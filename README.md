@@ -4,7 +4,7 @@ Tool-agnostic batch TODO processing for AI coding assistants.
 
 ```mermaid
 graph LR
-    A[Feature spec] -->|/decompose| B[TODOS.md]
+    A[Feature spec]:::external -->|/decompose| B[TODOS.md]
     B -->|/todos| C[Orchestrator]
     C -->|cmux| D[Worker 1]
     C -->|cmux| E[Worker 2]
@@ -12,12 +12,17 @@ graph LR
     D -->|PR| G[GitHub]
     E -->|PR| G
     F -->|PR| G
-    G -->|merge| H[main]
-    C -->|monitor & merge| G
-    H -->|version-bump| I[Release]
+    C -->|"CI fixes, review\nfeedback, rebases"| D
+    C -->|"CI fixes, review\nfeedback, rebases"| E
+    C -->|"CI fixes, review\nfeedback, rebases"| F
+    C -->|"squash merge\neach PR"| G
+    G --> H[main]
+    H -->|reconcile| I["Update TODOS,\nversion bump,\nchangelog"]
+
+    classDef external fill:#f5f5f5,stroke:#999,stroke-dasharray: 5 5,color:#666
 ```
 
-Decomposes features into PR-sized work items, launches parallel AI coding sessions to implement them, and orchestrates merging, rebasing, and version bumping.
+Takes a feature spec (yours -- bring your own PRD, doc, or verbal description), decomposes it into PR-sized work items, launches parallel AI sessions to implement them, and orchestrates the full lifecycle: CI monitoring, review feedback, rebasing, merging, and post-merge reconciliation.
 
 ## Supported AI Tools
 
