@@ -1,7 +1,7 @@
 <h1 align="center">ninthwave</h1>
 
 <p align="center">
-  <strong>Parallel AI coding sessions. Ship a feature, not a file.</strong>
+  <strong>Parallel AI sessions. Human-sized PRs.</strong>
 </p>
 
 <p align="center">
@@ -22,11 +22,13 @@
 
 ---
 
-Your AI coding tool can build anything. One thing at a time. A feature with 8 work items means 8 sequential sessions, 8 rounds of waiting for CI, 8 manual PR flows. You become the bottleneck in your own AI-assisted workflow.
+**ninthwave is an open-source orchestration layer for AI coding tools.**
 
-**ninthwave** decomposes a feature spec into PR-sized work items, then launches parallel AI coding sessions. Each is a full native instance of Claude Code, OpenCode, or Copilot CLI. It handles dependency ordering, CI monitoring, review feedback, and merging. You review, steer, and approve.
+Your AI coding tool handles one session at a time. A feature with 8 work items means 8 sequential sessions, 8 rounds of waiting for CI, 8 manual PR flows. You become the bottleneck in your own AI-assisted workflow. And when AI tools do produce PRs, they tend to be sprawling changes that are hard to review.
 
-This isn't an agent swarm. Each session is the same tool you already use, with the same interface. Switch into any session mid-flight. ninthwave is the orchestration layer; your tools do the work.
+**ninthwave** decomposes a feature spec into human-sized work items (~200–400 LOC each), then launches parallel AI coding sessions in [cmux](https://cmux.com). Each is a full native instance of Claude Code, OpenCode, or Copilot CLI — same interface, same capabilities. It sequences dependency ordering, monitors CI, dispatches review feedback, and merges. You review every PR before it lands.
+
+Switch into any session mid-flight. ninthwave is the orchestration layer; your tools do the work.
 
 ## See It Work
 
@@ -86,7 +88,7 @@ Launching batch 1...
   todo/C-UO-1  → Add welcome email          [session started]
   todo/H-UO-2  → Create onboarding context  [session started]
 
-Monitoring... (switch into any session to steer it)
+cmux sidebar shows 2 active sessions. Switch into any one to steer it.
 
   C-UO-1  Implementing → Testing → PR #42 → CI passing → Approved → Merged
   H-UO-2  Implementing → Testing → PR #43 → CI passing → Approved → Merged
@@ -140,7 +142,7 @@ All items merged. Version bump: 1.4.0 → 1.5.0 (CHANGELOG updated)
 | Dependency | Purpose | Install |
 |------------|---------|---------|
 | AI coding tool | Runs the sessions | [Claude Code](https://claude.ai/download), [OpenCode](https://opencode.ai), or [Copilot CLI](https://docs.github.com/en/copilot) |
-| [cmux](https://cmux.com) | Workspace management | `brew tap manaflow-ai/cmux && brew install --cask cmux` |
+| [cmux](https://cmux.com) | Parallel terminal sessions with visual sidebar | `brew tap manaflow-ai/cmux && brew install --cask cmux` |
 | [gh](https://cli.github.com) | PR operations | `brew install gh` |
 
 ### Global install (recommended)
@@ -169,13 +171,15 @@ One developer runs setup. The team gets everything via `git pull`.
 
 ## Why ninthwave?
 
-**Your tool, multiplied.** Each session is a full native instance of the AI coding tool you already use. Same interface, same capabilities. Switch into any session, steer it mid-flight, or iterate on a PR. ninthwave handles the coordination; you stay in control.
+**Your tool, multiplied.** Each session is a full native instance of the AI coding tool you already use. Same interface, same capabilities. Switch into any session via cmux's workspace sidebar, steer it mid-flight, or iterate on a PR. You review every PR before it merges.
 
-**Not an agent swarm.** One orchestrator session plus one worker per item. No redundant LLM calls, no runaway costs. When a worker opens a PR, its session idles until the orchestrator needs it for CI fixes or review feedback.
+**Deterministic orchestration.** One session per work item, dependency-ordered and conflict-checked. Workers idle after opening a PR — no polling, no redundant calls. The orchestrator wakes them for CI fixes or review feedback. Every step is visible and auditable.
 
-**Bring your own everything.** Your AI tool, your CI, your task management, your coding conventions. ninthwave is the orchestration layer that connects them. Works with Claude Code, OpenCode, Copilot CLI, and anything supporting the [Agent Skills standard](https://agentskills.io).
+**Bring your own agent.** Keep your billing, your interface, your API keys. Workers read your project instructions for conventions — same coding standards, same test commands, same architecture guardrails. No new billing layer, no proxy, no vendor lock-in. Works with Claude Code, OpenCode, Copilot CLI, and anything supporting the [Agent Skills standard](https://agentskills.io).
 
-**Cross-repo by convention.** Work items can target different repositories via a `Repo:` field. Sibling directories resolve automatically. No config file required. Enterprise multi-repo workflows just work.
+**Cross-repo by convention.** Work items can target different repositories via a `Repo:` field. Sibling directories resolve automatically — no config file required.
+
+Works for a solo dev decomposing a weekend feature and a team dividing a quarterly milestone.
 
 <!-- PLACEHOLDER: docs/assets/pr-feedback-loop.png
      Shows a GitHub PR titled "feat: Add onboarding checklist (H-UO-3)"
