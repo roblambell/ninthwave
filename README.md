@@ -1,6 +1,8 @@
 # workflow-kit
 
-Each TODO gets its own full interactive AI coding session -- not a sub-task, not a function call, but a complete session with its own context window, tool access, and the full capabilities of whichever harness you use. You can switch into any worker session to steer it, give feedback, or iterate on a PR, while the orchestrator handles the pipeline: launching, monitoring CI, dispatching review feedback, rebasing, and merging.
+Workflow orchestration for AI coding tools. Not a framework, not a harness -- bring your own AI tool, your own coding conventions, your own feature specs. workflow-kit handles what comes next: decomposing work into human-reviewable PRs, running parallel AI sessions to implement them, and delivering reviewed code ready to merge.
+
+Each TODO gets its own full interactive session -- not a sub-task or function call, but a complete session with its own context window, tool access, and the full capabilities of whichever harness you use. You can switch into any worker to steer it, give feedback, or iterate on a PR, while the orchestrator manages the pipeline around them.
 
 ```mermaid
 graph TD
@@ -16,10 +18,9 @@ graph TD
     classDef external fill:#f5f5f5,stroke:#999,stroke-dasharray: 5 5,color:#666
 ```
 
-Takes a feature spec (yours -- bring your own PRD, doc, or verbal description), decomposes it into PR-sized work items, launches parallel AI sessions to implement them, and orchestrates the full lifecycle: CI monitoring, review feedback, rebasing, merging, and post-merge reconciliation.
-
-- **Merge strategies** -- merge after approval + CI passes, auto-merge as soon as CI passes (skip approval), or confirm each merge manually
-- **WIP limits** -- rate-limit concurrent sessions (e.g., 5 at a time); auto-start next item when a PR opens, keeping the pipeline flowing without overwhelming CI or reviewers
+- **Bring your own spec** -- PRD, design doc, verbal description, whatever. `/decompose` breaks it into PR-sized TODO items with dependency ordering
+- **Merge strategies** -- merge after approval + CI passes, auto-merge as soon as CI passes, or confirm each merge manually
+- **WIP limits** -- rate-limit concurrent sessions (e.g., 5 at a time); auto-start next item when a PR opens, keeping the pipeline flowing
 - **Dependency batches** -- items are grouped by dependencies; batch N+1 only starts after batch N is merged
 
 ## Supported AI Tools
