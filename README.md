@@ -18,9 +18,9 @@ The tool is auto-detected from the orchestrator's environment. Workers launch wi
 ## Dependencies
 
 - **git** -- worktree management
-- **gh** -- GitHub CLI for PR operations
-- **cmux** -- terminal multiplexer for parallel sessions
-- **gstack** -- provides `/review`, `/qa`, `/design-review` ([install](https://garryslist.org))
+- **[gh](https://cli.github.com/)** -- GitHub CLI for PR operations
+- **[cmux](https://cmux.com/)** -- terminal multiplexer for parallel sessions
+- **[gstack](https://github.com/garrytan/gstack)** -- provides `/review`, `/qa`, `/design-review`
 - An AI coding tool (Claude Code, OpenCode, Copilot CLI, etc.)
 
 ## Quick Start
