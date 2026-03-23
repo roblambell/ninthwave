@@ -25,17 +25,29 @@ The tool is auto-detected from the orchestrator's environment. Workers launch wi
 
 ## Quick Start
 
+From your project directory:
+
+```bash
+bash <(curl -fsSL https://raw.githubusercontent.com/roblambell/workflow-kit/main/remote-install.sh)
+```
+
+This downloads and runs the installer without cloning the repo. It fetches the latest files, auto-detects your AI tools, and places everything in the right directories. Review with `git diff`, then commit.
+
+## Development / Contributing
+
+If you want to iterate on workflow-kit itself (modify skills, update the script, test changes across projects):
+
 ```bash
 # Clone the repo
 git clone git@github.com:roblambell/workflow-kit.git ~/code/workflow-kit
 
-# Install into your project (auto-detects installed tools)
+# Install from your local clone
 cd /path/to/your/project
 ~/code/workflow-kit/install.sh
 
-# Review and commit
+# After making changes to workflow-kit, re-install and review
+~/code/workflow-kit/install.sh --project-dir /path/to/your/project
 git diff
-git add -A && git commit -m "chore: install workflow-kit"
 ```
 
 ## What Gets Installed
@@ -148,10 +160,12 @@ workflow-kit/
 
 ## Updating
 
-Re-run the install script. It overwrites core files but preserves project-specific config:
+Re-run the same command you used to install. Core files are overwritten; project-specific config (`.workflow-kit/config`, `domains.conf`, `TODOS.md`) is preserved.
 
 ```bash
-~/code/workflow-kit/install.sh --project-dir /path/to/project
-git diff  # review changes
-git commit -am "chore: update workflow-kit"
+# Remote install (teammates)
+bash <(curl -fsSL https://raw.githubusercontent.com/roblambell/workflow-kit/main/remote-install.sh)
+
+# Local clone (contributors)
+~/code/workflow-kit/install.sh
 ```
