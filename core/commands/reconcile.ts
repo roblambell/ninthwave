@@ -20,10 +20,10 @@ export interface ReconcileDeps {
   getMergedTodoIds(projectRoot: string): string[];
 
   /** Get IDs of items currently in TODOS.md. */
-  getOpenTodoIds(todosFile: string): string[];
+  getOpenTodoIds(todosDir: string): string[];
 
   /** Mark items as done in TODOS.md. */
-  markDone(ids: string[], todosFile: string): void;
+  markDone(ids: string[], todosDir: string): void;
 
   /** List worktree IDs present in the worktree directory. */
   getWorktreeIds(worktreeDir: string): string[];
@@ -35,7 +35,7 @@ export interface ReconcileDeps {
   closeStaleWorkspaces(doneIds: string[]): number;
 
   /** Stage, commit, and push TODOS.md changes. Returns true if committed. */
-  commitAndPush(projectRoot: string, todosFile: string): boolean;
+  commitAndPush(projectRoot: string, todosDir: string): boolean;
 }
 
 // --- Three-way merge for TODOS.md ---
@@ -332,9 +332,9 @@ function defaultGetMergedTodoIds(projectRoot: string): string[] {
   }
 }
 
-function defaultGetOpenTodoIds(todosFile: string): string[] {
-  if (!existsSync(todosFile)) return [];
-  const content = readFileSync(todosFile, "utf-8");
+function defaultGetOpenTodoIds(todosDir: string): string[] {
+  if (!existsSync(todosDir)) return [];
+  const content = readFileSync(todosDir, "utf-8");
   const ids: string[] = [];
   for (const line of content.split("\n")) {
     if (!line.startsWith("### ")) continue;
@@ -346,8 +346,8 @@ function defaultGetOpenTodoIds(todosFile: string): string[] {
   return ids;
 }
 
-function defaultMarkDone(ids: string[], todosFile: string): void {
-  cmdMarkDone(ids, todosFile);
+function defaultMarkDone(ids: string[], todosDir: string): void {
+  cmdMarkDone(ids, todosDir);
 }
 
 function defaultGetWorktreeIds(worktreeDir: string): string[] {
@@ -365,7 +365,7 @@ function defaultCleanWorktree(id: string, worktreeDir: string, projectRoot: stri
   return cleanSingleWorktree(id, worktreeDir, projectRoot);
 }
 
-function defaultCommitAndPush(projectRoot: string, todosFile: string): boolean {
+function defaultCommitAndPush(projectRoot: string, todosDir: string): boolean {
   // Check if TODOS.md has changes
   const diffResult = run("git", ["-C", projectRoot, "diff", "--name-only", "TODOS.md"]);
   if (diffResult.exitCode !== 0 || !diffResult.stdout.trim()) {
@@ -416,7 +416,7 @@ export function defaultDeps(): ReconcileDeps {
  * 5. Commit and push TODOS.md if changed
  */
 export function reconcile(
-  todosFile: string,
+  todosDir: string,
   worktreeDir: string,
   projectRoot: string,
   deps: ReconcileDeps = defaultDeps(),
@@ -442,12 +442,12 @@ export function reconcile(
   }
 
   // Step 3: Find items that are merged but still open in TODOS.md
-  const openIds = new Set(deps.getOpenTodoIds(todosFile));
+  const openIds = new Set(deps.getOpenTodoIds(todosDir));
   const toMarkDone = mergedIds.filter((id) => openIds.has(id));
 
   if (toMarkDone.length > 0) {
     info(`Marking ${toMarkDone.length} merged item(s) as done: ${toMarkDone.join(", ")}`);
-    deps.markDone(toMarkDone, todosFile);
+    deps.markDone(toMarkDone, todosDir);
   } else {
     info("All merged items already marked done.");
   }
@@ -479,7 +479,7 @@ export function reconcile(
   // Step 5: Commit and push TODOS.md if changed
   if (toMarkDone.length > 0) {
     info("Committing and pushing TODOS.md...");
-    if (deps.commitAndPush(projectRoot, todosFile)) {
+    if (deps.commitAndPush(projectRoot, todosDir)) {
       console.log(`${GREEN}Reconciled: marked ${toMarkDone.length} item(s) done, cleaned ${cleanedCount} worktree(s), closed ${closedWorkspaces} workspace(s).${RESET}`);
     } else {
       info("No TODOS.md changes to commit.");
@@ -491,9 +491,9 @@ export function reconcile(
 
 /** CLI entry point for `ninthwave reconcile`. */
 export function cmdReconcile(
-  todosFile: string,
+  todosDir: string,
   worktreeDir: string,
   projectRoot: string,
 ): void {
-  reconcile(todosFile, worktreeDir, projectRoot);
+  reconcile(todosDir, worktreeDir, projectRoot);
 }

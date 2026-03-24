@@ -56,13 +56,13 @@ const SAMPLE_TODOS = `# TODOS
 **Priority:** High
 `;
 
-function setupTodos(content: string): { todosFile: string; worktreeDir: string; projectRoot: string } {
+function setupTodos(content: string): { todosDir: string; worktreeDir: string; projectRoot: string } {
   const dir = makeTmpDir();
-  const todosFile = join(dir, "TODOS.md");
+  const todosDir = join(dir, "TODOS.md");
   const worktreeDir = join(dir, ".worktrees");
   mkdirSync(worktreeDir, { recursive: true });
-  writeFileSync(todosFile, content);
-  return { todosFile, worktreeDir, projectRoot: dir };
+  writeFileSync(todosDir, content);
+  return { todosDir, worktreeDir, projectRoot: dir };
 }
 
 function captureOutput(fn: () => void): string {
@@ -84,9 +84,9 @@ function makeDeps(overrides: Partial<ReconcileDeps> = {}): ReconcileDeps {
   return {
     pullRebase: () => ({ ok: true, conflict: false }),
     getMergedTodoIds: () => [],
-    getOpenTodoIds: (todosFile: string) => {
-      if (!existsSync(todosFile)) return [];
-      const content = readFileSync(todosFile, "utf-8");
+    getOpenTodoIds: (todosDir: string) => {
+      if (!existsSync(todosDir)) return [];
+      const content = readFileSync(todosDir, "utf-8");
       const ids: string[] = [];
       for (const line of content.split("\n")) {
         if (!line.startsWith("### ")) continue;
@@ -108,7 +108,7 @@ function makeDeps(overrides: Partial<ReconcileDeps> = {}): ReconcileDeps {
 
 describe("reconcile", () => {
   it("pulls latest main as first step", () => {
-    const { todosFile, worktreeDir, projectRoot } = setupTodos(SAMPLE_TODOS);
+    const { todosDir, worktreeDir, projectRoot } = setupTodos(SAMPLE_TODOS);
     let pullCalled = false;
 
     const deps = makeDeps({
@@ -118,12 +118,12 @@ describe("reconcile", () => {
       },
     });
 
-    reconcile(todosFile, worktreeDir, projectRoot, deps);
+    reconcile(todosDir, worktreeDir, projectRoot, deps);
     expect(pullCalled).toBe(true);
   });
 
   it("stops and warns on pull failure", () => {
-    const { todosFile, worktreeDir, projectRoot } = setupTodos(SAMPLE_TODOS);
+    const { todosDir, worktreeDir, projectRoot } = setupTodos(SAMPLE_TODOS);
     let mergedCalled = false;
 
     const deps = makeDeps({
@@ -134,26 +134,26 @@ describe("reconcile", () => {
       },
     });
 
-    const output = captureOutput(() => reconcile(todosFile, worktreeDir, projectRoot, deps));
+    const output = captureOutput(() => reconcile(todosDir, worktreeDir, projectRoot, deps));
     expect(output).toContain("Pull failed");
     expect(output).toContain("network error");
     expect(mergedCalled).toBe(false);
   });
 
   it("warns about merge conflict and suggests manual resolution", () => {
-    const { todosFile, worktreeDir, projectRoot } = setupTodos(SAMPLE_TODOS);
+    const { todosDir, worktreeDir, projectRoot } = setupTodos(SAMPLE_TODOS);
 
     const deps = makeDeps({
       pullRebase: () => ({ ok: false, conflict: true, error: "CONFLICT in TODOS.md" }),
     });
 
-    const output = captureOutput(() => reconcile(todosFile, worktreeDir, projectRoot, deps));
+    const output = captureOutput(() => reconcile(todosDir, worktreeDir, projectRoot, deps));
     expect(output).toContain("Merge conflict");
     expect(output).toContain("Resolve conflicts manually");
   });
 
   it("queries GitHub for merged todo/* PRs", () => {
-    const { todosFile, worktreeDir, projectRoot } = setupTodos(SAMPLE_TODOS);
+    const { todosDir, worktreeDir, projectRoot } = setupTodos(SAMPLE_TODOS);
     let queriedProject: string | undefined;
 
     const deps = makeDeps({
@@ -163,12 +163,12 @@ describe("reconcile", () => {
       },
     });
 
-    reconcile(todosFile, worktreeDir, projectRoot, deps);
+    reconcile(todosDir, worktreeDir, projectRoot, deps);
     expect(queriedProject).toBe(projectRoot);
   });
 
   it("marks merged items as done in TODOS.md", () => {
-    const { todosFile, worktreeDir, projectRoot } = setupTodos(SAMPLE_TODOS);
+    const { todosDir, worktreeDir, projectRoot } = setupTodos(SAMPLE_TODOS);
     let markedIds: string[] = [];
 
     const deps = makeDeps({
@@ -178,12 +178,12 @@ describe("reconcile", () => {
       },
     });
 
-    reconcile(todosFile, worktreeDir, projectRoot, deps);
+    reconcile(todosDir, worktreeDir, projectRoot, deps);
     expect(markedIds).toEqual(["M-CI-1", "H-CI-2"]);
   });
 
   it("only marks items that are still open in TODOS.md", () => {
-    const { todosFile, worktreeDir, projectRoot } = setupTodos(SAMPLE_TODOS);
+    const { todosDir, worktreeDir, projectRoot } = setupTodos(SAMPLE_TODOS);
     let markedIds: string[] = [];
 
     const deps = makeDeps({
@@ -194,13 +194,13 @@ describe("reconcile", () => {
       },
     });
 
-    reconcile(todosFile, worktreeDir, projectRoot, deps);
+    reconcile(todosDir, worktreeDir, projectRoot, deps);
     // Should only mark M-CI-1 (which is in TODOS.md), not X-GONE-1
     expect(markedIds).toEqual(["M-CI-1"]);
   });
 
   it("cleans worktrees for merged items", () => {
-    const { todosFile, worktreeDir, projectRoot } = setupTodos(SAMPLE_TODOS);
+    const { todosDir, worktreeDir, projectRoot } = setupTodos(SAMPLE_TODOS);
     const cleaned: string[] = [];
 
     const deps = makeDeps({
@@ -212,13 +212,13 @@ describe("reconcile", () => {
       },
     });
 
-    reconcile(todosFile, worktreeDir, projectRoot, deps);
+    reconcile(todosDir, worktreeDir, projectRoot, deps);
     // Should clean M-CI-1 and H-CI-2 (merged), not C-UO-1 (not merged)
     expect(cleaned).toEqual(["M-CI-1", "H-CI-2"]);
   });
 
   it("commits and pushes TODOS.md when items were marked done", () => {
-    const { todosFile, worktreeDir, projectRoot } = setupTodos(SAMPLE_TODOS);
+    const { todosDir, worktreeDir, projectRoot } = setupTodos(SAMPLE_TODOS);
     let committed = false;
 
     const deps = makeDeps({
@@ -229,12 +229,12 @@ describe("reconcile", () => {
       },
     });
 
-    reconcile(todosFile, worktreeDir, projectRoot, deps);
+    reconcile(todosDir, worktreeDir, projectRoot, deps);
     expect(committed).toBe(true);
   });
 
   it("is a no-op when everything is in sync (no empty commits)", () => {
-    const { todosFile, worktreeDir, projectRoot } = setupTodos(SAMPLE_TODOS);
+    const { todosDir, worktreeDir, projectRoot } = setupTodos(SAMPLE_TODOS);
     let markDoneCalled = false;
     let commitCalled = false;
 
@@ -249,14 +249,14 @@ describe("reconcile", () => {
       },
     });
 
-    const output = captureOutput(() => reconcile(todosFile, worktreeDir, projectRoot, deps));
+    const output = captureOutput(() => reconcile(todosDir, worktreeDir, projectRoot, deps));
     expect(markDoneCalled).toBe(false);
     expect(commitCalled).toBe(false);
     expect(output).toContain("no changes needed");
   });
 
   it("is a no-op when merged IDs are not in TODOS.md", () => {
-    const { todosFile, worktreeDir, projectRoot } = setupTodos(SAMPLE_TODOS);
+    const { todosDir, worktreeDir, projectRoot } = setupTodos(SAMPLE_TODOS);
     let markDoneCalled = false;
     let commitCalled = false;
 
@@ -272,14 +272,14 @@ describe("reconcile", () => {
       },
     });
 
-    const output = captureOutput(() => reconcile(todosFile, worktreeDir, projectRoot, deps));
+    const output = captureOutput(() => reconcile(todosDir, worktreeDir, projectRoot, deps));
     expect(markDoneCalled).toBe(false);
     expect(commitCalled).toBe(false);
     expect(output).toContain("no changes needed");
   });
 
   it("reports summary with counts", () => {
-    const { todosFile, worktreeDir, projectRoot } = setupTodos(SAMPLE_TODOS);
+    const { todosDir, worktreeDir, projectRoot } = setupTodos(SAMPLE_TODOS);
 
     const deps = makeDeps({
       getMergedTodoIds: () => ["M-CI-1", "H-CI-2"],
@@ -288,13 +288,13 @@ describe("reconcile", () => {
       commitAndPush: () => true,
     });
 
-    const output = captureOutput(() => reconcile(todosFile, worktreeDir, projectRoot, deps));
+    const output = captureOutput(() => reconcile(todosDir, worktreeDir, projectRoot, deps));
     expect(output).toContain("2 item(s) done");
     expect(output).toContain("1 worktree(s)");
   });
 
   it("still cleans worktrees even when no commit needed", () => {
-    const { todosFile, worktreeDir, projectRoot } = setupTodos(SAMPLE_TODOS);
+    const { todosDir, worktreeDir, projectRoot } = setupTodos(SAMPLE_TODOS);
     const cleaned: string[] = [];
 
     const deps = makeDeps({
@@ -307,25 +307,25 @@ describe("reconcile", () => {
       },
     });
 
-    reconcile(todosFile, worktreeDir, projectRoot, deps);
+    reconcile(todosDir, worktreeDir, projectRoot, deps);
     // Worktree for X-OLD-1 should still be cleaned even though nothing to mark done
     expect(cleaned).toEqual(["X-OLD-1"]);
   });
 
   it("handles empty TODOS.md gracefully", () => {
-    const { todosFile, worktreeDir, projectRoot } = setupTodos("# TODOS\n");
+    const { todosDir, worktreeDir, projectRoot } = setupTodos("# TODOS\n");
 
     const deps = makeDeps({
       getMergedTodoIds: () => ["M-CI-1"],
     });
 
-    const output = captureOutput(() => reconcile(todosFile, worktreeDir, projectRoot, deps));
+    const output = captureOutput(() => reconcile(todosDir, worktreeDir, projectRoot, deps));
     // No items to mark done (TODOS.md has no items)
     expect(output).toContain("no changes needed");
   });
 
   it("does not attempt commit+push when no items were marked done", () => {
-    const { todosFile, worktreeDir, projectRoot } = setupTodos(SAMPLE_TODOS);
+    const { todosDir, worktreeDir, projectRoot } = setupTodos(SAMPLE_TODOS);
     let commitCalled = false;
 
     const deps = makeDeps({
@@ -336,12 +336,12 @@ describe("reconcile", () => {
       },
     });
 
-    reconcile(todosFile, worktreeDir, projectRoot, deps);
+    reconcile(todosDir, worktreeDir, projectRoot, deps);
     expect(commitCalled).toBe(false);
   });
 
   it("closes stale workspaces for merged items", () => {
-    const { todosFile, worktreeDir, projectRoot } = setupTodos(SAMPLE_TODOS);
+    const { todosDir, worktreeDir, projectRoot } = setupTodos(SAMPLE_TODOS);
     let closedIds: string[] = [];
 
     const deps = makeDeps({
@@ -352,13 +352,13 @@ describe("reconcile", () => {
       },
     });
 
-    reconcile(todosFile, worktreeDir, projectRoot, deps);
+    reconcile(todosDir, worktreeDir, projectRoot, deps);
     // All merged IDs are passed, not just newly-marked-done ones
     expect(closedIds).toEqual(["M-CI-1", "H-CI-2"]);
   });
 
   it("includes workspace count in summary output", () => {
-    const { todosFile, worktreeDir, projectRoot } = setupTodos(SAMPLE_TODOS);
+    const { todosDir, worktreeDir, projectRoot } = setupTodos(SAMPLE_TODOS);
 
     const deps = makeDeps({
       getMergedTodoIds: () => ["M-CI-1"],
@@ -366,7 +366,7 @@ describe("reconcile", () => {
       commitAndPush: () => true,
     });
 
-    const output = captureOutput(() => reconcile(todosFile, worktreeDir, projectRoot, deps));
+    const output = captureOutput(() => reconcile(todosDir, worktreeDir, projectRoot, deps));
     expect(output).toContain("1 workspace(s)");
   });
 });

@@ -126,13 +126,13 @@ describe("cmdStart", () => {
 
   it("dies with no arguments", () => {
     const repo = setupTempRepo();
-    const todosFile = join(repo, "TODOS.md");
+    const todosDir = join(repo, "TODOS.md");
     const worktreeDir = join(repo, ".worktrees");
 
-    writeFileSync(todosFile, "# TODOS\n");
+    writeFileSync(todosDir, "# TODOS\n");
 
     const output = captureOutput(() =>
-      cmdStart([], todosFile, worktreeDir, repo),
+      cmdStart([], todosDir, worktreeDir, repo),
     );
 
     expect(output).toContain("Usage");
@@ -141,11 +141,11 @@ describe("cmdStart", () => {
   it("dies when item ID not found", () => {
     const repo = setupTempRepo();
     useFixture(repo, "valid.md");
-    const todosFile = join(repo, "TODOS.md");
+    const todosDir = join(repo, "TODOS.md");
     const worktreeDir = join(repo, ".worktrees");
 
     const output = captureOutput(() =>
-      cmdStart(["NONEXISTENT-1"], todosFile, worktreeDir, repo),
+      cmdStart(["NONEXISTENT-1"], todosDir, worktreeDir, repo),
     );
 
     expect(output).toContain("not found");
@@ -155,11 +155,11 @@ describe("cmdStart", () => {
     const mockMux = createMockMux();
     const repo = setupTempRepo();
     useFixture(repo, "valid.md");
-    const todosFile = join(repo, "TODOS.md");
+    const todosDir = join(repo, "TODOS.md");
     const worktreeDir = join(repo, ".worktrees");
 
     const output = captureOutput(() =>
-      cmdStart(["M-CI-1"], todosFile, worktreeDir, repo, mockMux),
+      cmdStart(["M-CI-1"], todosDir, worktreeDir, repo, mockMux),
     );
 
     expect(output).toContain("Launched 1 session");
@@ -172,11 +172,11 @@ describe("cmdStart", () => {
     const mockMux = createMockMux();
     const repo = setupTempRepo();
     useFixture(repo, "valid.md");
-    const todosFile = join(repo, "TODOS.md");
+    const todosDir = join(repo, "TODOS.md");
     const worktreeDir = join(repo, ".worktrees");
 
     const output = captureOutput(() =>
-      cmdStart(["M-CI-1"], todosFile, worktreeDir, repo, mockMux),
+      cmdStart(["M-CI-1"], todosDir, worktreeDir, repo, mockMux),
     );
 
     expect(output).toContain("Detected AI tool: opencode");
@@ -200,13 +200,13 @@ describe("launchSingleItem", () => {
     const mockMux = createMockMux();
     const repo = setupTempRepo();
     useFixture(repo, "valid.md");
-    const todosFile = join(repo, "TODOS.md");
+    const todosDir = join(repo, "TODOS.md");
     const worktreeDir = join(repo, ".worktrees");
-    const items = parseTodos(todosFile, worktreeDir);
+    const items = parseTodos(todosDir, worktreeDir);
     const item = items.find((i) => i.id === "M-CI-1")!;
 
     const result = captureOutput(() => {
-      const res = launchSingleItem(item, todosFile, worktreeDir, repo, "claude", mockMux);
+      const res = launchSingleItem(item, todosDir, worktreeDir, repo, "claude", mockMux);
       expect(res).not.toBeNull();
       expect(res!.worktreePath).toContain("todo-M-CI-1");
       expect(res!.workspaceRef).toBe("workspace:1");
@@ -222,13 +222,13 @@ describe("launchSingleItem", () => {
 
     const repo = setupTempRepo();
     useFixture(repo, "valid.md");
-    const todosFile = join(repo, "TODOS.md");
+    const todosDir = join(repo, "TODOS.md");
     const worktreeDir = join(repo, ".worktrees");
-    const items = parseTodos(todosFile, worktreeDir);
+    const items = parseTodos(todosDir, worktreeDir);
     const item = items.find((i) => i.id === "M-CI-1")!;
 
     const result = captureOutput(() => {
-      const res = launchSingleItem(item, todosFile, worktreeDir, repo, "claude", mockMux);
+      const res = launchSingleItem(item, todosDir, worktreeDir, repo, "claude", mockMux);
       expect(res).toBeNull();
     });
 
@@ -239,13 +239,13 @@ describe("launchSingleItem", () => {
     const mockMux = createMockMux();
     const repo = setupTempRepo();
     useFixture(repo, "valid.md");
-    const todosFile = join(repo, "TODOS.md");
+    const todosDir = join(repo, "TODOS.md");
     const worktreeDir = join(repo, ".worktrees");
-    const items = parseTodos(todosFile, worktreeDir);
+    const items = parseTodos(todosDir, worktreeDir);
     const item = items.find((i) => i.id === "M-CI-1")!;
 
     const result = captureOutput(() => {
-      launchSingleItem(item, todosFile, worktreeDir, repo, "claude", mockMux);
+      launchSingleItem(item, todosDir, worktreeDir, repo, "claude", mockMux);
     });
 
     // Partition 1 should be allocated (first available)
@@ -256,14 +256,14 @@ describe("launchSingleItem", () => {
     const mockMux = createMockMux();
     const repo = setupTempRepo();
     useFixture(repo, "valid.md");
-    const todosFile = join(repo, "TODOS.md");
+    const todosDir = join(repo, "TODOS.md");
     const worktreeDir = join(repo, ".worktrees");
-    const items = parseTodos(todosFile, worktreeDir);
+    const items = parseTodos(todosDir, worktreeDir);
     const item = items.find((i) => i.id === "M-CI-1")!;
 
     // worktreeDir doesn't exist yet — launchSingleItem should create it
     captureOutput(() => {
-      launchSingleItem(item, todosFile, worktreeDir, repo, "claude", mockMux);
+      launchSingleItem(item, todosDir, worktreeDir, repo, "claude", mockMux);
     });
 
     const { existsSync } = require("fs");
@@ -274,9 +274,9 @@ describe("launchSingleItem", () => {
     const mockMux = createMockMux();
     const repo = setupTempRepo();
     useFixture(repo, "valid.md");
-    const todosFile = join(repo, "TODOS.md");
+    const todosDir = join(repo, "TODOS.md");
     const worktreeDir = join(repo, ".worktrees");
-    const items = parseTodos(todosFile, worktreeDir);
+    const items = parseTodos(todosDir, worktreeDir);
     const item = items.find((i) => i.id === "M-CI-1")!;
 
     (fetchOrigin as Mock).mockImplementationOnce(() => {
@@ -284,7 +284,7 @@ describe("launchSingleItem", () => {
     });
 
     const output = captureOutput(() => {
-      const res = launchSingleItem(item, todosFile, worktreeDir, repo, "claude", mockMux);
+      const res = launchSingleItem(item, todosDir, worktreeDir, repo, "claude", mockMux);
       expect(res).not.toBeNull();
       expect(res!.worktreePath).toContain("todo-M-CI-1");
     });
@@ -299,9 +299,9 @@ describe("launchSingleItem", () => {
     const mockMux = createMockMux();
     const repo = setupTempRepo();
     useFixture(repo, "valid.md");
-    const todosFile = join(repo, "TODOS.md");
+    const todosDir = join(repo, "TODOS.md");
     const worktreeDir = join(repo, ".worktrees");
-    const items = parseTodos(todosFile, worktreeDir);
+    const items = parseTodos(todosDir, worktreeDir);
     const item = items.find((i) => i.id === "M-CI-1")!;
 
     (ffMerge as Mock).mockImplementationOnce(() => {
@@ -309,7 +309,7 @@ describe("launchSingleItem", () => {
     });
 
     const output = captureOutput(() => {
-      const res = launchSingleItem(item, todosFile, worktreeDir, repo, "claude", mockMux);
+      const res = launchSingleItem(item, todosDir, worktreeDir, repo, "claude", mockMux);
       expect(res).not.toBeNull();
       expect(res!.worktreePath).toContain("todo-M-CI-1");
     });
@@ -324,9 +324,9 @@ describe("launchSingleItem", () => {
     const mockMux = createMockMux();
     const repo = setupTempRepo();
     useFixture(repo, "valid.md");
-    const todosFile = join(repo, "TODOS.md");
+    const todosDir = join(repo, "TODOS.md");
     const worktreeDir = join(repo, ".worktrees");
-    const items = parseTodos(todosFile, worktreeDir);
+    const items = parseTodos(todosDir, worktreeDir);
     const item = items.find((i) => i.id === "M-CI-1")!;
 
     (fetchOrigin as Mock).mockImplementationOnce(() => {
@@ -337,7 +337,7 @@ describe("launchSingleItem", () => {
     });
 
     const output = captureOutput(() => {
-      launchSingleItem(item, todosFile, worktreeDir, repo, "claude", mockMux);
+      launchSingleItem(item, todosDir, worktreeDir, repo, "claude", mockMux);
     });
 
     // Both warnings should appear
@@ -353,13 +353,13 @@ describe("launchSingleItem", () => {
     const mockMux = createMockMux();
     const repo = setupTempRepo();
     useFixture(repo, "valid.md");
-    const todosFile = join(repo, "TODOS.md");
+    const todosDir = join(repo, "TODOS.md");
     const worktreeDir = join(repo, ".worktrees");
-    const items = parseTodos(todosFile, worktreeDir);
+    const items = parseTodos(todosDir, worktreeDir);
     const item = items.find((i) => i.id === "M-CI-1")!;
 
     captureOutput(() => {
-      const res = launchSingleItem(item, todosFile, worktreeDir, repo, "claude", mockMux);
+      const res = launchSingleItem(item, todosDir, worktreeDir, repo, "claude", mockMux);
       expect(res).not.toBeNull();
       expect(res!.worktreePath).toBe(join(worktreeDir, "todo-M-CI-1"));
     });
@@ -433,9 +433,9 @@ describe("extractTodoText", () => {
 
   it("returns full TODO block for a valid ID", () => {
     const repo = setupTempRepo();
-    const todosFile = join(repo, "TODOS.md");
+    const todosDir = join(repo, "TODOS.md");
     writeFileSync(
-      todosFile,
+      todosDir,
       [
         "# TODOS",
         "",
@@ -461,7 +461,7 @@ describe("extractTodoText", () => {
       ].join("\n"),
     );
 
-    const text = extractTodoText(todosFile, "H-BUG-1");
+    const text = extractTodoText(todosDir, "H-BUG-1");
     expect(text).toContain("### Fix: Some bug (H-BUG-1)");
     expect(text).toContain("**Priority:** High");
     expect(text).toContain("Description of the bug.");
@@ -474,9 +474,9 @@ describe("extractTodoText", () => {
 
   it("returns empty string when ID is not found", () => {
     const repo = setupTempRepo();
-    const todosFile = join(repo, "TODOS.md");
+    const todosDir = join(repo, "TODOS.md");
     writeFileSync(
-      todosFile,
+      todosDir,
       [
         "# TODOS",
         "",
@@ -489,15 +489,15 @@ describe("extractTodoText", () => {
       ].join("\n"),
     );
 
-    const text = extractTodoText(todosFile, "NONEXISTENT-99");
+    const text = extractTodoText(todosDir, "NONEXISTENT-99");
     expect(text).toBe("");
   });
 
   it("returns first match when duplicate IDs exist", () => {
     const repo = setupTempRepo();
-    const todosFile = join(repo, "TODOS.md");
+    const todosDir = join(repo, "TODOS.md");
     writeFileSync(
-      todosFile,
+      todosDir,
       [
         "# TODOS",
         "",
@@ -514,7 +514,7 @@ describe("extractTodoText", () => {
       ].join("\n"),
     );
 
-    const text = extractTodoText(todosFile, "DUP-1");
+    const text = extractTodoText(todosDir, "DUP-1");
     expect(text).toContain("First occurrence");
     expect(text).toContain("First description.");
     // Should stop at the next ### header, so second occurrence is excluded
@@ -524,9 +524,9 @@ describe("extractTodoText", () => {
 
   it("handles malformed headers without parenthesized ID", () => {
     const repo = setupTempRepo();
-    const todosFile = join(repo, "TODOS.md");
+    const todosDir = join(repo, "TODOS.md");
     writeFileSync(
-      todosFile,
+      todosDir,
       [
         "# TODOS",
         "",
@@ -542,7 +542,7 @@ describe("extractTodoText", () => {
     );
 
     // Searching for the valid ID should skip malformed headers
-    const text = extractTodoText(todosFile, "H-OK-1");
+    const text = extractTodoText(todosDir, "H-OK-1");
     expect(text).toContain("### Fix: Valid item (H-OK-1)");
     expect(text).toContain("Has a valid ID.");
     expect(text).not.toContain("Missing ID header");
@@ -550,9 +550,9 @@ describe("extractTodoText", () => {
 
   it("returns text up to end of file when item is last in file", () => {
     const repo = setupTempRepo();
-    const todosFile = join(repo, "TODOS.md");
+    const todosDir = join(repo, "TODOS.md");
     writeFileSync(
-      todosFile,
+      todosDir,
       [
         "# TODOS",
         "",
@@ -564,7 +564,7 @@ describe("extractTodoText", () => {
       ].join("\n"),
     );
 
-    const text = extractTodoText(todosFile, "L-LAST-1");
+    const text = extractTodoText(todosDir, "L-LAST-1");
     expect(text).toContain("### Fix: Only item (L-LAST-1)");
     expect(text).toContain("This is the last item.");
     expect(text).toContain("Acceptance: Done.");
@@ -572,18 +572,18 @@ describe("extractTodoText", () => {
 
   it("handles empty TODOS file", () => {
     const repo = setupTempRepo();
-    const todosFile = join(repo, "TODOS.md");
-    writeFileSync(todosFile, "");
+    const todosDir = join(repo, "TODOS.md");
+    writeFileSync(todosDir, "");
 
-    const text = extractTodoText(todosFile, "H-BUG-1");
+    const text = extractTodoText(todosDir, "H-BUG-1");
     expect(text).toBe("");
   });
 
   it("matches partial ID prefix correctly (uses parenthesis matching)", () => {
     const repo = setupTempRepo();
-    const todosFile = join(repo, "TODOS.md");
+    const todosDir = join(repo, "TODOS.md");
     writeFileSync(
-      todosFile,
+      todosDir,
       [
         "# TODOS",
         "",
@@ -603,7 +603,7 @@ describe("extractTodoText", () => {
     // The function matches `(${targetId}` — so H-BUG-1 matches both (H-BUG-10) and (H-BUG-1)
     // because "(H-BUG-1" is a substring of "(H-BUG-10)"
     // This documents the current behavior (first match wins)
-    const text = extractTodoText(todosFile, "H-BUG-1");
+    const text = extractTodoText(todosDir, "H-BUG-1");
     expect(text).toContain("Item one");
     expect(text).toContain("Description for 10.");
   });

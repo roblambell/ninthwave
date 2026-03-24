@@ -140,8 +140,8 @@ function launchAiSession(
 /**
  * Extract full TODO text for an item from TODOS.md.
  */
-export function extractTodoText(todosFile: string, targetId: string): string {
-  const content = readFileSync(todosFile, "utf-8");
+export function extractTodoText(todosDir: string, targetId: string): string {
+  const content = readFileSync(todosDir, "utf-8");
   const lines = content.split("\n");
   let inItem = false;
   let found = false;
@@ -171,7 +171,7 @@ export function extractTodoText(todosFile: string, targetId: string): string {
  */
 export function launchSingleItem(
   item: TodoItem,
-  todosFile: string,
+  todosDir: string,
   worktreeDir: string,
   projectRoot: string,
   aiTool: string,
@@ -263,7 +263,7 @@ export function launchSingleItem(
   );
 
   // Build system prompt
-  const todoText = extractTodoText(todosFile, item.id);
+  const todoText = extractTodoText(todosDir, item.id);
   const systemPrompt = `YOUR_TODO_ID: ${item.id}
 YOUR_PARTITION: ${partition}
 PROJECT_ROOT: ${targetRepo}
@@ -298,7 +298,7 @@ ${todoText}`;
 
 export function cmdStart(
   args: string[],
-  todosFile: string,
+  todosDir: string,
   worktreeDir: string,
   projectRoot: string,
   muxOverride?: Multiplexer,
@@ -319,7 +319,7 @@ export function cmdStart(
   }
 
   if (ids.length < 1) die("Usage: ninthwave start <ID1> [ID2...] [--mux cmux|tmux]");
-  const items = parseTodos(todosFile, worktreeDir);
+  const items = parseTodos(todosDir, worktreeDir);
   const itemMap = new Map<string, TodoItem>();
   for (const item of items) {
     itemMap.set(item.id, item);
@@ -381,7 +381,7 @@ export function cmdStart(
       }
     }
     if (hasConflicts) {
-      cmdConflicts(ids, todosFile, worktreeDir);
+      cmdConflicts(ids, todosDir, worktreeDir);
       console.log();
       warn("Conflicts detected between selected items. Proceeding anyway.");
       console.log();
@@ -403,7 +403,7 @@ export function cmdStart(
 
   for (const id of ids) {
     const item = itemMap.get(id)!;
-    launchSingleItem(item, todosFile, worktreeDir, projectRoot, aiTool, mux);
+    launchSingleItem(item, todosDir, worktreeDir, projectRoot, aiTool, mux);
     launched.push(id);
   }
 

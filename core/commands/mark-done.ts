@@ -12,12 +12,12 @@ import { prList } from "../gh.ts";
  */
 export function cmdMarkDone(
   args: string[],
-  todosFile: string,
+  todosDir: string,
 ): void {
   if (args.length < 1) die("Usage: ninthwave mark-done <ID1> [ID2...]");
 
   const ids = new Set(args);
-  const content = readFileSync(todosFile, "utf-8");
+  const content = readFileSync(todosDir, "utf-8");
   const lines = content.split("\n");
   const outputLines: string[] = [];
 
@@ -80,7 +80,7 @@ export function cmdMarkDone(
     }
   }
 
-  writeFileSync(todosFile, outputLines.join("\n"));
+  writeFileSync(todosDir, outputLines.join("\n"));
 
   console.log(
     `${GREEN}Marked ${ids.size} item(s) as done: ${[...ids].join(" ")}${RESET}`,

@@ -695,7 +695,7 @@ function handleActionExecution(
   // so list --ready reflects reality for the rest of the run.
   if (action.type === "merge" && result.success && deps.reconcile) {
     try {
-      deps.reconcile(ctx.todosFile, ctx.worktreeDir, ctx.projectRoot);
+      deps.reconcile(ctx.todosDir, ctx.worktreeDir, ctx.projectRoot);
       log({
         ts: new Date().toISOString(),
         level: "info",
@@ -727,7 +727,7 @@ export interface OrchestrateLoopDeps {
   /** Get available free memory in bytes. Defaults to os.freemem(). Injectable for testing. */
   getFreeMem?: () => number;
   /** Reconcile TODOS.md with GitHub state after merge actions. */
-  reconcile?: (todosFile: string, worktreeDir: string, projectRoot: string) => void;
+  reconcile?: (todosDir: string, worktreeDir: string, projectRoot: string) => void;
   /** Supervisor dependencies (injected when supervisor is active). */
   supervisorDeps?: SupervisorDeps;
   /** Webhook notifier for lifecycle events (fire-and-forget). No-op when absent. */
@@ -1075,7 +1075,7 @@ export function forkDaemon(
 
 export async function cmdOrchestrate(
   args: string[],
-  todosFile: string,
+  todosDir: string,
   worktreeDir: string,
   projectRoot: string,
 ): Promise<void> {
@@ -1193,7 +1193,7 @@ export async function cmdOrchestrate(
   }
 
   // Parse TODO items
-  const allTodos = parseTodos(todosFile, worktreeDir);
+  const allTodos = parseTodos(todosDir, worktreeDir);
   const todoMap = new Map<string, TodoItem>();
   for (const todo of allTodos) {
     todoMap.set(todo.id, todo);
@@ -1224,10 +1224,10 @@ export async function cmdOrchestrate(
   // Detect AI tool
   const aiTool = detectAiTool();
 
-  const ctx: ExecutionContext = { projectRoot, worktreeDir, todosFile, aiTool };
+  const ctx: ExecutionContext = { projectRoot, worktreeDir, todosDir, aiTool };
   const actionDeps: OrchestratorDeps = {
-    launchSingleItem: (item, todosFile, worktreeDir, projectRoot, aiTool) =>
-      launchSingleItem(item, todosFile, worktreeDir, projectRoot, aiTool, mux),
+    launchSingleItem: (item, todosDir, worktreeDir, projectRoot, aiTool) =>
+      launchSingleItem(item, todosDir, worktreeDir, projectRoot, aiTool, mux),
     cleanSingleWorktree,
     prMerge: (repoRoot, prNumber) => prMerge(repoRoot, prNumber),
     prComment: (repoRoot, prNumber, body) => prComment(repoRoot, prNumber, body),

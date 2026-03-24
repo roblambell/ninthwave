@@ -34,10 +34,10 @@ describe("list", () => {
   it("lists all items with no filters", () => {
     const repo = setupTempRepo();
     useFixture(repo, "valid.md");
-    const todosFile = join(repo, "TODOS.md");
+    const todosDir = join(repo, "TODOS.md");
     const worktreeDir = join(repo, ".worktrees");
 
-    const output = captureOutput(() => cmdList([], todosFile, worktreeDir));
+    const output = captureOutput(() => cmdList([], todosDir, worktreeDir));
 
     expect(output).toContain("M-CI-1");
     expect(output).toContain("H-CI-2");
@@ -49,11 +49,11 @@ describe("list", () => {
   it("filters by priority", () => {
     const repo = setupTempRepo();
     useFixture(repo, "valid.md");
-    const todosFile = join(repo, "TODOS.md");
+    const todosDir = join(repo, "TODOS.md");
     const worktreeDir = join(repo, ".worktrees");
 
     const output = captureOutput(() =>
-      cmdList(["--priority", "high"], todosFile, worktreeDir),
+      cmdList(["--priority", "high"], todosDir, worktreeDir),
     );
 
     expect(output).toContain("H-CI-2");
@@ -69,11 +69,11 @@ describe("list", () => {
   it("filters by domain", () => {
     const repo = setupTempRepo();
     useFixture(repo, "valid.md");
-    const todosFile = join(repo, "TODOS.md");
+    const todosDir = join(repo, "TODOS.md");
     const worktreeDir = join(repo, ".worktrees");
 
     const output = captureOutput(() =>
-      cmdList(["--domain", "cloud-infrastructure"], todosFile, worktreeDir),
+      cmdList(["--domain", "cloud-infrastructure"], todosDir, worktreeDir),
     );
 
     expect(output).toContain("M-CI-1");
@@ -86,11 +86,11 @@ describe("list", () => {
   it("filters by feature code", () => {
     const repo = setupTempRepo();
     useFixture(repo, "valid.md");
-    const todosFile = join(repo, "TODOS.md");
+    const todosDir = join(repo, "TODOS.md");
     const worktreeDir = join(repo, ".worktrees");
 
     const output = captureOutput(() =>
-      cmdList(["--feature", "UO"], todosFile, worktreeDir),
+      cmdList(["--feature", "UO"], todosDir, worktreeDir),
     );
 
     expect(output).toContain("C-UO-1");
@@ -106,11 +106,11 @@ describe("list", () => {
   it("filters by ready (deps all satisfied)", () => {
     const repo = setupTempRepo();
     useFixture(repo, "valid.md");
-    const todosFile = join(repo, "TODOS.md");
+    const todosDir = join(repo, "TODOS.md");
     const worktreeDir = join(repo, ".worktrees");
 
     const output = captureOutput(() =>
-      cmdList(["--ready"], todosFile, worktreeDir),
+      cmdList(["--ready"], todosDir, worktreeDir),
     );
 
     // M-CI-1 has no deps -> ready
@@ -127,10 +127,10 @@ describe("list", () => {
   it("shows repo label for cross-repo items", () => {
     const repo = setupTempRepo();
     useFixture(repo, "cross_repo.md");
-    const todosFile = join(repo, "TODOS.md");
+    const todosDir = join(repo, "TODOS.md");
     const worktreeDir = join(repo, ".worktrees");
 
-    const output = captureOutput(() => cmdList([], todosFile, worktreeDir));
+    const output = captureOutput(() => cmdList([], todosDir, worktreeDir));
 
     expect(output).toContain("target-repo-a");
     expect(output).toContain("H-API-1");

@@ -94,7 +94,7 @@ function mockActionDeps(overrides?: Partial<OrchestratorDeps>): OrchestratorDeps
 const defaultCtx: ExecutionContext = {
   projectRoot: "/tmp/test-project",
   worktreeDir: "/tmp/test-project/.worktrees",
-  todosFile: "/tmp/test-project/TODOS.md",
+  todosDir: "/tmp/test-project/TODOS.md",
   aiTool: "claude",
 };
 

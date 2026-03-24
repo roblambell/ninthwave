@@ -132,7 +132,7 @@ export interface Action {
 export interface ExecutionContext {
   projectRoot: string;
   worktreeDir: string;
-  todosFile: string;
+  todosDir: string;
   aiTool: string;
 }
 
@@ -140,7 +140,7 @@ export interface ExecutionContext {
 export interface OrchestratorDeps {
   launchSingleItem: (
     item: TodoItem,
-    todosFile: string,
+    todosDir: string,
     worktreeDir: string,
     projectRoot: string,
     aiTool: string,
@@ -692,7 +692,7 @@ export class Orchestrator {
     try {
       const result = deps.launchSingleItem(
         item.todo,
-        ctx.todosFile,
+        ctx.todosDir,
         ctx.worktreeDir,
         ctx.projectRoot,
         ctx.aiTool,

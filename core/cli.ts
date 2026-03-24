@@ -85,7 +85,7 @@ if (command === "version") {
 
 // All other commands need a project root
 const projectRoot = getProjectRoot();
-const todosFile = join(projectRoot, "TODOS.md");
+const todosDir = join(projectRoot, ".ninthwave", "todos");
 const worktreeDir = join(projectRoot, ".worktrees");
 const partitionDir = join(worktreeDir, ".partitions");
 
@@ -181,7 +181,7 @@ if (!command) {
   process.exit(0);
 }
 
-// Most commands require TODOS.md — check before dispatching
+// Most commands require the todos directory — check before dispatching
 // (setup and version are handled above before project root resolution)
 const needsTodos = ![
   "repos",
@@ -200,28 +200,30 @@ const needsTodos = ![
   "pr-activity",
   "version-bump",
   "analytics",
+  "migrate-todos",
+  "generate-todos",
 ].includes(command);
 
-// list --backend <name> sources from an external backend, not TODOS.md
+// list --backend <name> sources from an external backend, not the todos directory
 const usesExternalBackend =
   command === "list" && args.includes("--backend");
 
-if (needsTodos && !usesExternalBackend && !existsSync(todosFile)) {
-  die(`TODOS.md not found at ${todosFile}`);
+if (needsTodos && !usesExternalBackend && !existsSync(todosDir)) {
+  die(`Todos directory not found at ${todosDir}`);
 }
 
 switch (command) {
   case "list":
-    cmdList(args, todosFile, worktreeDir, projectRoot);
+    cmdList(args, todosDir, worktreeDir, projectRoot);
     break;
   case "deps":
-    cmdDeps(args, todosFile, worktreeDir);
+    cmdDeps(args, todosDir, worktreeDir);
     break;
   case "conflicts":
-    cmdConflicts(args, todosFile, worktreeDir);
+    cmdConflicts(args, todosDir, worktreeDir);
     break;
   case "batch-order":
-    cmdBatchOrder(args, todosFile, worktreeDir);
+    cmdBatchOrder(args, todosDir, worktreeDir);
     break;
   case "repos":
     cmdRepos(projectRoot);
@@ -237,7 +239,7 @@ switch (command) {
     cmdPartitions(partitionDir);
     break;
   case "start":
-    cmdStart(args, todosFile, worktreeDir, projectRoot);
+    cmdStart(args, todosDir, worktreeDir, projectRoot);
     break;
   case "close-workspaces":
     cmdCloseWorkspaces();
@@ -252,7 +254,7 @@ switch (command) {
     cmdCleanSingle(args, worktreeDir, projectRoot);
     break;
   case "mark-done":
-    cmdMarkDone(args, todosFile);
+    cmdMarkDone(args, todosDir);
     break;
   case "merged-ids":
     cmdMergedIds(worktreeDir, projectRoot);
@@ -276,16 +278,22 @@ switch (command) {
     cmdVersionBump(projectRoot);
     break;
   case "orchestrate":
-    await cmdOrchestrate(args, todosFile, worktreeDir, projectRoot);
+    await cmdOrchestrate(args, todosDir, worktreeDir, projectRoot);
     break;
   case "stop":
     cmdStop(projectRoot);
     break;
   case "reconcile":
-    cmdReconcile(todosFile, worktreeDir, projectRoot);
+    cmdReconcile(todosDir, worktreeDir, projectRoot);
     break;
   case "analytics":
     cmdAnalytics(args, projectRoot);
+    break;
+  case "migrate-todos":
+    console.log("migrate-todos: not yet implemented");
+    break;
+  case "generate-todos":
+    console.log("generate-todos: not yet implemented");
     break;
   default:
     die(`Unknown command: ${command}`);

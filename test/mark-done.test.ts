@@ -26,9 +26,9 @@ function makeTmpDir(): string {
 
 function setupTodos(content: string): string {
   const dir = makeTmpDir();
-  const todosFile = join(dir, "TODOS.md");
-  writeFileSync(todosFile, content);
-  return todosFile;
+  const todosDir = join(dir, "TODOS.md");
+  writeFileSync(todosDir, content);
+  return todosDir;
 }
 
 afterEach(() => {
@@ -44,34 +44,34 @@ afterEach(() => {
 
 describe("cmdMarkDone", () => {
   it("removes a single item", () => {
-    const todosFile = setupTodos(VALID_FIXTURE);
-    cmdMarkDone(["M-CI-1"], todosFile);
-    const result = readFileSync(todosFile, "utf-8");
+    const todosDir = setupTodos(VALID_FIXTURE);
+    cmdMarkDone(["M-CI-1"], todosDir);
+    const result = readFileSync(todosDir, "utf-8");
     expect(result).not.toContain("(M-CI-1)");
     expect(result).not.toContain("Upgrade CI runners");
   });
 
   it("preserves other items after single removal", () => {
-    const todosFile = setupTodos(VALID_FIXTURE);
-    cmdMarkDone(["M-CI-1"], todosFile);
-    const result = readFileSync(todosFile, "utf-8");
+    const todosDir = setupTodos(VALID_FIXTURE);
+    cmdMarkDone(["M-CI-1"], todosDir);
+    const result = readFileSync(todosDir, "utf-8");
     expect(result).toContain("(H-CI-2)");
     expect(result).toContain("(C-UO-1)");
     expect(result).toContain("(H-UO-2)");
   });
 
   it("preserves section headers with remaining items", () => {
-    const todosFile = setupTodos(VALID_FIXTURE);
-    cmdMarkDone(["M-CI-1"], todosFile);
-    const result = readFileSync(todosFile, "utf-8");
+    const todosDir = setupTodos(VALID_FIXTURE);
+    cmdMarkDone(["M-CI-1"], todosDir);
+    const result = readFileSync(todosDir, "utf-8");
     expect(result).toContain("Cloud Infrastructure");
     expect(result).toContain("User Onboarding");
   });
 
   it("removes multiple items at once", () => {
-    const todosFile = setupTodos(VALID_FIXTURE);
-    cmdMarkDone(["M-CI-1", "H-CI-2"], todosFile);
-    const result = readFileSync(todosFile, "utf-8");
+    const todosDir = setupTodos(VALID_FIXTURE);
+    cmdMarkDone(["M-CI-1", "H-CI-2"], todosDir);
+    const result = readFileSync(todosDir, "utf-8");
     expect(result).not.toContain("(M-CI-1)");
     expect(result).not.toContain("(H-CI-2)");
     expect(result).not.toContain("Upgrade CI runners");
@@ -81,23 +81,23 @@ describe("cmdMarkDone", () => {
   });
 
   it("removes section header when all items in section are removed", () => {
-    const todosFile = setupTodos(VALID_FIXTURE);
-    cmdMarkDone(["M-CI-1", "H-CI-2"], todosFile);
-    const result = readFileSync(todosFile, "utf-8");
+    const todosDir = setupTodos(VALID_FIXTURE);
+    cmdMarkDone(["M-CI-1", "H-CI-2"], todosDir);
+    const result = readFileSync(todosDir, "utf-8");
     expect(result).not.toContain("Cloud Infrastructure");
   });
 
   it("keeps section with remaining items", () => {
-    const todosFile = setupTodos(VALID_FIXTURE);
-    cmdMarkDone(["M-CI-1", "H-CI-2"], todosFile);
-    const result = readFileSync(todosFile, "utf-8");
+    const todosDir = setupTodos(VALID_FIXTURE);
+    cmdMarkDone(["M-CI-1", "H-CI-2"], todosDir);
+    const result = readFileSync(todosDir, "utf-8");
     expect(result).toContain("User Onboarding");
   });
 
   it("removing all items leaves only the header", () => {
-    const todosFile = setupTodos(VALID_FIXTURE);
-    cmdMarkDone(["M-CI-1", "H-CI-2", "C-UO-1", "H-UO-2"], todosFile);
-    const result = readFileSync(todosFile, "utf-8");
+    const todosDir = setupTodos(VALID_FIXTURE);
+    cmdMarkDone(["M-CI-1", "H-CI-2", "C-UO-1", "H-UO-2"], todosDir);
+    const result = readFileSync(todosDir, "utf-8");
     expect(result).not.toContain("(M-CI-1)");
     expect(result).not.toContain("(H-CI-2)");
     expect(result).not.toContain("(C-UO-1)");
@@ -108,9 +108,9 @@ describe("cmdMarkDone", () => {
   });
 
   it("removes item from second section, preserves first section", () => {
-    const todosFile = setupTodos(MULTI_SECTION_FIXTURE);
-    cmdMarkDone(["H-BE-1"], todosFile);
-    const result = readFileSync(todosFile, "utf-8");
+    const todosDir = setupTodos(MULTI_SECTION_FIXTURE);
+    cmdMarkDone(["H-BE-1"], todosDir);
+    const result = readFileSync(todosDir, "utf-8");
     expect(result).not.toContain("(H-BE-1)");
     expect(result).toContain("(H-AL-1)");
     expect(result).toContain("(M-AL-2)");
@@ -118,19 +118,19 @@ describe("cmdMarkDone", () => {
   });
 
   it("removes empty second section header", () => {
-    const todosFile = setupTodos(MULTI_SECTION_FIXTURE);
-    cmdMarkDone(["H-BE-1"], todosFile);
-    const result = readFileSync(todosFile, "utf-8");
+    const todosDir = setupTodos(MULTI_SECTION_FIXTURE);
+    cmdMarkDone(["H-BE-1"], todosDir);
+    const result = readFileSync(todosDir, "utf-8");
     expect(result).not.toContain("Section Beta");
   });
 
   it("outputs confirmation message", () => {
-    const todosFile = setupTodos(VALID_FIXTURE);
+    const todosDir = setupTodos(VALID_FIXTURE);
     const logs: string[] = [];
     const origLog = console.log;
     console.log = (msg: string) => logs.push(msg);
     try {
-      cmdMarkDone(["M-CI-1"], todosFile);
+      cmdMarkDone(["M-CI-1"], todosDir);
     } finally {
       console.log = origLog;
     }
