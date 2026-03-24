@@ -2,78 +2,8 @@
 
 <!-- Format guide: see $(cat .ninthwave/dir)/core/docs/todos-format.md -->
 
-## Autonomous Pipeline (L-VIS-2 iteration, 2026-03-24)
-
-
-
-
-### Feat: Add Phase 3 continuous delivery loop to /work skill (H-CDL-1)
-
-**Priority:** High
-**Source:** Friction log #12, L-VIS-2 vision review
-**Depends on:** H-OL-1, M-OL-3
-
-The /work skill currently stops after the orchestrator exits (Phase 2). It should have a Phase 3 that continues the delivery loop: after orchestrator completes, check `list --ready` for remaining items unblocked by the completed batch, and if more exist, loop back to Phase 2 with a confirmation prompt. In dogfooding mode (working on the ninthwave repo), Phase 3 should also review the friction log for new actionable entries and offer to decompose them into TODOs before continuing. This closes the gap between "one batch done" and "all work done."
-
-**Test plan:**
-- Manual verification: run /work, confirm Phase 3 prompt appears after orchestrator exits
-- Verify `list --ready` is called after orchestrate completes
-- Verify dogfooding detection (check for ninthwave-specific marker files)
-- Edge case: no remaining items — skill should report "all done" and exit cleanly
-
-Acceptance: After the orchestrator exits, the /work skill checks for remaining ready items and offers to continue. In dogfooding mode, the friction log is checked for new actionable entries. The skill loops until no ready items remain or the user chooses to stop. SKILL.md contains a documented Phase 3.
-
-Key files: `skills/work/SKILL.md`
-
----
-
-## Test Confidence (L-VIS-2 iteration, 2026-03-24)
-
-
-
-
-### Test: Exhaustive orchestrator state machine test coverage (M-TST-1)
-
-**Priority:** Medium
-**Source:** L-VIS-2 vision review — VISION.md Section A
-**Depends on:** None
-
-The orchestrator state machine has 13 states and multiple transition paths. Current test coverage exists but does not systematically cover all valid transitions, invalid transitions, and edge cases. Add comprehensive tests for: every valid state transition, rejection of invalid transitions, dependency-gated transitions (queued → ready when deps clear), WIP-limited launching, concurrent transitions in a single tick, and crash recovery state reconstruction. The OOM crash (friction #11) was partly caused by a missing transition — exhaustive coverage prevents this class of bug.
-
-**Test plan:**
-- Map all 13 states × valid transitions in a test matrix
-- Test each valid transition with minimal setup
-- Test invalid transitions (e.g., `queued → merging`) are rejected or ignored
-- Test dependency chains: item unblocks when all deps reach `done`
-- Test WIP limit: items stay `ready` when WIP is at capacity
-- Test crash recovery: reconstruct state from disk snapshots
-
-Acceptance: Every valid state transition in the orchestrator is covered by at least one test. Invalid transitions are tested to confirm they are rejected. Dependency-gated and WIP-limited transitions have dedicated test cases. Test file runs cleanly with `bun test test/orchestrator.test.ts`. No infinite loops or OOM in any test path.
-
-Key files: `test/orchestrator.test.ts`, `core/orchestrator.ts`
-
----
-
-### Feat: Add test plan field to /decompose skill output (M-TCO-1)
-
-**Priority:** Medium
-**Source:** L-VIS-2 vision review — VISION.md Section A (test confidence)
-**Depends on:** None
-
-The /decompose skill generates work items but does not include a `**Test plan:**` field. The format guide (`todos-format.md`) already defines the field and the parser already supports it, but the decompose skill's output template doesn't generate it. Update the decompose SKILL.md to instruct the AI to generate a test plan for each work item during decomposition. The test plan should specify: what tests to write or verify, key code paths to cover, and edge cases specific to the item.
-
-**Test plan:**
-- Run /decompose on a sample spec and verify each output item has a `**Test plan:**` section
-- Verify the parser extracts the test plan field correctly (existing parser test)
-- Edge case: item with no testable code (e.g., docs-only) — test plan should say "Manual review"
-
-Acceptance: The /decompose SKILL.md template includes `**Test plan:**` in every generated work item. Generated test plans are specific to each item (not generic boilerplate). The parser correctly extracts the field from generated output.
-
-Key files: `skills/decompose/SKILL.md`
-
----
-
 ## Vision (recurring, 2026-03-24)
+
 
 
 
