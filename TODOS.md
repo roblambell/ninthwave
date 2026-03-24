@@ -140,25 +140,6 @@ Key files: `core/mux.ts`, `core/send-message.ts`, `test/mux.test.ts`
 
 ---
 
-### Fix: Log warnings on fetch/merge failures during worktree creation (M-WRK-4)
-
-**Priority:** Medium
-**Source:** Eng review W-3 — `docs/reviews/eng-review-workers.md`
-**Depends on:** None
-
-`launchSingleItem` in `core/commands/start.ts` (lines 200-208) silently catches `fetchOrigin` and `ffMerge` failures. A network failure means the worktree is created from stale local `main`, leading to merge conflicts later. Replace bare `catch {}` with `catch { warn(...) }` so users see that the worktree may be based on outdated code.
-
-**Test plan:**
-- Unit test: fetch failure logs a warning but continues
-- Unit test: ff-merge failure logs a warning but continues
-- Verify warning message includes actionable context
-
-Acceptance: `fetchOrigin` and `ffMerge` failures log warnings with `warn()`. Worktree creation still proceeds. Tests verify warnings are emitted. No regression.
-
-Key files: `core/commands/start.ts`, `test/start.test.ts`
-
----
-
 ### Fix: TmuxAdapter splitPane returns correct pane ID (M-WRK-5)
 
 **Priority:** Medium
