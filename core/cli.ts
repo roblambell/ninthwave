@@ -152,7 +152,7 @@ if (!command) {
     "  version-bump                                  Bump version + changelog",
   );
   console.log(
-    "  orchestrate --items ID1,ID2 [--mux cmux|tmux] Orchestrate parallel processing",
+    "  orchestrate --items ID1 ID2 ... [--mux cmux|tmux] Orchestrate parallel processing",
   );
   console.log(
     "  repos                                         List discovered repos",

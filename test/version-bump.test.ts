@@ -48,6 +48,13 @@ function makeTmpDir(): string {
   return dir;
 }
 
+// Strip git env vars so temp repos aren't poisoned by pre-commit hook context.
+// GIT_DIR, GIT_INDEX_FILE, etc. are set by git when running hooks and leak into
+// child processes, breaking tests that create isolated git repos.
+for (const key of Object.keys(process.env)) {
+  if (key.startsWith("GIT_")) delete process.env[key];
+}
+
 function git(args: string[]): void {
   const result = spawnSync("git", args, { encoding: "utf-8" });
   if (result.status !== 0) {
