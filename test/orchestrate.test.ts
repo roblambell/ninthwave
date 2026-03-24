@@ -1295,3 +1295,123 @@ describe("forkDaemon", () => {
     expect(spawnOpts.stdio[0]).toBe("ignore");
   });
 });
+
+// ── Post-merge sibling conflict detection in orchestrateLoop ──────────
+
+describe("orchestrateLoop post-merge conflict detection", () => {
+  it("checks sibling PRs for conflicts after a merge and sends rebase to conflicting ones", async () => {
+    const orch = new Orchestrator({ wipLimit: 3, mergeStrategy: "asap" });
+    orch.addItem(makeTodo("T-1-1"));
+    orch.addItem(makeTodo("T-1-2"));
+    orch.addItem(makeTodo("T-1-3"));
+
+    // T-1-1 is in ci-pending (about to pass CI and get merged by orchestrator)
+    // T-1-2 and T-1-3 are also in-flight with PRs
+    orch.setState("T-1-1", "ci-pending");
+    orch.getItem("T-1-1")!.prNumber = 10;
+    orch.getItem("T-1-1")!.workspaceRef = "workspace:1";
+    orch.setState("T-1-2", "ci-pending");
+    orch.getItem("T-1-2")!.prNumber = 11;
+    orch.getItem("T-1-2")!.workspaceRef = "workspace:2";
+    orch.setState("T-1-3", "ci-pending");
+    orch.getItem("T-1-3")!.prNumber = 12;
+    orch.getItem("T-1-3")!.workspaceRef = "workspace:3";
+
+    const buildSnapshot = (o: Orchestrator): PollSnapshot => {
+      const items: ItemSnapshot[] = [];
+      for (const item of o.getAllItems()) {
+        if (item.state === "done" || item.state === "stuck") continue;
+        if (item.state === "merging" || item.state === "merged") {
+          // After orchestrator merges, PR shows as merged next cycle
+          items.push({ id: item.id, prNumber: item.prNumber, prState: "merged" });
+        } else {
+          // All PRs have CI pass
+          items.push({
+            id: item.id,
+            prNumber: item.prNumber,
+            prState: "open",
+            ciStatus: "pass",
+          });
+        }
+      }
+      return { items, readyIds: [] };
+    };
+
+    // checkPrMergeable: T-1-2 (PR #11) has conflicts, T-1-3 (PR #12) is fine
+    const checkPrMergeable = vi.fn((_: string, prNum: number) => prNum !== 11);
+    const sendMessage = vi.fn(() => true);
+    const warn = vi.fn();
+
+    const deps: OrchestrateLoopDeps = {
+      buildSnapshot,
+      sleep: () => Promise.resolve(),
+      log: () => {},
+      actionDeps: mockActionDeps({ checkPrMergeable, sendMessage, warn }),
+    };
+
+    await orchestrateLoop(orch, defaultCtx, deps);
+
+    // checkPrMergeable should have been called for sibling PRs when T-1-1 merged
+    expect(checkPrMergeable).toHaveBeenCalledWith(defaultCtx.projectRoot, 11);
+    expect(checkPrMergeable).toHaveBeenCalledWith(defaultCtx.projectRoot, 12);
+
+    // Rebase message should be sent to T-1-2 (conflicting)
+    expect(sendMessage).toHaveBeenCalledWith(
+      "workspace:2",
+      expect.stringContaining("merge conflicts"),
+    );
+  });
+
+  it("does not check sibling PRs when checkPrMergeable is not provided", async () => {
+    const orch = new Orchestrator({ wipLimit: 3, mergeStrategy: "asap" });
+    orch.addItem(makeTodo("T-1-1"));
+    orch.addItem(makeTodo("T-1-2"));
+
+    // T-1-1 about to pass CI and get merged; T-1-2 also in-flight
+    orch.setState("T-1-1", "ci-pending");
+    orch.getItem("T-1-1")!.prNumber = 10;
+    orch.getItem("T-1-1")!.workspaceRef = "workspace:1";
+    orch.setState("T-1-2", "ci-pending");
+    orch.getItem("T-1-2")!.prNumber = 11;
+    orch.getItem("T-1-2")!.workspaceRef = "workspace:2";
+
+    const buildSnapshot = (o: Orchestrator): PollSnapshot => {
+      const items: ItemSnapshot[] = [];
+      for (const item of o.getAllItems()) {
+        if (item.state === "done" || item.state === "stuck") continue;
+        if (item.state === "merging" || item.state === "merged") {
+          items.push({ id: item.id, prNumber: item.prNumber, prState: "merged" });
+        } else {
+          items.push({
+            id: item.id,
+            prNumber: item.prNumber,
+            prState: "open",
+            ciStatus: "pass",
+          });
+        }
+      }
+      return { items, readyIds: [] };
+    };
+
+    const sendMessage = vi.fn(() => true);
+
+    // Explicitly omit checkPrMergeable from deps
+    const actionDeps = mockActionDeps({ sendMessage });
+    delete actionDeps.checkPrMergeable;
+
+    const deps: OrchestrateLoopDeps = {
+      buildSnapshot,
+      sleep: () => Promise.resolve(),
+      log: () => {},
+      actionDeps,
+    };
+
+    await orchestrateLoop(orch, defaultCtx, deps);
+
+    // No rebase-for-conflicts messages should be sent
+    const conflictRebaseCalls = sendMessage.mock.calls.filter(
+      (call: unknown[]) => typeof call[1] === "string" && (call[1] as string).includes("merge conflicts"),
+    );
+    expect(conflictRebaseCalls.length).toBe(0);
+  });
+});

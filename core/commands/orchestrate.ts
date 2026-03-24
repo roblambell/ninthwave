@@ -24,7 +24,7 @@ import { parseTodos } from "../parser.ts";
 import { checkPrStatus } from "./watch.ts";
 import { launchSingleItem, detectAiTool } from "./start.ts";
 import { cleanSingleWorktree } from "./clean.ts";
-import { prMerge, prComment, getRepoOwner } from "../gh.ts";
+import { prMerge, prComment, checkPrMergeable, getRepoOwner } from "../gh.ts";
 import { fetchOrigin, ffMerge, hasChanges, getStagedFiles, gitAdd, gitCommit, gitReset } from "../git.ts";
 import { type Multiplexer, getMux } from "../mux.ts";
 import { reconcile } from "./reconcile.ts";
@@ -1124,6 +1124,9 @@ export async function cmdOrchestrate(
     closeWorkspace: (ref) => mux.closeWorkspace(ref),
     fetchOrigin,
     ffMerge,
+    checkPrMergeable,
+    warn: (message) =>
+      structuredLog({ ts: new Date().toISOString(), level: "warn", event: "orchestrator_warning", message }),
   };
 
   // Graceful SIGINT handling

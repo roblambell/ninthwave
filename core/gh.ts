@@ -136,6 +136,18 @@ export function prComment(
   return result.exitCode === 0;
 }
 
+/**
+ * Check if a PR is mergeable (no conflicts with base branch).
+ * Returns true if mergeable or status is unknown, false only if definitely conflicting.
+ * Conservative: treats unknown as mergeable to avoid spurious rebase requests.
+ */
+export function checkPrMergeable(repoRoot: string, prNumber: number): boolean {
+  const data = prView(repoRoot, prNumber, ["mergeable"]);
+  const mergeable = data.mergeable as string | undefined;
+  // GitHub returns "MERGEABLE", "CONFLICTING", or "UNKNOWN"
+  return mergeable !== "CONFLICTING";
+}
+
 /** Lock a PR/issue conversation to restrict comments to collaborators. Returns true on success. */
 export function prLock(repoRoot: string, prNumber: number): boolean {
   let ownerRepo: string;

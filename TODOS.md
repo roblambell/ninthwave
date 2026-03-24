@@ -559,26 +559,6 @@ Key files: `core/commands/orchestrate.ts`, `test/orchestrate.test.ts`
 ## Detection Latency & Auto-Rebase (friction #17/#18, 2026-03-24)
 
 
-### Fix: Wire checkPrMergeable in production orchestrate command (H-DET-1)
-
-**Priority:** High
-**Source:** Friction #18 — post-merge sibling conflict detection is defined but never wired
-**Depends on:** None
-
-`checkPrMergeable` is defined as an optional dependency in the orchestrator interface (`core/orchestrator.ts`) and used in the post-merge conflict detection logic (lines 638-659), but it's never provided in the production `cmdOrchestrate` function (`core/commands/orchestrate.ts` lines 1104-1114). This means after a PR merges, the orchestrator never checks whether sibling PRs now have conflicts — they sit in `ci-pending` until the next full poll cycle detects the conflict. Wire `checkPrMergeable` by providing the `prView` call that returns the mergeable field for a given PR number.
-
-**Test plan:**
-- Unit test: after a merge, sibling PRs are checked for mergeable status
-- Unit test: conflicting siblings get rebase messages sent
-- Unit test: non-conflicting siblings are left alone
-- Integration: verify the dependency is provided in cmdOrchestrate
-
-Acceptance: `checkPrMergeable` is wired in `cmdOrchestrate`. After a PR merges, all in-flight sibling PRs are checked for conflicts. Conflicting siblings receive rebase messages. Tests cover the wiring and the behavior. No regression.
-
-Key files: `core/commands/orchestrate.ts`, `core/orchestrator.ts`, `test/orchestrator.test.ts`
-
----
-
 ### Feat: Add detection latency timestamps to state transitions (M-DET-2)
 
 **Priority:** Medium
