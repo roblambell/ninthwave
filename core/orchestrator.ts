@@ -821,11 +821,21 @@ export class Orchestrator {
     ctx: ExecutionContext,
     deps: OrchestratorDeps,
   ): ActionResult {
-    if (item.workspaceRef) {
-      deps.closeWorkspace(item.workspaceRef);
-    }
+    const workspaceClosed = item.workspaceRef
+      ? deps.closeWorkspace(item.workspaceRef)
+      : null; // null = not attempted (no workspace to close)
 
-    deps.cleanSingleWorktree(item.id, ctx.worktreeDir, ctx.projectRoot);
+    const worktreeCleaned = deps.cleanSingleWorktree(item.id, ctx.worktreeDir, ctx.projectRoot);
+
+    // Partial cleanup (one of two succeeds) is still OK.
+    // Fail only when every attempted operation failed.
+    const anySucceeded = workspaceClosed === true || worktreeCleaned;
+    if (!anySucceeded) {
+      const failures: string[] = [];
+      if (workspaceClosed === false) failures.push("workspace close");
+      if (!worktreeCleaned) failures.push("worktree cleanup");
+      return { success: false, error: `Clean failed for ${item.id}: ${failures.join(" and ")} failed` };
+    }
 
     return { success: true };
   }

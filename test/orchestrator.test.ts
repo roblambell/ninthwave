@@ -1252,6 +1252,61 @@ describe("Orchestrator", () => {
       );
     });
 
+    it("clean: returns success when only closeWorkspace fails (partial cleanup OK)", () => {
+      const deps = mockDeps({ closeWorkspace: vi.fn(() => false) });
+      orch.addItem(makeTodo("H-1-1"));
+      orch.setState("H-1-1", "merged");
+      orch.getItem("H-1-1")!.workspaceRef = "workspace:1";
+
+      const result = orch.executeAction({ type: "clean", itemId: "H-1-1" }, defaultCtx, deps);
+
+      expect(result.success).toBe(true);
+      expect(deps.closeWorkspace).toHaveBeenCalledWith("workspace:1");
+      expect(deps.cleanSingleWorktree).toHaveBeenCalled();
+    });
+
+    it("clean: returns success when only cleanSingleWorktree fails (partial cleanup OK)", () => {
+      const deps = mockDeps({ cleanSingleWorktree: vi.fn(() => false) });
+      orch.addItem(makeTodo("H-1-1"));
+      orch.setState("H-1-1", "merged");
+      orch.getItem("H-1-1")!.workspaceRef = "workspace:1";
+
+      const result = orch.executeAction({ type: "clean", itemId: "H-1-1" }, defaultCtx, deps);
+
+      expect(result.success).toBe(true);
+      expect(deps.closeWorkspace).toHaveBeenCalledWith("workspace:1");
+      expect(deps.cleanSingleWorktree).toHaveBeenCalled();
+    });
+
+    it("clean: returns failure when both operations fail", () => {
+      const deps = mockDeps({
+        closeWorkspace: vi.fn(() => false),
+        cleanSingleWorktree: vi.fn(() => false),
+      });
+      orch.addItem(makeTodo("H-1-1"));
+      orch.setState("H-1-1", "merged");
+      orch.getItem("H-1-1")!.workspaceRef = "workspace:1";
+
+      const result = orch.executeAction({ type: "clean", itemId: "H-1-1" }, defaultCtx, deps);
+
+      expect(result.success).toBe(false);
+      expect(result.error).toContain("Clean failed");
+      expect(result.error).toContain("H-1-1");
+    });
+
+    it("clean: returns failure when no workspace ref and worktree cleanup fails", () => {
+      const deps = mockDeps({ cleanSingleWorktree: vi.fn(() => false) });
+      orch.addItem(makeTodo("H-1-1"));
+      orch.setState("H-1-1", "merged");
+      // No workspaceRef — closeWorkspace is not called, so only worktree cleanup matters
+
+      const result = orch.executeAction({ type: "clean", itemId: "H-1-1" }, defaultCtx, deps);
+
+      expect(result.success).toBe(false);
+      expect(result.error).toContain("Clean failed");
+      expect(deps.closeWorkspace).not.toHaveBeenCalled();
+    });
+
     // ── retry ──────────────────────────────────────────────────
 
     it("retry: closes workspace and cleans worktree for fresh relaunch", () => {
