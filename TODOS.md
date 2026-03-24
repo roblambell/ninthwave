@@ -78,22 +78,41 @@ Key files: `core/templates.ts`, `test/templates.test.ts`
 
 ---
 
-### Refactor: Replace die() with throw in resolveRepo (M-DP-14)
+### Feat: Config key validation with unknown key warnings (L-DP-16)
 
-**Priority:** Medium
-**Source:** Eng review M-ENG-3 finding 6.1
+**Priority:** Low
+**Source:** Eng review M-ENG-3 finding 7.2
 **Depends on:** None
 
-`resolveRepo` calls `die()` (which calls `process.exit(1)`) when a repo alias cannot be resolved. This makes error handling impossible for callers and makes the function difficult to test. Replace `die()` with `throw new Error(...)` and let callers decide how to handle the failure.
+Unknown config keys (e.g., typos) are silently accepted. Add a known-keys list and warn when unrecognized keys are found in `.ninthwave/config`.
 
 **Test plan:**
-- Unit test: resolveRepo throws on unresolvable alias (instead of process.exit)
-- Unit test: callers can catch the error and continue
-- Verify all call sites handle the thrown error appropriately
+- Unit test: known keys are accepted without warning
+- Unit test: unknown keys trigger a warning
+- Unit test: existing config loading behavior is preserved
 
-Acceptance: `resolveRepo` throws instead of calling `die()`. All call sites catch and handle the error. Tests cover the error paths. No regression in cross-repo functionality.
+Acceptance: Unrecognized config keys produce a diagnostic warning. Known keys work as before. Tests cover both cases.
 
-Key files: `core/cross-repo.ts`, `test/cross-repo.test.ts`
+Key files: `core/config.ts`, `test/config.test.ts`
+
+---
+
+### Refactor: Consolidate domain file parsing — normalizeDomain should accept a Map (L-DP-17)
+
+**Priority:** Low
+**Source:** Eng review M-ENG-3 finding 7.3
+**Depends on:** None
+
+`normalizeDomain` reads and parses `domains.conf` directly from disk, duplicating the logic in `loadDomainMappings()`. Refactor `normalizeDomain` to accept a `Map<string, string>` parameter instead of a file path, and have `parseTodos` call `loadDomainMappings` once and pass the result.
+
+**Test plan:**
+- Unit test: normalizeDomain with Map produces same results as with file path
+- Unit test: parseTodos loads domain mappings once and passes them through
+- Integration: existing domain mapping tests pass
+
+Acceptance: Domain file is read once per parse call. `normalizeDomain` accepts a Map. `loadDomainMappings` is the single source of file-parsing logic. All existing tests pass.
+
+Key files: `core/parser.ts`, `core/config.ts`, `test/parser.test.ts`, `test/config.test.ts`
 
 ---
 
