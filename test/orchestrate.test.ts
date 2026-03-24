@@ -12,9 +12,11 @@ import {
   buildSnapshot,
   launchStatusPane,
   closeStatusPane,
+  isInsideWorkspace,
   STATUS_PANE_NAME,
   type LogEntry,
   type OrchestrateLoopDeps,
+  type EnvAccessor,
 } from "../core/commands/orchestrate.ts";
 import {
   Orchestrator,
@@ -867,6 +869,7 @@ describe("buildSnapshot lastCommitTime", () => {
     return {
       isAvailable: () => true,
       launchWorkspace: () => null,
+      splitPane: () => null,
       sendMessage: () => true,
       readScreen: () => "",
       listWorkspaces: () => workspaces,
@@ -963,6 +966,7 @@ describe("launchStatusPane", () => {
     return {
       isAvailable: () => true,
       launchWorkspace: vi.fn(() => "workspace:99"),
+      splitPane: vi.fn(() => "pane:1"),
       sendMessage: () => true,
       readScreen: () => "",
       listWorkspaces: () => "",
@@ -971,15 +975,27 @@ describe("launchStatusPane", () => {
     };
   }
 
-  it("launches status pane via mux.launchWorkspace", () => {
+  /** Env that simulates running outside any workspace. */
+  const noWorkspaceEnv: EnvAccessor = () => undefined;
+
+  /** Env that simulates running inside a cmux workspace. */
+  const cmuxWorkspaceEnv: EnvAccessor = (key) =>
+    key === "CMUX_WORKSPACE_ID" ? "workspace:5" : undefined;
+
+  /** Env that simulates running inside a tmux session. */
+  const tmuxWorkspaceEnv: EnvAccessor = (key) =>
+    key === "TMUX" ? "/tmp/tmux-501/default,12345,0" : undefined;
+
+  it("launches status pane via mux.launchWorkspace when not in a workspace", () => {
     const mux = mockMux();
-    const ref = launchStatusPane(mux, "/tmp/project");
+    const ref = launchStatusPane(mux, "/tmp/project", noWorkspaceEnv);
 
     expect(ref).toBe("workspace:99");
     expect(mux.launchWorkspace).toHaveBeenCalledWith(
       "/tmp/project",
       "ninthwave status --watch",
     );
+    expect(mux.splitPane).not.toHaveBeenCalled();
   });
 
   it("uses nw-status as the status pane identifier constant", () => {
@@ -988,17 +1004,75 @@ describe("launchStatusPane", () => {
 
   it("returns null when mux is not available", () => {
     const mux = mockMux({ isAvailable: () => false });
-    const ref = launchStatusPane(mux, "/tmp/project");
+    const ref = launchStatusPane(mux, "/tmp/project", noWorkspaceEnv);
 
     expect(ref).toBeNull();
     expect(mux.launchWorkspace).not.toHaveBeenCalled();
   });
 
-  it("returns null when launchWorkspace fails", () => {
+  it("returns null when launchWorkspace fails and not in a workspace", () => {
     const mux = mockMux({ launchWorkspace: vi.fn(() => null) });
-    const ref = launchStatusPane(mux, "/tmp/project");
+    const ref = launchStatusPane(mux, "/tmp/project", noWorkspaceEnv);
 
     expect(ref).toBeNull();
+  });
+
+  it("splits pane when CMUX_WORKSPACE_ID is set", () => {
+    const mux = mockMux();
+    const ref = launchStatusPane(mux, "/tmp/project", cmuxWorkspaceEnv);
+
+    expect(ref).toBe("pane:1");
+    expect(mux.splitPane).toHaveBeenCalledWith("ninthwave status --watch");
+    expect(mux.launchWorkspace).not.toHaveBeenCalled();
+  });
+
+  it("splits pane when TMUX env var is set", () => {
+    const mux = mockMux();
+    const ref = launchStatusPane(mux, "/tmp/project", tmuxWorkspaceEnv);
+
+    expect(ref).toBe("pane:1");
+    expect(mux.splitPane).toHaveBeenCalledWith("ninthwave status --watch");
+    expect(mux.launchWorkspace).not.toHaveBeenCalled();
+  });
+
+  it("falls back to launchWorkspace when splitPane fails inside a workspace", () => {
+    const mux = mockMux({ splitPane: vi.fn(() => null) });
+    const ref = launchStatusPane(mux, "/tmp/project", cmuxWorkspaceEnv);
+
+    expect(ref).toBe("workspace:99");
+    expect(mux.splitPane).toHaveBeenCalledWith("ninthwave status --watch");
+    expect(mux.launchWorkspace).toHaveBeenCalledWith(
+      "/tmp/project",
+      "ninthwave status --watch",
+    );
+  });
+});
+
+describe("isInsideWorkspace", () => {
+  it("returns true when CMUX_WORKSPACE_ID is set", () => {
+    const env: EnvAccessor = (key) =>
+      key === "CMUX_WORKSPACE_ID" ? "workspace:5" : undefined;
+    expect(isInsideWorkspace(env)).toBe(true);
+  });
+
+  it("returns true when TMUX is set", () => {
+    const env: EnvAccessor = (key) =>
+      key === "TMUX" ? "/tmp/tmux-501/default,12345,0" : undefined;
+    expect(isInsideWorkspace(env)).toBe(true);
+  });
+
+  it("returns false when neither env var is set", () => {
+    const env: EnvAccessor = () => undefined;
+    expect(isInsideWorkspace(env)).toBe(false);
+  });
+
+  it("returns true when both env vars are set", () => {
+    const env: EnvAccessor = (key) => {
+      if (key === "CMUX_WORKSPACE_ID") return "workspace:5";
+      if (key === "TMUX") return "/tmp/tmux-501/default,12345,0";
+      return undefined;
+    };
+    expect(isInsideWorkspace(env)).toBe(true);
   });
 });
 
@@ -1008,6 +1082,7 @@ describe("closeStatusPane", () => {
     const mux: Multiplexer = {
       isAvailable: () => true,
       launchWorkspace: () => null,
+      splitPane: () => null,
       sendMessage: () => true,
       readScreen: () => "",
       listWorkspaces: () => "",
@@ -1023,6 +1098,7 @@ describe("closeStatusPane", () => {
     const mux: Multiplexer = {
       isAvailable: () => true,
       launchWorkspace: () => null,
+      splitPane: () => null,
       sendMessage: () => true,
       readScreen: () => "",
       listWorkspaces: () => "",

@@ -78,3 +78,19 @@ export function closeWorkspace(workspaceRef: string): boolean {
   ]);
   return result.exitCode === 0;
 }
+
+/**
+ * Split a pane in the current cmux workspace.
+ * Uses the CMUX_WORKSPACE_ID env var to target the current workspace.
+ * Returns the pane ref (e.g., "pane:1") or null on failure.
+ */
+export function splitPane(command: string): string | null {
+  const result = run("cmux", [
+    "split-pane",
+    "--command",
+    command,
+  ]);
+  if (result.exitCode !== 0) return null;
+  const match = result.stdout.match(/pane:\d+/);
+  return match ? match[0] : null;
+}

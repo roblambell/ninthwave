@@ -233,6 +233,52 @@ describe("TmuxAdapter", () => {
     });
   });
 
+  describe("splitPane", () => {
+    it("calls tmux split-window with the command", () => {
+      const { runner, calls } = fakeRunner([
+        { stdout: "", stderr: "", exitCode: 0 }, // split-window
+        { stdout: "%5", stderr: "", exitCode: 0 }, // display-message
+      ]);
+      const adapter = new TmuxAdapter(runner);
+
+      const ref = adapter.splitPane("ninthwave status --watch");
+
+      expect(ref).toBe("%5");
+      expect(calls[0].cmd).toBe("tmux");
+      expect(calls[0].args).toEqual([
+        "split-window",
+        "ninthwave status --watch",
+      ]);
+      // Second call gets the pane ID
+      expect(calls[1].args).toEqual([
+        "display-message",
+        "-p",
+        "#{pane_id}",
+      ]);
+    });
+
+    it("returns null when split-window fails", () => {
+      const { runner } = fakeRunner([
+        { stdout: "", stderr: "no session", exitCode: 1 },
+      ]);
+      const adapter = new TmuxAdapter(runner);
+
+      expect(adapter.splitPane("cmd")).toBeNull();
+    });
+
+    it("returns fallback pane ref when display-message fails", () => {
+      const { runner } = fakeRunner([
+        { stdout: "", stderr: "", exitCode: 0 }, // split-window OK
+        { stdout: "", stderr: "error", exitCode: 1 }, // display-message fails
+      ]);
+      const adapter = new TmuxAdapter(runner);
+
+      const ref = adapter.splitPane("cmd");
+      // Falls back to counter-based name
+      expect(ref).toMatch(/^nw-pane-/);
+    });
+  });
+
   describe("closeWorkspace", () => {
     it("calls tmux kill-session with correct session name", () => {
       const { runner, calls } = fakeRunner([
@@ -263,6 +309,7 @@ describe("TmuxAdapter", () => {
 
       expect(typeof adapter.isAvailable).toBe("function");
       expect(typeof adapter.launchWorkspace).toBe("function");
+      expect(typeof adapter.splitPane).toBe("function");
       expect(typeof adapter.sendMessage).toBe("function");
       expect(typeof adapter.readScreen).toBe("function");
       expect(typeof adapter.listWorkspaces).toBe("function");

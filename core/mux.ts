@@ -17,6 +17,8 @@ export interface Multiplexer {
   isAvailable(): boolean;
   /** Launch a new workspace. Returns a ref (e.g., "workspace:1") or null on failure. */
   launchWorkspace(cwd: string, command: string): string | null;
+  /** Split a pane in the current workspace. Returns a ref or null on failure. */
+  splitPane(command: string): string | null;
   /** Send a message to a workspace. Returns true on success. */
   sendMessage(ref: string, message: string): boolean;
   /** Read screen content from a workspace. Returns raw text or "" on failure. */
@@ -34,6 +36,9 @@ export class CmuxAdapter implements Multiplexer {
   }
   launchWorkspace(cwd: string, command: string): string | null {
     return cmux.launchWorkspace(cwd, command);
+  }
+  splitPane(command: string): string | null {
+    return cmux.splitPane(command);
   }
   sendMessage(ref: string, message: string): boolean {
     return cmux.sendMessage(ref, message);
@@ -82,6 +87,24 @@ export class TmuxAdapter implements Multiplexer {
     ]);
     if (result.exitCode !== 0) return null;
     return name;
+  }
+
+  splitPane(command: string): string | null {
+    const result = this.run("tmux", [
+      "split-window",
+      command,
+    ]);
+    if (result.exitCode !== 0) return null;
+    // Return the pane identifier from tmux (e.g., "%5")
+    // Use list-panes to find the most recently created pane
+    const listResult = this.run("tmux", [
+      "display-message",
+      "-p",
+      "#{pane_id}",
+    ]);
+    return listResult.exitCode === 0 && listResult.stdout
+      ? listResult.stdout
+      : `nw-pane-${this.counter}`;
   }
 
   sendMessage(ref: string, message: string): boolean {

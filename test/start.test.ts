@@ -19,6 +19,7 @@ vi.mock("../core/git.ts", () => ({
 
 vi.mock("../core/cmux.ts", () => ({
   launchWorkspace: vi.fn(() => "workspace:1"),
+  splitPane: vi.fn(() => "pane:1"),
   sendMessage: vi.fn(() => true),
   readScreen: vi.fn(() => "line1\nline2\nline3\nline4\n"),
 }));

@@ -666,15 +666,42 @@ export async function orchestrateLoop(
 /** Status pane workspace name used for identification. */
 export const STATUS_PANE_NAME = "nw-status";
 
+/** Environment variable accessor — injectable for testing. */
+export type EnvAccessor = (key: string) => string | undefined;
+
+const defaultEnv: EnvAccessor = (key) => process.env[key];
+
+/**
+ * Check if we're running inside an existing workspace.
+ * Detects cmux via CMUX_WORKSPACE_ID and tmux via TMUX env vars.
+ */
+export function isInsideWorkspace(env: EnvAccessor = defaultEnv): boolean {
+  return !!(env("CMUX_WORKSPACE_ID") || env("TMUX"));
+}
+
 /**
  * Launch a dedicated status pane that runs `ninthwave status --watch`.
- * Returns the workspace ref or null if mux is not available.
+ *
+ * When running inside an existing workspace (detected via CMUX_WORKSPACE_ID
+ * or TMUX env vars), opens the status pane as a split in the current
+ * workspace. Falls back to creating a new workspace when not inside one.
+ *
+ * Returns the workspace/pane ref or null if mux is not available.
  */
 export function launchStatusPane(
   mux: Multiplexer,
   projectRoot: string,
+  env: EnvAccessor = defaultEnv,
 ): string | null {
   if (!mux.isAvailable()) return null;
+
+  // When inside an existing workspace, split a pane instead of creating a new workspace
+  if (isInsideWorkspace(env)) {
+    const paneRef = mux.splitPane("ninthwave status --watch");
+    if (paneRef) return paneRef;
+    // Fall through to launchWorkspace if splitPane fails
+  }
+
   return mux.launchWorkspace(projectRoot, "ninthwave status --watch");
 }
 

@@ -6,6 +6,7 @@ import { describe, it, expect, vi } from "vitest";
 vi.mock("../core/cmux.ts", () => ({
   isAvailable: vi.fn(() => true),
   launchWorkspace: vi.fn(() => "workspace:42"),
+  splitPane: vi.fn(() => "pane:1"),
   sendMessage: vi.fn(() => true),
   readScreen: vi.fn(() => "line1\nline2\nline3\n"),
   listWorkspaces: vi.fn(() => "workspace:1 TODO T-1 test"),
@@ -78,6 +79,13 @@ describe("CmuxAdapter", () => {
     const result = adapter.readScreen("workspace:1", 5);
     expect(result).toBe("line1\nline2\nline3\n");
     expect(cmux.readScreen).toHaveBeenCalledWith("workspace:1", 5);
+  });
+
+  it("delegates splitPane to cmux.splitPane", () => {
+    const adapter = new CmuxAdapter();
+    const result = adapter.splitPane("ninthwave status --watch");
+    expect(result).toBe("pane:1");
+    expect(cmux.splitPane).toHaveBeenCalledWith("ninthwave status --watch");
   });
 });
 
@@ -183,6 +191,7 @@ describe("getMux", () => {
     const mux: Multiplexer = getMux(deps);
     expect(typeof mux.isAvailable).toBe("function");
     expect(typeof mux.launchWorkspace).toBe("function");
+    expect(typeof mux.splitPane).toBe("function");
     expect(typeof mux.sendMessage).toBe("function");
     expect(typeof mux.readScreen).toBe("function");
     expect(typeof mux.listWorkspaces).toBe("function");
@@ -209,6 +218,7 @@ describe("waitForReady", () => {
     const fakeMux: Multiplexer = {
       isAvailable: () => true,
       launchWorkspace: () => null,
+      splitPane: () => null,
       sendMessage: () => true,
       readScreen: () => "Welcome to Claude\nReady for input\nType your message\n>",
       listWorkspaces: () => "",
@@ -229,6 +239,7 @@ describe("waitForReady", () => {
     const fakeMux: Multiplexer = {
       isAvailable: () => true,
       launchWorkspace: () => null,
+      splitPane: () => null,
       sendMessage: () => true,
       readScreen: () => `changing content ${callCount++}\nline2\nline3`,
       listWorkspaces: () => "",
@@ -245,6 +256,7 @@ describe("waitForReady", () => {
     const fakeMux: Multiplexer = {
       isAvailable: () => true,
       launchWorkspace: () => null,
+      splitPane: () => null,
       sendMessage: () => true,
       readScreen: () => "just one line",
       listWorkspaces: () => "",
@@ -262,6 +274,7 @@ describe("waitForReady", () => {
     const fakeMux: Multiplexer = {
       isAvailable: () => true,
       launchWorkspace: () => null,
+      splitPane: () => null,
       sendMessage: () => true,
       readScreen: () => {
         callCount++;
