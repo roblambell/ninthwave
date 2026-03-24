@@ -7,26 +7,6 @@
 
 
 
-### Feat: Add tmux multiplexer adapter (H-MUX-2)
-
-**Priority:** High
-**Source:** L-VIS-3 vision review
-**Depends on:** H-MUX-1
-
-Implement `TmuxAdapter` in `core/mux.ts` (or `core/mux/tmux.ts`) that implements the `Multiplexer` interface using tmux CLI commands: `tmux new-session -d -s <name> -c <cwd> '<command>'` for launch, `tmux send-keys -t <name>` for send, `tmux list-sessions` for list, `tmux kill-session -t <name>` for close. Use `nw-<item-id>` session name prefix to avoid collisions with user sessions. Escape special characters in commands. Handle tmux-not-running errors gracefully (return null/false). Unit test with injected shell runner.
-
-**Test plan:**
-- Unit test: `launchWorkspace` calls `tmux new-session` with correct args
-- Unit test: `sendMessage` calls `tmux send-keys` with escaped text
-- Unit test: `listWorkspaces` parses tmux session list output
-- Unit test: `closeWorkspace` calls `tmux kill-session`
-- Unit test: graceful failure when tmux is not installed
-
-Acceptance: `TmuxAdapter` implements `Multiplexer`. Unit tests verify each operation maps to the correct tmux CLI invocation. Error cases (tmux not running, session not found) return null/false gracefully. Session naming uses `nw-` prefix to avoid collisions with user sessions.
-
-Key files: `core/mux.ts`, `test/mux.test.ts`
-
----
 
 ### Feat: Auto-detect multiplexer and add --mux flag (M-MUX-3)
 
@@ -72,6 +52,7 @@ Key files: `README.md`, `core/commands/setup.ts`, `test/setup.test.ts`
 
 
 
+
 ### Feat: Explore vision, scope next iteration, and decompose into TODOs (L-VIS-4)
 
 **Priority:** Low
@@ -87,6 +68,7 @@ Key files: `TODOS.md`, `CLAUDE.md`, `README.md`, `vision.md`
 ---
 
 ## Dogfood Friction Fixes (friction decomposition, 2026-03-24)
+
 
 
 
