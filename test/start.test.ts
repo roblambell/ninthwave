@@ -18,7 +18,7 @@ vi.mock("../core/git.ts", () => ({
   createWorktree: vi.fn(),
 }));
 
-import { detectAiTool, cmdStart, launchSingleItem } from "../core/commands/start.ts";
+import { detectAiTool, cmdStart, launchSingleItem, sanitizeTitle } from "../core/commands/start.ts";
 import { parseTodos } from "../core/parser.ts";
 
 /** Create a mock Multiplexer for dependency injection (avoids vi.mock leaking). */
@@ -283,5 +283,67 @@ describe("launchSingleItem", () => {
       expect(res).not.toBeNull();
       expect(res!.worktreePath).toBe(join(worktreeDir, "todo-M-CI-1"));
     });
+  });
+});
+
+describe("sanitizeTitle", () => {
+  it("passes through normal alphanumeric titles unchanged", () => {
+    expect(sanitizeTitle("Fix the login bug")).toBe("Fix the login bug");
+  });
+
+  it("preserves hyphens and underscores", () => {
+    expect(sanitizeTitle("my-feature_name")).toBe("my-feature_name");
+  });
+
+  it("replaces double quotes", () => {
+    expect(sanitizeTitle('title with "quotes"')).toBe("title with _quotes_");
+  });
+
+  it("replaces backslashes", () => {
+    expect(sanitizeTitle("title with \\backslash")).toBe("title with _backslash");
+  });
+
+  it("replaces semicolons", () => {
+    expect(sanitizeTitle("title; rm -rf /")).toBe("title_ rm -rf _");
+  });
+
+  it("replaces pipe characters", () => {
+    expect(sanitizeTitle("title | cat /etc/passwd")).toBe("title _ cat _etc_passwd");
+  });
+
+  it("replaces ampersands", () => {
+    expect(sanitizeTitle("title && echo pwned")).toBe("title __ echo pwned");
+  });
+
+  it("replaces newlines", () => {
+    expect(sanitizeTitle("title\ninjected")).toBe("title_injected");
+  });
+
+  it("replaces backticks (command substitution)", () => {
+    expect(sanitizeTitle("title `whoami`")).toBe("title _whoami_");
+  });
+
+  it("replaces dollar signs (variable expansion)", () => {
+    expect(sanitizeTitle("title $HOME")).toBe("title _HOME");
+  });
+
+  it("replaces single quotes", () => {
+    expect(sanitizeTitle("title 'injected'")).toBe("title _injected_");
+  });
+
+  it("replaces parentheses (subshells)", () => {
+    expect(sanitizeTitle("title $(whoami)")).toBe("title __whoami_");
+  });
+
+  it("handles empty title", () => {
+    expect(sanitizeTitle("")).toBe("");
+  });
+
+  it("handles title that is entirely metacharacters", () => {
+    expect(sanitizeTitle(";|&$`\"'\\")).toBe("________");
+  });
+
+  it("handles mixed safe and unsafe characters", () => {
+    expect(sanitizeTitle("Fix bug #123 (critical)")).toBe("Fix bug _123 _critical_");
   });
 });

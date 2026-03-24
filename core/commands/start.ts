@@ -28,6 +28,14 @@ import {
 import { cmdConflicts } from "./conflicts.ts";
 import type { TodoItem } from "../types.ts";
 
+/**
+ * Sanitize a title for safe shell interpolation.
+ * Uses an allowlist: only [a-zA-Z0-9 _-] are kept; everything else becomes _.
+ */
+export function sanitizeTitle(title: string): string {
+  return title.replace(/[^a-zA-Z0-9 _-]/g, "_");
+}
+
 /** Result of launching a single TODO item. */
 export interface LaunchResult {
   worktreePath: string;
@@ -238,8 +246,8 @@ export function launchSingleItem(
     partition = allocatePartition(partitionDir, item.id);
   }
 
-  // Sanitize title for shell safety
-  const safeTitle = item.title.replace(/[`$']/g, "_");
+  // Sanitize title for shell safety (allowlist: only keep safe characters)
+  const safeTitle = sanitizeTitle(item.title);
   info(
     `Launching ${aiTool} session for ${item.id}: ${safeTitle} (partition ${partition})`,
   );
