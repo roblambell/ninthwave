@@ -18,6 +18,7 @@
 
 
 
+
 ### Docs: Update /work skill to use orchestrate command (M-ORCH-9)
 
 **Priority:** Medium
@@ -32,21 +33,8 @@ Key files: `skills/work/SKILL.md`
 
 ---
 
-### Docs: Update worker agent for daemon-driven orchestration (M-ORCH-10)
-
-**Priority:** Medium
-**Source:** Orchestrator pivot
-**Depends on:** H-ORCH-8
-
-Update `agents/todo-worker.md` to reference the new `[ORCHESTRATOR]` message format from the deterministic daemon. Clarify that the orchestrator is now a TypeScript process (not an LLM). Adjust the "Idle" phase to note that the daemon handles all post-PR lifecycle automatically (merge, rebase, cleanup). Workers still need to respond to CI fix requests and review feedback sent via `cmux send`.
-
-Acceptance: Worker agent prompt accurately describes the daemon-driven workflow. No references to LLM orchestrator polling. Message format examples match what the daemon sends.
-
-Key files: `agents/todo-worker.md`
-
----
-
 ## Vision (recurring, 2026-03-23)
+
 
 
 
