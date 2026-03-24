@@ -181,6 +181,7 @@ if (!command) {
 const needsTodos = ![
   "repos",
   "partitions",
+  "status",
   "close-workspaces",
   "close-workspace",
   "clean",

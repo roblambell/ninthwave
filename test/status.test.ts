@@ -12,10 +12,15 @@ import {
   formatSummary,
   formatStatusTable,
   cmdStatusWatch,
+  cmdStatus,
+  getTerminalWidth,
   pad,
   type StatusItem,
   type ItemState,
 } from "../core/commands/status.ts";
+import { mkdtempSync, mkdirSync, writeFileSync, rmSync } from "fs";
+import { join } from "path";
+import { tmpdir } from "os";
 
 // Strip ANSI escape codes for content assertions
 function stripAnsi(s: string): string {
@@ -295,6 +300,13 @@ describe("formatStatusTable", () => {
     expect(output).toContain("No active items");
   });
 
+  it("shows getting-started hints when empty", () => {
+    const output = stripAnsi(formatStatusTable([]));
+    expect(output).toContain("To get started:");
+    expect(output).toContain("ninthwave list --ready");
+    expect(output).toContain("ninthwave start <ID>");
+  });
+
   it("includes batch progress line", () => {
     const items = [
       makeItem("A-1", "merged"),
@@ -361,6 +373,173 @@ describe("formatStatusTable", () => {
     // Should have separator lines (using ─)
     const sepLines = output.split("\n").filter((l) => l.includes("─"));
     expect(sepLines.length).toBeGreaterThanOrEqual(2);
+  });
+});
+
+// ─── getTerminalWidth ────────────────────────────────────────────────────────
+
+describe("getTerminalWidth", () => {
+  it("returns a positive number", () => {
+    const width = getTerminalWidth();
+    expect(width).toBeGreaterThan(0);
+  });
+
+  it("returns 80 when process.stdout.columns is undefined", () => {
+    const original = Object.getOwnPropertyDescriptor(
+      process.stdout,
+      "columns",
+    );
+    Object.defineProperty(process.stdout, "columns", {
+      value: undefined,
+      configurable: true,
+    });
+    try {
+      expect(getTerminalWidth()).toBe(80);
+    } finally {
+      if (original) {
+        Object.defineProperty(process.stdout, "columns", original);
+      } else {
+        delete (process.stdout as Record<string, unknown>)["columns"];
+      }
+    }
+  });
+
+  it("returns 80 when process.stdout.columns is 0", () => {
+    const original = Object.getOwnPropertyDescriptor(
+      process.stdout,
+      "columns",
+    );
+    Object.defineProperty(process.stdout, "columns", {
+      value: 0,
+      configurable: true,
+    });
+    try {
+      expect(getTerminalWidth()).toBe(80);
+    } finally {
+      if (original) {
+        Object.defineProperty(process.stdout, "columns", original);
+      } else {
+        delete (process.stdout as Record<string, unknown>)["columns"];
+      }
+    }
+  });
+
+  it("returns actual column count when available", () => {
+    const original = Object.getOwnPropertyDescriptor(
+      process.stdout,
+      "columns",
+    );
+    Object.defineProperty(process.stdout, "columns", {
+      value: 120,
+      configurable: true,
+    });
+    try {
+      expect(getTerminalWidth()).toBe(120);
+    } finally {
+      if (original) {
+        Object.defineProperty(process.stdout, "columns", original);
+      } else {
+        delete (process.stdout as Record<string, unknown>)["columns"];
+      }
+    }
+  });
+});
+
+// ─── cmdStatus (integration) ────────────────────────────────────────────────
+
+describe("cmdStatus", () => {
+  let logSpy: ReturnType<typeof vi.spyOn>;
+  let logOutput: string[];
+
+  function setupLogSpy() {
+    logOutput = [];
+    logSpy = vi
+      .spyOn(console, "log")
+      .mockImplementation((...args: unknown[]) => {
+        logOutput.push(args.map(String).join(" "));
+      });
+  }
+
+  function teardownLogSpy() {
+    logSpy.mockRestore();
+  }
+
+  function allOutput(): string {
+    return stripAnsi(logOutput.join("\n"));
+  }
+
+  it("shows 'No active items' when worktreeDir does not exist", () => {
+    setupLogSpy();
+    try {
+      cmdStatus("/nonexistent/path/.worktrees", "/nonexistent/path");
+      const output = allOutput();
+      expect(output).toContain("No active items");
+      expect(output).toContain("ninthwave status");
+    } finally {
+      teardownLogSpy();
+    }
+  });
+
+  it("shows worktreeDir path when it does not exist", () => {
+    setupLogSpy();
+    try {
+      cmdStatus(
+        "/nonexistent/path/.worktrees",
+        "/nonexistent/path",
+      );
+      const output = allOutput();
+      expect(output).toContain("/nonexistent/path/.worktrees");
+      expect(output).toContain("not found");
+    } finally {
+      teardownLogSpy();
+    }
+  });
+
+  it("shows getting-started hints when worktreeDir does not exist", () => {
+    setupLogSpy();
+    try {
+      cmdStatus("/nonexistent/path/.worktrees", "/nonexistent/path");
+      const output = allOutput();
+      expect(output).toContain("To get started:");
+      expect(output).toContain("ninthwave list --ready");
+    } finally {
+      teardownLogSpy();
+    }
+  });
+
+  it("shows 'No active items' when worktreeDir exists but has no todo-* entries", () => {
+    const tmpDir = mkdtempSync(join(tmpdir(), "nw-status-test-"));
+    const worktreeDir = join(tmpDir, ".worktrees");
+    mkdirSync(worktreeDir);
+    // Add a non-todo file to ensure it's not picked up
+    writeFileSync(join(worktreeDir, "some-other-file"), "");
+
+    setupLogSpy();
+    try {
+      cmdStatus(worktreeDir, tmpDir);
+      const output = allOutput();
+      expect(output).toContain("No active items");
+      expect(output).toContain("ninthwave status");
+    } finally {
+      teardownLogSpy();
+      rmSync(tmpDir, { recursive: true, force: true });
+    }
+  });
+
+  it("shows getting-started hints when worktreeDir exists but is empty", () => {
+    const tmpDir = mkdtempSync(join(tmpdir(), "nw-status-test-"));
+    const worktreeDir = join(tmpDir, ".worktrees");
+    mkdirSync(worktreeDir);
+
+    setupLogSpy();
+    try {
+      cmdStatus(worktreeDir, tmpDir);
+      const output = allOutput();
+      expect(output).toContain("To get started:");
+    } finally {
+      teardownLogSpy();
+      rmSync(tmpDir, { recursive: true, force: true });
+    }
   });
 });
 

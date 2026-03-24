@@ -197,6 +197,10 @@ export function formatStatusTable(
 
   if (items.length === 0) {
     lines.push(`  ${DIM}No active items${RESET}`);
+    lines.push("");
+    lines.push(`  ${DIM}To get started:${RESET}`);
+    lines.push(`    ${DIM}ninthwave list --ready${RESET}     ${DIM}Show available TODOs${RESET}`);
+    lines.push(`    ${DIM}ninthwave start <ID>${RESET}       ${DIM}Start working on an item${RESET}`);
     return lines.join("\n");
   }
 
@@ -368,6 +372,22 @@ function getWorktreeAge(wtDir: string): number {
   }
 }
 
+// ─── Terminal width detection ─────────────────────────────────────────────────
+
+/**
+ * Get terminal width, defaulting to 80 for non-TTY contexts.
+ * Gracefully handles environments where process.stdout.columns is undefined.
+ */
+export function getTerminalWidth(): number {
+  try {
+    const cols = process.stdout.columns;
+    if (typeof cols === "number" && cols > 0) return cols;
+  } catch {
+    // non-TTY or error accessing columns
+  }
+  return 80;
+}
+
 // ─── Commands ────────────────────────────────────────────────────────────────
 
 /**
@@ -404,7 +424,9 @@ export async function cmdStatusWatch(
 
 export function cmdStatus(worktreeDir: string, projectRoot: string): void {
   if (!existsSync(worktreeDir)) {
-    console.log(formatStatusTable([]));
+    const termWidth = getTerminalWidth();
+    console.log(formatStatusTable([], termWidth));
+    console.log(`\n  ${DIM}Worktree directory: ${worktreeDir} (not found)${RESET}`);
     return;
   }
 
@@ -457,16 +479,7 @@ export function cmdStatus(worktreeDir: string, projectRoot: string): void {
     }
   }
 
-  // Determine terminal width
-  let termWidth = 80;
-  try {
-    const cols = process.stdout.columns;
-    if (cols && cols > 0) termWidth = cols;
-  } catch {
-    // default to 80
-  }
-
-  console.log(formatStatusTable(items, termWidth));
+  console.log(formatStatusTable(items, getTerminalWidth()));
 }
 
 export function cmdPartitions(partitionDir: string): void {
