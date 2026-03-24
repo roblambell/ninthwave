@@ -1192,6 +1192,42 @@ describe("buildSnapshot isMergeable", () => {
   });
 });
 
+// ── buildSnapshot "ready" status mapping (L-TST-7) ───────────────
+
+describe("buildSnapshot ready status mapping", () => {
+  function mockMux(workspaces: string = ""): Multiplexer {
+    return {
+      isAvailable: () => true,
+      launchWorkspace: () => null,
+      sendMessage: () => true,
+      readScreen: () => "",
+      listWorkspaces: () => workspaces,
+      closeWorkspace: () => true,
+    };
+  }
+
+  it("sets ciStatus pass, reviewDecision APPROVED, and isMergeable true when checkPr returns ready", () => {
+    const orch = new Orchestrator({ wipLimit: 2 });
+    orch.addItem(makeTodo("R-1-1"));
+    orch.setState("R-1-1", "ci-pending");
+
+    // checkPr returns "ready" status with MERGEABLE 4th field
+    const checkPr = () => "R-1-1\t42\tready\tMERGEABLE";
+    const getLastCommitTime = vi.fn(() => null);
+    const mux = mockMux();
+
+    const snapshot = buildSnapshot(orch, "/tmp/project", "/tmp/project/.worktrees", mux, getLastCommitTime, checkPr);
+
+    const snapItem = snapshot.items.find((i) => i.id === "R-1-1");
+    expect(snapItem).toBeDefined();
+    expect(snapItem!.ciStatus).toBe("pass");
+    expect(snapItem!.reviewDecision).toBe("APPROVED");
+    expect(snapItem!.isMergeable).toBe(true);
+    expect(snapItem!.prState).toBe("open");
+    expect(snapItem!.prNumber).toBe(42);
+  });
+});
+
 // ── Status pane management ────────────────────────────────────────
 
 describe("launchStatusPane", () => {
