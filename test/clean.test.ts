@@ -342,12 +342,12 @@ describe("cmdClean", () => {
     expect(mockMux.closeWorkspace).toHaveBeenCalledWith("workspace:1");
   });
 
-  it("closes all workspaces when no target ID is specified", () => {
+  it("closes workspaces only for merged items when no target ID is specified", () => {
     const mockMux = createMockMux();
     const repo = setupTempRepo();
     const worktreeDir = join(repo, ".worktrees");
-    mkdirSync(join(worktreeDir, "todo-H-1"), { recursive: true });
-    mkdirSync(join(worktreeDir, "todo-H-2"), { recursive: true });
+    mkdirSync(join(worktreeDir, "todo-H-CI-1"), { recursive: true });
+    mkdirSync(join(worktreeDir, "todo-H-CI-2"), { recursive: true });
 
     mockMux.listWorkspaces.mockReturnValue(
       "workspace:1 TODO H-CI-1 first\nworkspace:2 TODO H-CI-2 second",
@@ -356,8 +356,55 @@ describe("cmdClean", () => {
 
     captureOutput(() => cmdClean([], worktreeDir, repo, mockMux));
 
-    // Should close all todo workspaces when no target is specified
+    // Should close workspaces for both items since both are merged
     expect(mockMux.closeWorkspace).toHaveBeenCalledTimes(2);
+  });
+
+  it("does not close workspaces for non-merged items (broad cleanup)", () => {
+    const mockMux = createMockMux();
+    const repo = setupTempRepo();
+    const worktreeDir = join(repo, ".worktrees");
+    // Create worktrees for two items: H-CI-1 (merged) and H-CI-2 (not merged)
+    mkdirSync(join(worktreeDir, "todo-H-CI-1"), { recursive: true });
+    mkdirSync(join(worktreeDir, "todo-H-CI-2"), { recursive: true });
+
+    mockMux.listWorkspaces.mockReturnValue(
+      "workspace:1 TODO H-CI-1 first\nworkspace:2 TODO H-CI-2 second",
+    );
+    // H-CI-1 is merged, H-CI-2 is not
+    (git.isBranchMerged as Mock).mockImplementation(
+      (_repo: string, branch: string) => branch === "todo/H-CI-1",
+    );
+
+    captureOutput(() => cmdClean([], worktreeDir, repo, mockMux));
+
+    // Should only close workspace:1 (H-CI-1 is merged), NOT workspace:2
+    expect(mockMux.closeWorkspace).toHaveBeenCalledTimes(1);
+    expect(mockMux.closeWorkspace).toHaveBeenCalledWith("workspace:1");
+    // Worktree removal should only happen for the merged item
+    expect(git.removeWorktree as Mock).toHaveBeenCalledTimes(1);
+  });
+
+  it("preserves active workers for non-merged items", () => {
+    const mockMux = createMockMux();
+    const repo = setupTempRepo();
+    const worktreeDir = join(repo, ".worktrees");
+    // Three items: all have active workspaces, none are merged
+    mkdirSync(join(worktreeDir, "todo-H-CI-1"), { recursive: true });
+    mkdirSync(join(worktreeDir, "todo-H-CI-2"), { recursive: true });
+    mkdirSync(join(worktreeDir, "todo-H-CI-3"), { recursive: true });
+
+    mockMux.listWorkspaces.mockReturnValue(
+      "workspace:1 TODO H-CI-1 first\nworkspace:2 TODO H-CI-2 second\nworkspace:3 TODO H-CI-3 third",
+    );
+    (git.isBranchMerged as Mock).mockReturnValue(false);
+
+    captureOutput(() => cmdClean([], worktreeDir, repo, mockMux));
+
+    // No workspaces should be closed — all items are still active
+    expect(mockMux.closeWorkspace).not.toHaveBeenCalled();
+    // No worktrees should be removed
+    expect(git.removeWorktree as Mock).not.toHaveBeenCalled();
   });
 
   it("logs warning when removeWorktree fails in cleanItem", () => {

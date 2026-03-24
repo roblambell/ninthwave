@@ -118,8 +118,11 @@ function isMerged(
 }
 
 /**
- * Clean up worktrees. Closes workspaces first, then removes merged worktrees.
- * If targetId is provided, removes only that specific worktree (merged or not).
+ * Clean up worktrees and their associated workspaces.
+ * - Without targetId: removes merged worktrees and closes only their workspaces.
+ *   Active workers for non-merged items are preserved.
+ * - With targetId: closes the specific workspace and removes the worktree
+ *   regardless of merge status.
  */
 export function cmdClean(
   args: string[],
@@ -129,11 +132,11 @@ export function cmdClean(
 ): void {
   const targetId = args[0] ?? "";
 
-  // Close workspaces — scoped to target when cleaning a specific item
+  // Close workspaces — scoped to target when cleaning a specific item.
+  // For broad cleanup (no targetId), workspace closing is deferred until
+  // we know which items are merged, to preserve active workers.
   if (targetId) {
     cmdCloseWorkspace(targetId, mux);
-  } else {
-    cmdCloseWorkspaces(mux);
   }
 
   if (!existsSync(worktreeDir)) {
@@ -144,6 +147,7 @@ export function cmdClean(
   const partitionDir = join(worktreeDir, ".partitions");
   const crossRepoIndex = join(worktreeDir, ".cross-repo-index");
   let cleaned = 0;
+  const mergedIds = new Set<string>();
 
   // Helper to clean a single worktree item
   function cleanItem(id: string, repoRoot: string, wtDir: string): boolean {
@@ -153,6 +157,7 @@ export function cmdClean(
     const merged = isMerged(repoRoot, branch);
 
     if (merged || targetId) {
+      if (merged && !targetId) mergedIds.add(id);
       info(`Removing worktree for ${id} from ${basename(repoRoot)}`);
       try {
         removeWorktree(repoRoot, wtDir, true);
@@ -212,6 +217,12 @@ export function cmdClean(
         cleaned++;
       }
     }
+  }
+
+  // For broad cleanup, close workspaces only for confirmed-merged items.
+  // Active workers for non-merged items are preserved.
+  if (!targetId) {
+    closeWorkspacesForIds(mergedIds, mux);
   }
 
   console.log(`${GREEN}Cleaned ${cleaned} worktree(s)${RESET}`);
