@@ -99,24 +99,82 @@ Key files: `core/cross-repo.ts`, `test/cross-repo.test.ts`
 
 ## Worker Reliability (eng-review-workers, 2026-03-24)
 
-### Feat: Add time-based heartbeat for stuck worker detection (H-WRK-2)
+
+### Fix: Add delivery verification and retry to TmuxAdapter sendMessage (H-WRK-3)
 
 **Priority:** High
-**Source:** Eng review W-15 — `docs/reviews/eng-review-workers.md`
+**Source:** Eng review W-25 — `docs/reviews/eng-review-workers.md`
 **Depends on:** None
 
-The current liveness check is binary (workspace exists = alive). A worker that launches but hangs indefinitely is never detected as stuck. Add a time-based heartbeat: if `lastCommitTime` is null and the worker has been in `implementing` state for longer than a configurable timeout (e.g., 30 minutes), or if `lastCommitTime` is stale beyond a longer timeout (e.g., 60 minutes), transition to `stuck`. The `lastCommitTime` field is already tracked in `buildSnapshot` but not used in transition logic.
+The tmux `sendMessage` uses `send-keys -l` without delivery verification or retry, while cmux has paste-buffer + verify + exponential backoff. Extract the verification logic from `send-message.ts` into a shared utility and wire it into `TmuxAdapter.sendMessage`. Alternatively, have `TmuxAdapter` use tmux's `load-buffer` + `paste-buffer` approach (analogous to cmux's atomic paste) with verification.
 
 **Test plan:**
-- Unit test: worker with no commits after launch timeout transitions to stuck
-- Unit test: worker with stale commit beyond activity timeout transitions to stuck
-- Unit test: worker with recent commits stays in implementing
-- Unit test: timeout values are configurable via `OrchestratorConfig`
-- Edge case: worker that just launched (within grace period) is not marked stuck
+- Unit test: TmuxAdapter sendMessage verifies delivery via readScreen
+- Unit test: TmuxAdapter retries on failed delivery
+- Unit test: TmuxAdapter falls back gracefully when verification fails
+- Integration: message delivery works end-to-end on tmux
 
-Acceptance: Workers that hang without making commits are detected as stuck after a configurable timeout. `OrchestratorConfig` has `launchTimeoutMs` and `activityTimeoutMs` fields. State machine uses `lastCommitTime` and `lastTransition` timestamps for stuck detection. Tests pass. No regression.
+Acceptance: `TmuxAdapter.sendMessage` includes delivery verification and retry with exponential backoff. Tmux and cmux paths have equivalent delivery guarantees. Tests cover retry and verification scenarios. No regression.
 
-Key files: `core/orchestrator.ts`, `core/commands/orchestrate.ts`, `test/orchestrator.test.ts`
+Key files: `core/mux.ts`, `core/send-message.ts`, `test/mux.test.ts`
+
+---
+
+### Fix: Log warnings on fetch/merge failures during worktree creation (M-WRK-4)
+
+**Priority:** Medium
+**Source:** Eng review W-3 — `docs/reviews/eng-review-workers.md`
+**Depends on:** None
+
+`launchSingleItem` in `core/commands/start.ts` (lines 200-208) silently catches `fetchOrigin` and `ffMerge` failures. A network failure means the worktree is created from stale local `main`, leading to merge conflicts later. Replace bare `catch {}` with `catch { warn(...) }` so users see that the worktree may be based on outdated code.
+
+**Test plan:**
+- Unit test: fetch failure logs a warning but continues
+- Unit test: ff-merge failure logs a warning but continues
+- Verify warning message includes actionable context
+
+Acceptance: `fetchOrigin` and `ffMerge` failures log warnings with `warn()`. Worktree creation still proceeds. Tests verify warnings are emitted. No regression.
+
+Key files: `core/commands/start.ts`, `test/start.test.ts`
+
+---
+
+### Fix: TmuxAdapter splitPane returns correct pane ID (M-WRK-5)
+
+**Priority:** Medium
+**Source:** Eng review W-9 — `docs/reviews/eng-review-workers.md`
+**Depends on:** None
+
+`TmuxAdapter.splitPane` (mux.ts lines 92-108) runs `tmux split-window` then `tmux display-message -p '#{pane_id}'` to get the new pane's ID. But `display-message` returns the active pane's ID, which may not be the newly created pane. Fix by using `tmux split-window -P -F '#{pane_id}'` which prints the new pane's ID as output.
+
+**Test plan:**
+- Unit test: splitPane returns the pane ID from split-window output
+- Unit test: splitPane returns fallback when -P flag output is empty
+- Verify via injected ShellRunner mock
+
+Acceptance: `TmuxAdapter.splitPane` uses `split-window -P -F '#{pane_id}'` and returns the correct pane ID. Tests verify correct pane ID is returned. No regression.
+
+Key files: `core/mux.ts`, `test/mux.test.ts`
+
+---
+
+### Fix: Log cleanup failures instead of silently swallowing (M-WRK-6)
+
+**Priority:** Medium
+**Source:** Eng review W-19 — `docs/reviews/eng-review-workers.md`
+**Depends on:** None
+
+`cleanItem` in `core/commands/clean.ts` (lines 157-175) has multiple `try/catch` blocks that silently ignore errors from `removeWorktree`, `deleteBranch`, and `deleteRemoteBranch`. Replace bare `catch {}` with `catch (e) { warn(...) }` so cleanup failures are visible. The cleanup should still continue on error (resilient), but should not be silent.
+
+**Test plan:**
+- Unit test: removeWorktree failure logs warning and continues
+- Unit test: deleteBranch failure logs warning and continues
+- Unit test: deleteRemoteBranch failure logs warning and continues
+- Verify cleanup completes even when all operations fail
+
+Acceptance: All `catch {}` blocks in `cleanItem` and `cleanSingleWorktree` log warnings. Cleanup still completes on failure (resilient behavior preserved). Tests verify warnings. No regression.
+
+Key files: `core/commands/clean.ts`, `test/clean.test.ts`
 
 ---
 
