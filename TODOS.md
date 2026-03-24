@@ -2,31 +2,6 @@
 
 <!-- Format guide: see $(cat .ninthwave/dir)/core/docs/todos-format.md -->
 
-## Operational Maturity (vision exploration, 2026-03-24)
-
-
-
-### Feat: Automatic worker retry on crash or OOM (M-RET-1)
-
-**Priority:** Medium
-**Source:** Vision — resilience improvement for production use
-**Depends on:** H-WIP-1
-
-When a worker transitions to "stuck" due to heartbeat timeout or workspace death, automatically retry once before marking as permanently stuck. Clean up the failed worktree, create a fresh one, and relaunch the worker. Add `retryCount` to `OrchestratorItem` and `maxRetries` to `OrchestratorConfig` (default: 1). Log retries as structured events. Only mark as permanently stuck after exhausting retries.
-
-**Test plan:**
-- Unit test: stuck worker triggers retry transition when retryCount < maxRetries
-- Unit test: retry creates fresh worktree and relaunches worker
-- Unit test: permanently stuck after maxRetries exhausted
-- Unit test: retryCount is tracked in item metrics for analytics
-- Edge case: worker crashes during retry (second attempt counts correctly)
-
-Acceptance: Workers that crash are retried once automatically with a fresh worktree. Retry count is tracked per item and reflected in analytics. Items are permanently stuck only after exhausting retries. Retries are logged as structured events. Tests pass. No regression in orchestrator state machine tests.
-
-Key files: `core/orchestrator.ts`, `core/commands/orchestrate.ts`, `core/commands/clean.ts`
-
----
-
 ## Data Pipeline Hardening (eng review M-ENG-3, 2026-03-24)
 
 
