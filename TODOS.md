@@ -7,6 +7,7 @@
 
 
 
+
 ### Feat: Add bundle directory resolution module (H-BREW-1)
 
 **Priority:** High
@@ -97,19 +98,6 @@ Key files: `README.md`, `CONTRIBUTING.md`, `setup` (delete), `remote-install.sh`
 
 
 
-### Feat: Add prMerge and prComment to GitHub module (H-ORCH-2)
-
-**Priority:** High
-**Source:** Orchestrator pivot
-**Depends on:** None
-
-Add `prMerge(repoRoot, prNumber, method)` that runs `gh pr merge <N> --squash --delete-branch` and returns success boolean. Add `prComment(repoRoot, prNumber, body)` that runs `gh pr comment <N> --body <body>`. These are the orchestrator's primary GitHub write operations — currently done ad-hoc in bash but not available as TypeScript functions.
-
-Acceptance: `prMerge` merges a PR and returns true on success, false on failure. `prComment` posts a comment. Both are unit-tested with mocked `gh` calls. Existing `gh.ts` tests still pass.
-
-Key files: `core/gh.ts`, `test/gh.test.ts` (new)
-
----
 
 ### Refactor: Extract launchSingleItem from start command (H-ORCH-4)
 
@@ -196,6 +184,7 @@ Key files: `agents/todo-worker.md`
 ---
 
 ## Vision (recurring, 2026-03-23)
+
 
 
 
