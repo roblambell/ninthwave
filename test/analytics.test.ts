@@ -6,9 +6,11 @@ import {
   collectRunMetrics,
   writeRunMetrics,
   commitAnalyticsFiles,
+  parseCostSummary,
   type RunMetrics,
   type AnalyticsIO,
   type AnalyticsCommitDeps,
+  type CostSummary,
 } from "../core/analytics.ts";
 import {
   loadRuns,
@@ -167,6 +169,8 @@ describe("collectRunMetrics", () => {
       state: "done",
       ciRetryCount: 0,
       tool: "cursor",
+      tokensUsed: null,
+      costUsd: null,
     });
     expect(metrics.items[1]).toEqual({
       id: "T-1-2",
@@ -174,6 +178,8 @@ describe("collectRunMetrics", () => {
       ciRetryCount: 3,
       tool: "cursor",
       prNumber: 42,
+      tokensUsed: null,
+      costUsd: null,
     });
   });
 
@@ -502,10 +508,12 @@ function makeRun(overrides: Partial<RunMetrics> = {}): RunMetrics {
     itemsFailed: 1,
     mergeStrategy: "asap",
     items: [
-      { id: "T-1-1", state: "done", ciRetryCount: 0, tool: "claude" },
-      { id: "T-1-2", state: "done", ciRetryCount: 1, tool: "claude" },
-      { id: "T-1-3", state: "stuck", ciRetryCount: 2, tool: "claude" },
+      { id: "T-1-1", state: "done", ciRetryCount: 0, tool: "claude", tokensUsed: null, costUsd: null },
+      { id: "T-1-2", state: "done", ciRetryCount: 1, tool: "claude", tokensUsed: null, costUsd: null },
+      { id: "T-1-3", state: "stuck", ciRetryCount: 2, tool: "claude", tokensUsed: null, costUsd: null },
     ],
+    totalTokensUsed: null,
+    totalCostUsd: null,
     ...overrides,
   };
 }
@@ -1029,5 +1037,492 @@ describe("orchestrateLoop analytics auto-commit", () => {
     expect(logs.some((l) => l.event === "analytics_committed")).toBe(false);
     expect(logs.some((l) => l.event === "analytics_commit_skipped")).toBe(false);
     expect(logs.some((l) => l.event === "analytics_commit_error")).toBe(false);
+  });
+});
+
+// ── parseCostSummary ─────────────────────────────────────────────────
+
+describe("parseCostSummary", () => {
+  it("parses Claude Code exit summary with tokens and cost", () => {
+    const text = `
+Total tokens: 42,567
+Total cost: $3.45
+Total duration: 5m 23s
+    `;
+    const result = parseCostSummary(text);
+    expect(result.tokensUsed).toBe(42567);
+    expect(result.costUsd).toBe(3.45);
+  });
+
+  it("parses cost without dollar sign prefix", () => {
+    const text = "cost: 1.23";
+    const result = parseCostSummary(text);
+    expect(result.costUsd).toBe(1.23);
+  });
+
+  it("parses tokens without commas", () => {
+    const text = "Tokens: 12345";
+    const result = parseCostSummary(text);
+    expect(result.tokensUsed).toBe(12345);
+  });
+
+  it("parses tokens with = separator", () => {
+    const text = "tokens = 5,000";
+    const result = parseCostSummary(text);
+    expect(result.tokensUsed).toBe(5000);
+  });
+
+  it("parses cost with = separator", () => {
+    const text = "cost = $0.50";
+    const result = parseCostSummary(text);
+    expect(result.costUsd).toBe(0.50);
+  });
+
+  it("returns null for both fields when text has no cost info", () => {
+    const text = "Worker completed successfully. No errors.";
+    const result = parseCostSummary(text);
+    expect(result.tokensUsed).toBeNull();
+    expect(result.costUsd).toBeNull();
+  });
+
+  it("returns null for both fields on empty string", () => {
+    const result = parseCostSummary("");
+    expect(result.tokensUsed).toBeNull();
+    expect(result.costUsd).toBeNull();
+  });
+
+  it("returns null for both fields on null-like input", () => {
+    const result = parseCostSummary(undefined as unknown as string);
+    expect(result.tokensUsed).toBeNull();
+    expect(result.costUsd).toBeNull();
+  });
+
+  it("parses cost only when tokens are missing", () => {
+    const text = "Session cost: $2.10";
+    const result = parseCostSummary(text);
+    expect(result.tokensUsed).toBeNull();
+    expect(result.costUsd).toBe(2.10);
+  });
+
+  it("parses tokens only when cost is missing", () => {
+    const text = "Total token: 100,000";
+    const result = parseCostSummary(text);
+    expect(result.tokensUsed).toBe(100000);
+    expect(result.costUsd).toBeNull();
+  });
+
+  it("handles zero cost gracefully", () => {
+    const text = "cost: $0.00\ntokens: 100";
+    const result = parseCostSummary(text);
+    expect(result.costUsd).toBe(0);
+    expect(result.tokensUsed).toBe(100);
+  });
+
+  it("handles large token counts", () => {
+    const text = "Total tokens: 1,234,567";
+    const result = parseCostSummary(text);
+    expect(result.tokensUsed).toBe(1234567);
+  });
+});
+
+// ── collectRunMetrics with cost data ─────────────────────────────────
+
+describe("collectRunMetrics with cost data", () => {
+  const config: OrchestratorConfig = {
+    wipLimit: 4,
+    mergeStrategy: "asap",
+    maxCiRetries: 2,
+  };
+
+  it("populates per-item cost when costData is provided", () => {
+    const items: OrchestratorItem[] = [
+      {
+        id: "T-1-1",
+        todo: makeTodo("T-1-1"),
+        state: "done",
+        ciFailCount: 0,
+        lastTransition: new Date().toISOString(),
+      },
+      {
+        id: "T-1-2",
+        todo: makeTodo("T-1-2"),
+        state: "done",
+        ciFailCount: 0,
+        lastTransition: new Date().toISOString(),
+      },
+    ];
+
+    const costData = new Map<string, CostSummary>([
+      ["T-1-1", { tokensUsed: 10000, costUsd: 1.50 }],
+      ["T-1-2", { tokensUsed: 20000, costUsd: 2.50 }],
+    ]);
+
+    const metrics = collectRunMetrics(
+      items,
+      config,
+      "2026-03-24T10:00:00.000Z",
+      "2026-03-24T10:05:00.000Z",
+      "claude",
+      costData,
+    );
+
+    expect(metrics.items[0]!.tokensUsed).toBe(10000);
+    expect(metrics.items[0]!.costUsd).toBe(1.50);
+    expect(metrics.items[1]!.tokensUsed).toBe(20000);
+    expect(metrics.items[1]!.costUsd).toBe(2.50);
+    expect(metrics.totalTokensUsed).toBe(30000);
+    expect(metrics.totalCostUsd).toBe(4.00);
+  });
+
+  it("defaults to null when costData is not provided", () => {
+    const items: OrchestratorItem[] = [
+      {
+        id: "T-1-1",
+        todo: makeTodo("T-1-1"),
+        state: "done",
+        ciFailCount: 0,
+        lastTransition: new Date().toISOString(),
+      },
+    ];
+
+    const metrics = collectRunMetrics(
+      items,
+      config,
+      "2026-03-24T10:00:00.000Z",
+      "2026-03-24T10:01:00.000Z",
+      "claude",
+    );
+
+    expect(metrics.items[0]!.tokensUsed).toBeNull();
+    expect(metrics.items[0]!.costUsd).toBeNull();
+    expect(metrics.totalTokensUsed).toBeNull();
+    expect(metrics.totalCostUsd).toBeNull();
+  });
+
+  it("handles mixed cost data (some items have data, others don't)", () => {
+    const items: OrchestratorItem[] = [
+      {
+        id: "T-1-1",
+        todo: makeTodo("T-1-1"),
+        state: "done",
+        ciFailCount: 0,
+        lastTransition: new Date().toISOString(),
+      },
+      {
+        id: "T-1-2",
+        todo: makeTodo("T-1-2"),
+        state: "stuck",
+        ciFailCount: 2,
+        lastTransition: new Date().toISOString(),
+      },
+    ];
+
+    const costData = new Map<string, CostSummary>([
+      ["T-1-1", { tokensUsed: 15000, costUsd: 2.00 }],
+    ]);
+
+    const metrics = collectRunMetrics(
+      items,
+      config,
+      "2026-03-24T10:00:00.000Z",
+      "2026-03-24T10:05:00.000Z",
+      "claude",
+      costData,
+    );
+
+    expect(metrics.items[0]!.tokensUsed).toBe(15000);
+    expect(metrics.items[0]!.costUsd).toBe(2.00);
+    expect(metrics.items[1]!.tokensUsed).toBeNull();
+    expect(metrics.items[1]!.costUsd).toBeNull();
+    expect(metrics.totalTokensUsed).toBe(15000);
+    expect(metrics.totalCostUsd).toBe(2.00);
+  });
+});
+
+// ── computeSummary with cost data ────────────────────────────────────
+
+describe("computeSummary with cost data", () => {
+  it("aggregates cost across multiple runs", () => {
+    const runs: RunMetrics[] = [
+      makeRun({
+        runTimestamp: "2026-03-24T10:00:00.000Z",
+        totalTokensUsed: 50000,
+        totalCostUsd: 3.00,
+      }),
+      makeRun({
+        runTimestamp: "2026-03-25T10:00:00.000Z",
+        totalTokensUsed: 30000,
+        totalCostUsd: 2.00,
+      }),
+    ];
+
+    const summary = computeSummary(runs);
+    expect(summary.totalTokensUsed).toBe(80000);
+    expect(summary.totalCostUsd).toBe(5.00);
+  });
+
+  it("returns null totals when no run has cost data", () => {
+    const runs: RunMetrics[] = [
+      makeRun({ totalTokensUsed: null, totalCostUsd: null }),
+      makeRun({ totalTokensUsed: null, totalCostUsd: null }),
+    ];
+
+    const summary = computeSummary(runs);
+    expect(summary.totalTokensUsed).toBeNull();
+    expect(summary.totalCostUsd).toBeNull();
+  });
+
+  it("aggregates only runs that have cost data", () => {
+    const runs: RunMetrics[] = [
+      makeRun({
+        runTimestamp: "2026-03-24T10:00:00.000Z",
+        totalTokensUsed: 40000,
+        totalCostUsd: 2.50,
+      }),
+      makeRun({
+        runTimestamp: "2026-03-25T10:00:00.000Z",
+        totalTokensUsed: null,
+        totalCostUsd: null,
+      }),
+    ];
+
+    const summary = computeSummary(runs);
+    expect(summary.totalTokensUsed).toBe(40000);
+    expect(summary.totalCostUsd).toBe(2.50);
+  });
+
+  it("returns null for zero runs", () => {
+    const summary = computeSummary([]);
+    expect(summary.totalTokensUsed).toBeNull();
+    expect(summary.totalCostUsd).toBeNull();
+  });
+});
+
+// ── formatAnalytics with cost data ───────────────────────────────────
+
+describe("formatAnalytics with cost data", () => {
+  it("shows cost summary when cost data exists", () => {
+    const runs: RunMetrics[] = [
+      makeRun({
+        totalTokensUsed: 50000,
+        totalCostUsd: 3.50,
+      }),
+    ];
+    const summary = computeSummary(runs);
+    const output = formatAnalytics(summary, false).join("\n");
+
+    expect(output).toContain("Total cost");
+    expect(output).toContain("$3.50");
+    expect(output).toContain("Total tokens");
+    expect(output).toContain("50.0k");
+  });
+
+  it("hides cost summary when no cost data exists", () => {
+    const runs: RunMetrics[] = [
+      makeRun({ totalTokensUsed: null, totalCostUsd: null }),
+    ];
+    const summary = computeSummary(runs);
+    const output = formatAnalytics(summary, false).join("\n");
+
+    expect(output).not.toContain("Total cost");
+    expect(output).not.toContain("Total tokens");
+  });
+
+  it("shows Cost column in run history when any run has cost data", () => {
+    const runs: RunMetrics[] = [
+      makeRun({
+        runTimestamp: "2026-03-24T10:00:00.000Z",
+        totalTokensUsed: 10000,
+        totalCostUsd: 1.25,
+      }),
+      makeRun({
+        runTimestamp: "2026-03-25T10:00:00.000Z",
+        totalTokensUsed: null,
+        totalCostUsd: null,
+      }),
+    ];
+    const summary = computeSummary(runs);
+    const output = formatAnalytics(summary, false).join("\n");
+
+    expect(output).toContain("Cost");
+    expect(output).toContain("$1.25");
+    expect(output).toContain("—");
+  });
+
+  it("hides Cost column when no run has cost data", () => {
+    const runs: RunMetrics[] = [
+      makeRun({ totalTokensUsed: null, totalCostUsd: null }),
+    ];
+    const summary = computeSummary(runs);
+    const lines = formatAnalytics(summary, false);
+    const headerLine = lines.find((l) => l.includes("Timestamp") && l.includes("Duration"));
+
+    expect(headerLine).not.toContain("Cost");
+  });
+});
+
+// ── orchestrateLoop captures cost before cleanup ─────────────────────
+
+describe("orchestrateLoop cost capture", () => {
+  it("captures cost data from worker screen before cleanup", async () => {
+    const orch = new Orchestrator({ wipLimit: 2, mergeStrategy: "asap" });
+    orch.addItem(makeTodo("T-1-1"));
+
+    let cycle = 0;
+    const io = mockAnalyticsIO();
+    const logs: LogEntry[] = [];
+
+    // Flow: launch → implementing → pr-open → ci-pending
+    // Then PR detected as merged externally → clean action fires (triggers cost capture)
+    const buildSnapshot = (): PollSnapshot => {
+      cycle++;
+      switch (cycle) {
+        case 1:
+          return { items: [], readyIds: ["T-1-1"] };
+        case 2:
+          return { items: [{ id: "T-1-1", workerAlive: true }], readyIds: [] };
+        case 3:
+          return {
+            items: [{ id: "T-1-1", prNumber: 1, prState: "open", ciStatus: "pending" }],
+            readyIds: [],
+          };
+        case 4:
+          return {
+            items: [{ id: "T-1-1", prNumber: 1, prState: "merged" }],
+            readyIds: [],
+          };
+        default:
+          return { items: [], readyIds: [] };
+      }
+    };
+
+    const deps: OrchestrateLoopDeps = {
+      buildSnapshot,
+      sleep: () => Promise.resolve(),
+      log: (entry) => logs.push(entry),
+      actionDeps: mockActionDeps(),
+      analyticsIO: io,
+      readScreen: () => "Total tokens: 25,000\nTotal cost: $1.75\n",
+    };
+
+    const config: OrchestrateLoopConfig = {
+      analyticsDir: "/tmp/.ninthwave/analytics",
+      aiTool: "claude",
+    };
+
+    await orchestrateLoop(orch, defaultCtx, deps, config);
+
+    // Cost was captured
+    const costLog = logs.find((l) => l.event === "cost_captured");
+    expect(costLog).toBeDefined();
+    expect(costLog!.tokensUsed).toBe(25000);
+    expect(costLog!.costUsd).toBe(1.75);
+
+    // Metrics include cost data
+    const written = JSON.parse(io.writeFileSync.mock.calls[0][1]) as RunMetrics;
+    expect(written.items[0]!.tokensUsed).toBe(25000);
+    expect(written.items[0]!.costUsd).toBe(1.75);
+    expect(written.totalTokensUsed).toBe(25000);
+    expect(written.totalCostUsd).toBe(1.75);
+  });
+
+  it("handles missing cost data gracefully (readScreen returns no cost info)", async () => {
+    const orch = new Orchestrator({ wipLimit: 2, mergeStrategy: "asap" });
+    orch.addItem(makeTodo("T-1-1"));
+
+    let cycle = 0;
+    const io = mockAnalyticsIO();
+
+    const buildSnapshot = (): PollSnapshot => {
+      cycle++;
+      switch (cycle) {
+        case 1:
+          return { items: [], readyIds: ["T-1-1"] };
+        case 2:
+          return { items: [{ id: "T-1-1", workerAlive: true }], readyIds: [] };
+        case 3:
+          return {
+            items: [{ id: "T-1-1", prNumber: 1, prState: "open", ciStatus: "pending" }],
+            readyIds: [],
+          };
+        case 4:
+          return {
+            items: [{ id: "T-1-1", prNumber: 1, prState: "merged" }],
+            readyIds: [],
+          };
+        default:
+          return { items: [], readyIds: [] };
+      }
+    };
+
+    const deps: OrchestrateLoopDeps = {
+      buildSnapshot,
+      sleep: () => Promise.resolve(),
+      log: () => {},
+      actionDeps: mockActionDeps(),
+      analyticsIO: io,
+      readScreen: () => "Worker idle. Waiting for orchestrator.",
+    };
+
+    const config: OrchestrateLoopConfig = {
+      analyticsDir: "/tmp/.ninthwave/analytics",
+      aiTool: "claude",
+    };
+
+    await orchestrateLoop(orch, defaultCtx, deps, config);
+
+    // Metrics have null cost data (not 0)
+    const written = JSON.parse(io.writeFileSync.mock.calls[0][1]) as RunMetrics;
+    expect(written.items[0]!.tokensUsed).toBeNull();
+    expect(written.items[0]!.costUsd).toBeNull();
+    expect(written.totalTokensUsed).toBeNull();
+    expect(written.totalCostUsd).toBeNull();
+  });
+
+  it("handles readScreen not provided (null cost data)", async () => {
+    const orch = new Orchestrator({ wipLimit: 2, mergeStrategy: "asap" });
+    orch.addItem(makeTodo("T-1-1"));
+
+    let cycle = 0;
+    const io = mockAnalyticsIO();
+
+    const buildSnapshot = (): PollSnapshot => {
+      cycle++;
+      switch (cycle) {
+        case 1:
+          return { items: [], readyIds: ["T-1-1"] };
+        case 2:
+          return { items: [{ id: "T-1-1", workerAlive: true }], readyIds: [] };
+        case 3:
+          return {
+            items: [{ id: "T-1-1", prNumber: 1, prState: "open", ciStatus: "pass" }],
+            readyIds: [],
+          };
+        default:
+          return { items: [], readyIds: [] };
+      }
+    };
+
+    const deps: OrchestrateLoopDeps = {
+      buildSnapshot,
+      sleep: () => Promise.resolve(),
+      log: () => {},
+      actionDeps: mockActionDeps(),
+      analyticsIO: io,
+    };
+
+    const config: OrchestrateLoopConfig = {
+      analyticsDir: "/tmp/.ninthwave/analytics",
+      aiTool: "claude",
+    };
+
+    await orchestrateLoop(orch, defaultCtx, deps, config);
+
+    // Metrics have null cost data
+    const written = JSON.parse(io.writeFileSync.mock.calls[0][1]) as RunMetrics;
+    expect(written.items[0]!.tokensUsed).toBeNull();
+    expect(written.items[0]!.costUsd).toBeNull();
+    expect(written.totalTokensUsed).toBeNull();
+    expect(written.totalCostUsd).toBeNull();
   });
 });

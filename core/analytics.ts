@@ -1,6 +1,6 @@
 // Structured metrics emitter for orchestrator runs.
 // Writes a JSON file per run to .ninthwave/analytics/ with timing,
-// item counts, CI retry counts, merge strategy, and tool info.
+// item counts, CI retry counts, merge strategy, cost/token tracking, and tool info.
 
 import type { OrchestratorItem, OrchestratorConfig } from "./orchestrator.ts";
 
@@ -12,6 +12,10 @@ export interface ItemMetric {
   ciRetryCount: number;
   tool: string;
   prNumber?: number;
+  /** Total tokens used by this item's worker session. Null when cost data is unavailable. */
+  tokensUsed?: number | null;
+  /** Total cost in USD for this item's worker session. Null when cost data is unavailable. */
+  costUsd?: number | null;
 }
 
 export interface RunMetrics {
@@ -29,6 +33,56 @@ export interface RunMetrics {
   mergeStrategy: string;
   /** Per-item metrics. */
   items: ItemMetric[];
+  /** Aggregate tokens used across all items. Null when no cost data is available. */
+  totalTokensUsed: number | null;
+  /** Aggregate cost in USD across all items. Null when no cost data is available. */
+  totalCostUsd: number | null;
+}
+
+// ── Cost/token parsing ────────────────────────────────────────────────
+
+/** Parsed cost summary from a worker session's exit output. */
+export interface CostSummary {
+  tokensUsed: number | null;
+  costUsd: number | null;
+}
+
+/**
+ * Parse Claude Code's exit summary for token count and cost.
+ *
+ * Handles common output formats:
+ *   - "Total tokens: 42,567" or "Tokens: 42567"
+ *   - "Total cost: $3.45" or "Cost: $0.12"
+ *
+ * Returns null for each field that cannot be parsed.
+ * Gracefully handles empty input, malformed text, and tools
+ * that don't report cost data.
+ */
+export function parseCostSummary(text: string): CostSummary {
+  if (!text) return { tokensUsed: null, costUsd: null };
+
+  let tokensUsed: number | null = null;
+  let costUsd: number | null = null;
+
+  // Match token count: "tokens: 42,567" or "tokens: 42567"
+  const tokenMatch = text.match(/tokens?\s*[:=]\s*([\d,]+)/i);
+  if (tokenMatch) {
+    const parsed = parseInt(tokenMatch[1]!.replace(/,/g, ""), 10);
+    if (!isNaN(parsed) && parsed > 0) {
+      tokensUsed = parsed;
+    }
+  }
+
+  // Match cost: "$3.45" or "cost: $0.12" or "cost: 1.23"
+  const costMatch = text.match(/cost\s*[:=]\s*\$?\s*([\d.]+)/i);
+  if (costMatch) {
+    const parsed = parseFloat(costMatch[1]!);
+    if (!isNaN(parsed) && parsed >= 0) {
+      costUsd = parsed;
+    }
+  }
+
+  return { tokensUsed, costUsd };
 }
 
 // ── Metrics collection ────────────────────────────────────────────────
@@ -41,6 +95,7 @@ export interface RunMetrics {
  * @param startTime - ISO timestamp when the run started
  * @param endTime - ISO timestamp when the run ended
  * @param aiTool - The AI tool used for this run (e.g., "claude", "cursor")
+ * @param costData - Optional per-item cost data parsed from worker exit output
  */
 export function collectRunMetrics(
   allItems: OrchestratorItem[],
@@ -48,18 +103,35 @@ export function collectRunMetrics(
   startTime: string,
   endTime: string,
   aiTool: string,
+  costData?: Map<string, CostSummary>,
 ): RunMetrics {
   const start = new Date(startTime).getTime();
   const end = new Date(endTime).getTime();
   const wallClockMs = Math.max(0, end - start);
 
-  const items: ItemMetric[] = allItems.map((item) => ({
-    id: item.id,
-    state: item.state,
-    ciRetryCount: item.ciFailCount,
-    tool: aiTool,
-    ...(item.prNumber != null ? { prNumber: item.prNumber } : {}),
-  }));
+  const items: ItemMetric[] = allItems.map((item) => {
+    const cost = costData?.get(item.id);
+    return {
+      id: item.id,
+      state: item.state,
+      ciRetryCount: item.ciFailCount,
+      tool: aiTool,
+      ...(item.prNumber != null ? { prNumber: item.prNumber } : {}),
+      tokensUsed: cost?.tokensUsed ?? null,
+      costUsd: cost?.costUsd ?? null,
+    };
+  });
+
+  // Aggregate totals — null when no items have cost data
+  const itemsWithTokens = items.filter((i) => i.tokensUsed != null);
+  const itemsWithCost = items.filter((i) => i.costUsd != null);
+
+  const totalTokensUsed = itemsWithTokens.length > 0
+    ? itemsWithTokens.reduce((sum, i) => sum + i.tokensUsed!, 0)
+    : null;
+  const totalCostUsd = itemsWithCost.length > 0
+    ? itemsWithCost.reduce((sum, i) => sum + i.costUsd!, 0)
+    : null;
 
   return {
     runTimestamp: startTime,
@@ -69,6 +141,8 @@ export function collectRunMetrics(
     itemsFailed: allItems.filter((i) => i.state === "stuck").length,
     mergeStrategy: config.mergeStrategy,
     items,
+    totalTokensUsed,
+    totalCostUsd,
   };
 }
 
