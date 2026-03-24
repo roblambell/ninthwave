@@ -52,22 +52,320 @@ Key files: `core/orchestrator.ts`, `core/commands/orchestrate.ts`, `core/command
 
 ---
 
-### Docs: Engineering review — data pipeline (parser, analytics, webhooks, templates) (M-ENG-3)
+## Data Pipeline Hardening (eng review M-ENG-3, 2026-03-24)
+
+
+### Fix: Parser should warn on skipped items with missing IDs (M-DP-1)
 
 **Priority:** Medium
-**Source:** Vision — comprehensive architecture audit
+**Source:** Eng review M-ENG-3 finding 1.1
 **Depends on:** None
 
-Run `/plan-eng-review` on the data pipeline: TODOS.md parser (`core/parser.ts`), analytics (`core/analytics.ts`, `core/commands/analytics.ts`), webhooks (`core/webhooks.ts`), decomposition templates (`core/templates.ts`), cross-repo resolution (`core/cross-repo.ts`), and configuration (`core/config.ts`). Audit: parser robustness with malformed input, analytics data integrity, webhook failure handling, template extensibility, and cross-repo edge cases. Document findings in `docs/reviews/eng-review-data-pipeline.md`. Add TODOs for actionable findings.
+When an item in TODOS.md has no ID (e.g., `### Feat: Item with no ID`), `parseTodos` silently skips it. Add an optional `warn` callback parameter to `parseTodos` (consistent with the DI pattern) that is called when items are skipped due to missing ID, including the line number for diagnostics.
 
 **Test plan:**
-- Run `/plan-eng-review` targeting data pipeline modules
-- Verify review covers edge cases in parser (malformed TODOS.md, missing fields)
-- Verify each actionable finding has a corresponding TODO
+- Unit test: warn callback is invoked with line number when an item has no ID
+- Unit test: parsing continues correctly after warning
+- Unit test: warn is not called for valid items
 
-Acceptance: `docs/reviews/eng-review-data-pipeline.md` exists with structured findings. Every actionable finding has a corresponding TODO added to TODOS.md. Review covers: parser robustness, analytics integrity, webhook failure handling, template extensibility, and cross-repo edge cases. No code changes in this TODO — findings only.
+Acceptance: `parseTodos` accepts an optional warn callback. Callback is invoked with a descriptive message and line number when items are skipped. Existing tests continue to pass (no warn = no change in behavior). New tests cover the warning behavior.
 
-Key files: `core/parser.ts`, `core/analytics.ts`, `core/commands/analytics.ts`, `core/webhooks.ts`, `core/templates.ts`, `core/cross-repo.ts`, `core/config.ts`, `test/parser.test.ts`, `test/analytics.test.ts`, `test/webhooks.test.ts`, `test/templates.test.ts`
+Key files: `core/parser.ts`, `test/parser.test.ts`
+
+---
+
+### Fix: Parser should detect and warn on duplicate IDs (M-DP-2)
+
+**Priority:** Medium
+**Source:** Eng review M-ENG-3 finding 1.2
+**Depends on:** None
+
+If two items share the same ID, both are added to the items array. Downstream consumers using `Map(items.map(i => [i.id, i]))` silently pick the last one. Add duplicate detection during parsing: warn on the second occurrence and skip it.
+
+**Test plan:**
+- Unit test: duplicate ID triggers warning via warn callback
+- Unit test: first item is kept, duplicate is skipped
+- Unit test: parsing continues after duplicate is detected
+- Add a `duplicate_ids.md` fixture
+
+Acceptance: Duplicate IDs are detected and the duplicate is skipped with a warning. First occurrence is kept. Tests cover the duplicate detection behavior. No regression in existing parser tests.
+
+Key files: `core/parser.ts`, `test/parser.test.ts`, `test/fixtures/duplicate_ids.md`
+
+---
+
+### Refactor: Remove dead `projectRoot` variable in parseTodos (L-DP-3)
+
+**Priority:** Low
+**Source:** Eng review M-ENG-3 finding 1.3
+**Depends on:** None
+
+Line 251 of `core/parser.ts` computes `const projectRoot = join(todosFile, "..", "..")` which is never used. Remove the dead variable.
+
+Acceptance: Dead variable is removed. No behavioral change. Tests pass.
+
+Key files: `core/parser.ts`
+
+---
+
+### Fix: Title regex stripping is too greedy after ID pattern (L-DP-4)
+
+**Priority:** Low
+**Source:** Eng review M-ENG-3 finding 1.4
+**Depends on:** None
+
+The title-cleaning regex `/ \([A-Z]*-[A-Za-z0-9]*-[0-9]*.*/` uses `.*` after the ID pattern, which strips everything after the first ID-like parenthetical. For example, `### Feat: Migration (M-DB-1) (phase 2)` produces `Feat: Migration` instead of `Feat: Migration (phase 2)`. Make the regex match only the ID parenthetical and known suffixes.
+
+**Test plan:**
+- Unit test: title with ID followed by extra parentheticals preserves the extras
+- Unit test: existing title extraction still works for standard format
+
+Acceptance: Title extraction preserves non-ID parenthetical content. Existing title tests continue to pass. New test covers the edge case.
+
+Key files: `core/parser.ts`, `test/parser.test.ts`
+
+---
+
+### Fix: Parser should strip UTF-8 BOM from TODOS.md (L-DP-5)
+
+**Priority:** Low
+**Source:** Eng review M-ENG-3 finding 1.5
+**Depends on:** None
+
+If TODOS.md starts with a UTF-8 BOM (`\uFEFF`), the first `## ` header check fails because the BOM character precedes it. Strip BOM from content at the start of `parseTodos`.
+
+**Test plan:**
+- Unit test: TODOS.md with BOM prefix parses correctly
+- Unit test: TODOS.md without BOM is unaffected
+
+Acceptance: BOM is stripped before parsing. Tests pass with both BOM and non-BOM input.
+
+Key files: `core/parser.ts`, `test/parser.test.ts`
+
+---
+
+### Fix: Tighten parseCostSummary regex to avoid false positives (L-DP-6)
+
+**Priority:** Low
+**Source:** Eng review M-ENG-3 finding 2.1
+**Depends on:** None
+
+The token-matching regex `tokens?\s*[:=]\s*([\d,]+)` can match false positives like "CSRF token: 12345". Anchor the match more tightly — require "total tokens" or a more specific prefix to reduce false positives.
+
+**Test plan:**
+- Unit test: "CSRF token: 12345" does not produce a token count
+- Unit test: "Total tokens: 42,567" still matches correctly
+- Unit test: existing cost parsing tests still pass
+
+Acceptance: False positive cases are rejected. Legitimate cost summaries are still parsed correctly. Tests cover both cases.
+
+Key files: `core/analytics.ts`, `test/analytics.test.ts`
+
+---
+
+### Fix: commitAnalyticsFiles should unstage on dirty_index (L-DP-7)
+
+**Priority:** Low
+**Source:** Eng review M-ENG-3 finding 2.2
+**Depends on:** None
+
+When `commitAnalyticsFiles` detects non-analytics staged files and returns `dirty_index`, it leaves the analytics files staged. Add an unstage step (via an injectable `gitReset` dep) before returning `dirty_index`.
+
+**Test plan:**
+- Unit test: analytics files are unstaged when dirty_index is returned
+- Unit test: existing commit behavior unchanged for clean index
+
+Acceptance: Analytics files are unstaged when returning `dirty_index`. Existing tests pass. New test verifies the unstage behavior.
+
+Key files: `core/analytics.ts`, `test/analytics.test.ts`
+
+---
+
+### Fix: Analytics loadRuns should validate JSON structure and warn on corrupt files (L-DP-8)
+
+**Priority:** Low
+**Source:** Eng review M-ENG-3 findings 2.3 and 3.2
+**Depends on:** None
+
+`loadRuns` does minimal validation (only checks `runTimestamp` and `wallClockMs`) and silently skips corrupt files. Add structural validation (items array exists, each item has id and state) and an optional warn callback for corrupt/skipped files.
+
+**Test plan:**
+- Unit test: file with valid timestamp but missing items array is skipped with warning
+- Unit test: file with malformed item entries is skipped with warning
+- Unit test: valid files are loaded as before
+
+Acceptance: Corrupt analytics files are skipped with a diagnostic warning. Valid files load normally. Tests cover corrupt file scenarios.
+
+Key files: `core/commands/analytics.ts`, `test/analytics.test.ts`
+
+---
+
+### Fix: Webhook fireWebhook should have a fetch timeout (M-DP-9)
+
+**Priority:** Medium
+**Source:** Eng review M-ENG-3 finding 4.1
+**Depends on:** None
+
+`fireWebhook` calls fetch without a timeout. If the webhook endpoint hangs, the promise stays pending indefinitely, accumulating resources. Add an `AbortController` with a 10-second timeout to the fetch call.
+
+**Test plan:**
+- Unit test: fetch that exceeds timeout is aborted and error is logged
+- Unit test: fast responses work normally
+- Unit test: existing webhook tests pass
+
+Acceptance: Fetch calls have a 10-second timeout via AbortController. Timeout triggers abort and logs an error. No change to behavior for fast responses. Tests cover timeout scenario.
+
+Key files: `core/webhooks.ts`, `test/webhooks.test.ts`
+
+---
+
+### Feat: Webhook rate limiting / debounce for rapid events (L-DP-10)
+
+**Priority:** Low
+**Source:** Eng review M-ENG-3 finding 4.2
+**Depends on:** None
+
+Rapid orchestration events can fire multiple webhooks per second, exceeding Slack/Discord rate limits. Add a simple debounce window (e.g., 2 seconds) to `createWebhookNotifier` that coalesces rapid events into batched payloads.
+
+**Test plan:**
+- Unit test: rapid events within window are coalesced into one webhook
+- Unit test: events outside window are sent individually
+- Unit test: all event data is preserved in coalesced payload
+
+Acceptance: Rapid webhook events are debounced. Coalesced payloads contain all event data. Single events are sent immediately after the debounce window. Tests cover both scenarios.
+
+Key files: `core/webhooks.ts`, `test/webhooks.test.ts`
+
+---
+
+### Fix: Validate webhook URL format on resolve (L-DP-11)
+
+**Priority:** Low
+**Source:** Eng review M-ENG-3 finding 4.3
+**Depends on:** None
+
+`resolveWebhookUrl` returns raw strings from env or config without URL validation. Invalid URLs fail at fetch time with unclear errors. Add URL format validation using `new URL()` and return null (with warning) for invalid URLs.
+
+**Test plan:**
+- Unit test: invalid URL string returns null
+- Unit test: valid HTTP/HTTPS URLs pass validation
+- Unit test: existing tests pass
+
+Acceptance: Invalid URLs are caught at resolve time with a descriptive warning. Valid URLs work as before. Tests cover invalid URL scenarios.
+
+Key files: `core/webhooks.ts`, `test/webhooks.test.ts`
+
+---
+
+### Refactor: Pre-compile template keyword regexes at load time (L-DP-12)
+
+**Priority:** Low
+**Source:** Eng review M-ENG-3 finding 5.1
+**Depends on:** None
+
+In `matchTemplates`, a new `RegExp` is constructed for each single-word keyword on each call. Pre-compile keyword regexes in `parseTemplate` and store them on the `DecompositionTemplate` object for better performance.
+
+**Test plan:**
+- Unit test: matching behavior is unchanged
+- Unit test: pre-compiled regexes produce same results as dynamic construction
+
+Acceptance: Keyword regexes are compiled once at template load time. All existing template matching tests pass without modification.
+
+Key files: `core/templates.ts`, `test/templates.test.ts`
+
+---
+
+### Fix: Strip Keywords section from template body (L-DP-13)
+
+**Priority:** Low
+**Source:** Eng review M-ENG-3 finding 5.2
+**Depends on:** None
+
+The `body` field stores the full markdown content including the `## Keywords` section. When templates are rendered to users, this metadata section is confusing. Strip it during parsing.
+
+**Test plan:**
+- Unit test: parsed template body does not contain `## Keywords` section
+- Unit test: template body preserves all other sections
+
+Acceptance: Template body excludes the Keywords section. All other content is preserved. Tests verify the stripping behavior.
+
+Key files: `core/templates.ts`, `test/templates.test.ts`
+
+---
+
+### Refactor: Replace die() with throw in resolveRepo (M-DP-14)
+
+**Priority:** Medium
+**Source:** Eng review M-ENG-3 finding 6.1
+**Depends on:** None
+
+`resolveRepo` calls `die()` (which calls `process.exit(1)`) when a repo alias cannot be resolved. This makes error handling impossible for callers and makes the function difficult to test. Replace `die()` with `throw new Error(...)` and let callers decide how to handle the failure.
+
+**Test plan:**
+- Unit test: resolveRepo throws on unresolvable alias (instead of process.exit)
+- Unit test: callers can catch the error and continue
+- Verify all call sites handle the thrown error appropriately
+
+Acceptance: `resolveRepo` throws instead of calling `die()`. All call sites catch and handle the error. Tests cover the error paths. No regression in cross-repo functionality.
+
+Key files: `core/cross-repo.ts`, `test/cross-repo.test.ts`
+
+---
+
+### Fix: Cross-repo index should deduplicate entries on write (L-DP-15)
+
+**Priority:** Low
+**Source:** Eng review M-ENG-3 finding 6.2
+**Depends on:** None
+
+`writeCrossRepoIndex` appends entries without checking for existing entries with the same ID. Add a deduplication check: if an entry with the same ID already exists, update it rather than appending a duplicate.
+
+**Test plan:**
+- Unit test: writing same ID twice results in one entry
+- Unit test: writing different IDs produces separate entries
+- Unit test: existing index operations still work
+
+Acceptance: Duplicate entries are prevented. Writing an existing ID updates the entry. Tests cover deduplication behavior.
+
+Key files: `core/cross-repo.ts`, `test/cross-repo.test.ts`
+
+---
+
+### Feat: Config key validation with unknown key warnings (L-DP-16)
+
+**Priority:** Low
+**Source:** Eng review M-ENG-3 finding 7.2
+**Depends on:** None
+
+Unknown config keys (e.g., typos) are silently accepted. Add a known-keys list and warn when unrecognized keys are found in `.ninthwave/config`.
+
+**Test plan:**
+- Unit test: known keys are accepted without warning
+- Unit test: unknown keys trigger a warning
+- Unit test: existing config loading behavior is preserved
+
+Acceptance: Unrecognized config keys produce a diagnostic warning. Known keys work as before. Tests cover both cases.
+
+Key files: `core/config.ts`, `test/config.test.ts`
+
+---
+
+### Refactor: Consolidate domain file parsing — normalizeDomain should accept a Map (L-DP-17)
+
+**Priority:** Low
+**Source:** Eng review M-ENG-3 finding 7.3
+**Depends on:** None
+
+`normalizeDomain` reads and parses `domains.conf` directly from disk, duplicating the logic in `loadDomainMappings()`. Refactor `normalizeDomain` to accept a `Map<string, string>` parameter instead of a file path, and have `parseTodos` call `loadDomainMappings` once and pass the result.
+
+**Test plan:**
+- Unit test: normalizeDomain with Map produces same results as with file path
+- Unit test: parseTodos loads domain mappings once and passes them through
+- Integration: existing domain mapping tests pass
+
+Acceptance: Domain file is read once per parse call. `normalizeDomain` accepts a Map. `loadDomainMappings` is the single source of file-parsing logic. All existing tests pass.
+
+Key files: `core/parser.ts`, `core/config.ts`, `test/parser.test.ts`, `test/config.test.ts`
 
 ---
 
@@ -556,7 +854,7 @@ Key files: `core/commands/orchestrate.ts`, `test/orchestrate.test.ts`
 
 **Priority:** Low
 **Source:** Self-improvement loop
-**Depends on:** ANL-*, WIP-*, GHI-*, DAE-*, RET-*, ENG-*
+**Depends on:** ANL-*, WIP-*, GHI-*, DAE-*, RET-*, ENG-*, DP-*
 
 This is a recurring meta-item. When all other TODOs are complete, this item triggers a new cycle: (1) Review the current state of ninthwave against the product vision — what's shipped, what's missing, what friction was logged. (2) Read the friction log and identify actionable improvements. (3) Identify the next most impactful capability or refinement. (4) Decompose it into TODO items following the standard format. (5) Add a new copy of this same item (L-VIS-6, etc.) depending on the new terminal items, so the cycle continues.
 
