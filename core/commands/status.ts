@@ -370,6 +370,38 @@ function getWorktreeAge(wtDir: string): number {
 
 // ─── Commands ────────────────────────────────────────────────────────────────
 
+/**
+ * Run `ninthwave status` in watch mode: clear screen and refresh every intervalMs.
+ * Exits when the abort signal fires (or Ctrl-C).
+ */
+export async function cmdStatusWatch(
+  worktreeDir: string,
+  projectRoot: string,
+  intervalMs: number = 5_000,
+  signal?: AbortSignal,
+): Promise<void> {
+  while (!signal?.aborted) {
+    // Clear screen and move cursor to top-left
+    process.stdout.write("\x1B[2J\x1B[H");
+    cmdStatus(worktreeDir, projectRoot);
+    await new Promise<void>((resolve) => {
+      if (signal?.aborted) {
+        resolve();
+        return;
+      }
+      const timer = setTimeout(resolve, intervalMs);
+      signal?.addEventListener(
+        "abort",
+        () => {
+          clearTimeout(timer);
+          resolve();
+        },
+        { once: true },
+      );
+    });
+  }
+}
+
 export function cmdStatus(worktreeDir: string, projectRoot: string): void {
   if (!existsSync(worktreeDir)) {
     console.log(formatStatusTable([]));

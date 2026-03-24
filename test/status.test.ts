@@ -1,7 +1,7 @@
 // Tests for the status command formatting functions.
 // Uses dependency injection (pure functions) to avoid vi.mock.
 
-import { describe, it, expect } from "vitest";
+import { describe, it, expect, vi } from "vitest";
 import {
   stateColor,
   stateLabel,
@@ -11,6 +11,7 @@ import {
   formatBatchProgress,
   formatSummary,
   formatStatusTable,
+  cmdStatusWatch,
   pad,
   type StatusItem,
   type ItemState,
@@ -360,6 +361,59 @@ describe("formatStatusTable", () => {
     // Should have separator lines (using ─)
     const sepLines = output.split("\n").filter((l) => l.includes("─"));
     expect(sepLines.length).toBeGreaterThanOrEqual(2);
+  });
+});
+
+// ─── cmdStatusWatch ──────────────────────────────────────────────────────────
+
+describe("cmdStatusWatch", () => {
+  it("--watch triggers a polling refresh loop that stops on abort", async () => {
+    const controller = new AbortController();
+    let iterations = 0;
+
+    // Spy on stdout.write to count screen clears
+    const writeSpy = vi.spyOn(process.stdout, "write").mockImplementation(() => true);
+    // Spy on console.log to suppress output
+    const logSpy = vi.spyOn(console, "log").mockImplementation(() => {});
+
+    // Abort after 2 iterations using a very short interval
+    const watchPromise = cmdStatusWatch(
+      "/nonexistent",
+      "/nonexistent",
+      10, // 10ms interval for fast testing
+      controller.signal,
+    );
+
+    // Wait a bit for a few iterations, then abort
+    await new Promise<void>((resolve) => setTimeout(resolve, 50));
+    controller.abort();
+    await watchPromise;
+
+    // Screen clear sequence should have been written multiple times
+    const clearCalls = writeSpy.mock.calls.filter(
+      (call) => typeof call[0] === "string" && (call[0] as string).includes("\x1B[2J"),
+    );
+    expect(clearCalls.length).toBeGreaterThanOrEqual(1);
+
+    writeSpy.mockRestore();
+    logSpy.mockRestore();
+  });
+
+  it("resolves immediately when signal is already aborted", async () => {
+    const controller = new AbortController();
+    controller.abort();
+
+    const writeSpy = vi.spyOn(process.stdout, "write").mockImplementation(() => true);
+    const logSpy = vi.spyOn(console, "log").mockImplementation(() => {});
+
+    const start = Date.now();
+    await cmdStatusWatch("/nonexistent", "/nonexistent", 5000, controller.signal);
+    const elapsed = Date.now() - start;
+
+    expect(elapsed).toBeLessThan(100);
+
+    writeSpy.mockRestore();
+    logSpy.mockRestore();
   });
 });
 

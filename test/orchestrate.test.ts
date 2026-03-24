@@ -10,6 +10,9 @@ import {
   interruptibleSleep,
   computeDefaultWipLimit,
   buildSnapshot,
+  launchStatusPane,
+  closeStatusPane,
+  STATUS_PANE_NAME,
   type LogEntry,
   type OrchestrateLoopDeps,
 } from "../core/commands/orchestrate.ts";
@@ -950,5 +953,83 @@ describe("buildSnapshot lastCommitTime", () => {
 
     // Should not have been called for ci-pending items
     expect(getLastCommitTime).not.toHaveBeenCalled();
+  });
+});
+
+// ── Status pane management ────────────────────────────────────────
+
+describe("launchStatusPane", () => {
+  function mockMux(overrides?: Partial<Multiplexer>): Multiplexer {
+    return {
+      isAvailable: () => true,
+      launchWorkspace: vi.fn(() => "workspace:99"),
+      sendMessage: () => true,
+      readScreen: () => "",
+      listWorkspaces: () => "",
+      closeWorkspace: vi.fn(() => true),
+      ...overrides,
+    };
+  }
+
+  it("launches status pane via mux.launchWorkspace", () => {
+    const mux = mockMux();
+    const ref = launchStatusPane(mux, "/tmp/project");
+
+    expect(ref).toBe("workspace:99");
+    expect(mux.launchWorkspace).toHaveBeenCalledWith(
+      "/tmp/project",
+      "ninthwave status --watch",
+    );
+  });
+
+  it("uses nw-status as the status pane identifier constant", () => {
+    expect(STATUS_PANE_NAME).toBe("nw-status");
+  });
+
+  it("returns null when mux is not available", () => {
+    const mux = mockMux({ isAvailable: () => false });
+    const ref = launchStatusPane(mux, "/tmp/project");
+
+    expect(ref).toBeNull();
+    expect(mux.launchWorkspace).not.toHaveBeenCalled();
+  });
+
+  it("returns null when launchWorkspace fails", () => {
+    const mux = mockMux({ launchWorkspace: vi.fn(() => null) });
+    const ref = launchStatusPane(mux, "/tmp/project");
+
+    expect(ref).toBeNull();
+  });
+});
+
+describe("closeStatusPane", () => {
+  it("closes the status pane workspace", () => {
+    const closeWorkspace = vi.fn(() => true);
+    const mux: Multiplexer = {
+      isAvailable: () => true,
+      launchWorkspace: () => null,
+      sendMessage: () => true,
+      readScreen: () => "",
+      listWorkspaces: () => "",
+      closeWorkspace,
+    };
+
+    closeStatusPane(mux, "workspace:99");
+    expect(closeWorkspace).toHaveBeenCalledWith("workspace:99");
+  });
+
+  it("is a no-op when ref is null", () => {
+    const closeWorkspace = vi.fn(() => true);
+    const mux: Multiplexer = {
+      isAvailable: () => true,
+      launchWorkspace: () => null,
+      sendMessage: () => true,
+      readScreen: () => "",
+      listWorkspaces: () => "",
+      closeWorkspace,
+    };
+
+    closeStatusPane(mux, null);
+    expect(closeWorkspace).not.toHaveBeenCalled();
   });
 });
