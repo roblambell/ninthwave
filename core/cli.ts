@@ -34,6 +34,7 @@ import { cmdOrchestrate } from "./commands/orchestrate.ts";
 import { cmdReconcile } from "./commands/reconcile.ts";
 import { cmdAnalytics } from "./commands/analytics.ts";
 import { cmdStop } from "./commands/stop.ts";
+import { cmdMigrateTodos, cmdGenerateTodos } from "./commands/migrate-todos.ts";
 
 // Resolve project root via git
 function getProjectRoot(): string {
@@ -178,6 +179,12 @@ if (!command) {
   console.log(
     "  analytics [--all]                             Show orchestration performance trends",
   );
+  console.log(
+    "  migrate-todos                                 Migrate TODOS.md to file-per-todo format",
+  );
+  console.log(
+    "  generate-todos                                Generate TODOS.md from individual todo files",
+  );
   process.exit(0);
 }
 
@@ -290,10 +297,10 @@ switch (command) {
     cmdAnalytics(args, projectRoot);
     break;
   case "migrate-todos":
-    console.log("migrate-todos: not yet implemented");
+    cmdMigrateTodos(projectRoot);
     break;
   case "generate-todos":
-    console.log("generate-todos: not yet implemented");
+    cmdGenerateTodos(todosDir, join(projectRoot, "TODOS.md"));
     break;
   default:
     die(`Unknown command: ${command}`);
