@@ -118,27 +118,6 @@ Key files: `core/parser.ts`, `core/config.ts`, `test/parser.test.ts`, `test/conf
 
 ## Worker Reliability (eng-review-workers, 2026-03-24)
 
-
-
-### Fix: Sanitize TODO title with allowlist to prevent shell injection (H-WRK-1)
-
-**Priority:** High
-**Source:** Eng review W-7 — `docs/reviews/eng-review-workers.md`
-**Depends on:** None
-
-`launchAiSession` in `core/commands/start.ts` (line 98) interpolates `safeTitle` into a shell command string. The current sanitization (line 242) only strips `` ` ``, `$`, and `'` but doesn't handle `"`, `\`, `;`, `|`, `&`, or newlines. Switch to an allowlist approach: replace everything except `[a-zA-Z0-9 _-]` with `_`.
-
-**Test plan:**
-- Unit test: titles with shell metacharacters (`"`, `\`, `;`, `|`, `&`, newlines) are sanitized
-- Unit test: normal titles pass through unchanged
-- Unit test: empty title produces safe output
-
-Acceptance: `safeTitle` sanitization uses an allowlist (`[a-zA-Z0-9 _-]`). Shell metacharacters are replaced, not just stripped. Tests cover all common injection vectors. No regression in start tests.
-
-Key files: `core/commands/start.ts`, `test/start.test.ts`
-
----
-
 ### Feat: Add time-based heartbeat for stuck worker detection (H-WRK-2)
 
 **Priority:** High
