@@ -602,8 +602,12 @@ export async function cmdOrchestrate(
   while (i < args.length) {
     switch (args[i]) {
       case "--items":
-        itemIds = (args[i + 1] ?? "").split(",").filter(Boolean);
-        i += 2;
+        // Support both comma-separated (--items A,B,C) and space-separated (--items A B C)
+        i += 1;
+        while (i < args.length && !args[i].startsWith("--")) {
+          itemIds.push(...args[i].split(",").filter(Boolean));
+          i += 1;
+        }
         break;
       case "--merge-strategy":
         mergeStrategy = (args[i + 1] ?? "asap") as MergeStrategy;
@@ -663,7 +667,7 @@ export async function cmdOrchestrate(
 
   if (itemIds.length === 0) {
     die(
-      "Usage: ninthwave orchestrate --items ID1,ID2 [--merge-strategy asap|approved|ask] [--wip-limit N] [--poll-interval SECS]",
+      "Usage: ninthwave orchestrate --items ID1 ID2 ... [--merge-strategy asap|approved|ask] [--wip-limit N] [--poll-interval SECS]",
     );
   }
 
