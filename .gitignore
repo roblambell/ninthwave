@@ -4,6 +4,9 @@
 # Machine-specific bundle location (created by setup)
 .ninthwave/dir
 
+# Claude Code per-user data (created in worktrees by workers)
+.claude/projects/
+
 # Node/Bun dependencies
 node_modules/
 
