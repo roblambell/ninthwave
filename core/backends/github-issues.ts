@@ -1,7 +1,7 @@
 // GitHub Issues backend: reads issues from a GitHub repo via `gh` CLI
-// and maps them to TodoItem shape. Read-only — markDone is a no-op stub.
+// and maps them to TodoItem shape. Supports closing issues and syncing status labels.
 
-import type { RunResult, TodoItem, Priority, TaskBackend } from "../types.ts";
+import type { RunResult, TodoItem, Priority, TaskBackend, StatusSync } from "../types.ts";
 
 /** Function signature for running gh commands in a repo context. */
 export type GhRunner = (repoRoot: string, args: string[]) => RunResult;
@@ -48,7 +48,10 @@ export function issueToTodoItem(issue: GhIssueJson): TodoItem {
 
 const ISSUE_FIELDS = "number,title,body,labels,milestone,state";
 
-export class GitHubIssuesBackend implements TaskBackend {
+/** Known status labels managed by the orchestrator. */
+export const STATUS_LABELS = ["status:in-progress", "status:pr-open"] as const;
+
+export class GitHubIssuesBackend implements TaskBackend, StatusSync {
   constructor(
     private repoRoot: string,
     private label: string = "ninthwave",
@@ -99,8 +102,40 @@ export class GitHubIssuesBackend implements TaskBackend {
     }
   }
 
-  /** Stub — write operations come in GHI-2. */
-  markDone(_id: string): boolean {
-    return false;
+  /** Close the issue via `gh issue close`. Idempotent — already-closed issues return true. */
+  markDone(id: string): boolean {
+    const num = id.replace(/^GHI-/, "");
+    const result = this.runner(this.repoRoot, ["issue", "close", num]);
+    // gh issue close returns 0 for both open→closed and already-closed issues
+    return result.exitCode === 0;
+  }
+
+  /** Add a status label to an issue. Returns true on success. */
+  addStatusLabel(id: string, label: string): boolean {
+    const num = id.replace(/^GHI-/, "");
+    const result = this.runner(this.repoRoot, [
+      "issue", "edit", num, "--add-label", label,
+    ]);
+    return result.exitCode === 0;
+  }
+
+  /**
+   * Remove a status label from an issue.
+   * Idempotent — returns true even if the label doesn't exist on the issue or repo.
+   */
+  removeStatusLabel(id: string, label: string): boolean {
+    const num = id.replace(/^GHI-/, "");
+    this.runner(this.repoRoot, [
+      "issue", "edit", num, "--remove-label", label,
+    ]);
+    // Always return true — missing label is not an error condition
+    return true;
+  }
+
+  /** Remove all known status labels from an issue. */
+  removeAllStatusLabels(id: string): void {
+    for (const label of STATUS_LABELS) {
+      this.removeStatusLabel(id, label);
+    }
   }
 }

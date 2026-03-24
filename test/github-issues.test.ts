@@ -6,6 +6,7 @@ import {
   parsePriorityLabel,
   issueToTodoItem,
   GitHubIssuesBackend,
+  STATUS_LABELS,
 } from "../core/backends/github-issues.ts";
 import type { GhIssueJson, GhRunner } from "../core/backends/github-issues.ts";
 import type { RunResult } from "../core/types.ts";
@@ -306,9 +307,129 @@ describe("GitHubIssuesBackend.read", () => {
 // GitHubIssuesBackend.markDone
 // ---------------------------------------------------------------------------
 describe("GitHubIssuesBackend.markDone", () => {
-  it("returns false (stub for read-only backend)", () => {
+  it("calls gh issue close with correct issue number", () => {
+    const { runner, calls } = spyRunner({ stdout: "", stderr: "", exitCode: 0 });
+    const backend = new GitHubIssuesBackend("/repo", "ninthwave", runner);
+
+    const result = backend.markDone("GHI-42");
+
+    expect(result).toBe(true);
+    expect(calls).toHaveLength(1);
+    expect(calls[0].repoRoot).toBe("/repo");
+    expect(calls[0].args).toEqual(["issue", "close", "42"]);
+  });
+
+  it("strips GHI- prefix from id", () => {
+    const { runner, calls } = spyRunner({ stdout: "", stderr: "", exitCode: 0 });
+    const backend = new GitHubIssuesBackend("/repo", "ninthwave", runner);
+
+    backend.markDone("GHI-7");
+
+    expect(calls[0].args).toEqual(["issue", "close", "7"]);
+  });
+
+  it("accepts plain number string", () => {
+    const { runner, calls } = spyRunner({ stdout: "", stderr: "", exitCode: 0 });
+    const backend = new GitHubIssuesBackend("/repo", "ninthwave", runner);
+
+    backend.markDone("15");
+
+    expect(calls[0].args).toEqual(["issue", "close", "15"]);
+  });
+
+  it("is idempotent — returns true when issue is already closed", () => {
+    // gh issue close returns 0 even for already-closed issues
     const runner = mockRunner({ stdout: "", stderr: "", exitCode: 0 });
     const backend = new GitHubIssuesBackend("/repo", "ninthwave", runner);
+
+    expect(backend.markDone("GHI-1")).toBe(true);
+  });
+
+  it("returns false when gh command fails", () => {
+    const runner = mockRunner({ stdout: "", stderr: "error", exitCode: 1 });
+    const backend = new GitHubIssuesBackend("/repo", "ninthwave", runner);
+
     expect(backend.markDone("GHI-1")).toBe(false);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// GitHubIssuesBackend.addStatusLabel
+// ---------------------------------------------------------------------------
+describe("GitHubIssuesBackend.addStatusLabel", () => {
+  it("calls gh issue edit --add-label with correct args", () => {
+    const { runner, calls } = spyRunner({ stdout: "", stderr: "", exitCode: 0 });
+    const backend = new GitHubIssuesBackend("/repo", "ninthwave", runner);
+
+    const result = backend.addStatusLabel("GHI-10", "status:in-progress");
+
+    expect(result).toBe(true);
+    expect(calls).toHaveLength(1);
+    expect(calls[0].args).toEqual([
+      "issue", "edit", "10", "--add-label", "status:in-progress",
+    ]);
+  });
+
+  it("returns false when gh command fails", () => {
+    const runner = mockRunner({ stdout: "", stderr: "error", exitCode: 1 });
+    const backend = new GitHubIssuesBackend("/repo", "ninthwave", runner);
+
+    expect(backend.addStatusLabel("GHI-5", "status:pr-open")).toBe(false);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// GitHubIssuesBackend.removeStatusLabel
+// ---------------------------------------------------------------------------
+describe("GitHubIssuesBackend.removeStatusLabel", () => {
+  it("calls gh issue edit --remove-label with correct args", () => {
+    const { runner, calls } = spyRunner({ stdout: "", stderr: "", exitCode: 0 });
+    const backend = new GitHubIssuesBackend("/repo", "ninthwave", runner);
+
+    const result = backend.removeStatusLabel("GHI-10", "status:in-progress");
+
+    expect(result).toBe(true);
+    expect(calls).toHaveLength(1);
+    expect(calls[0].args).toEqual([
+      "issue", "edit", "10", "--remove-label", "status:in-progress",
+    ]);
+  });
+
+  it("returns true even when label does not exist (graceful skip)", () => {
+    // gh may return non-zero when label doesn't exist on the issue or repo
+    const runner = mockRunner({ stdout: "", stderr: "label not found", exitCode: 1 });
+    const backend = new GitHubIssuesBackend("/repo", "ninthwave", runner);
+
+    // Should not error — idempotent by design
+    expect(backend.removeStatusLabel("GHI-5", "status:nonexistent")).toBe(true);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// GitHubIssuesBackend.removeAllStatusLabels
+// ---------------------------------------------------------------------------
+describe("GitHubIssuesBackend.removeAllStatusLabels", () => {
+  it("removes all known status labels", () => {
+    const { runner, calls } = spyRunner({ stdout: "", stderr: "", exitCode: 0 });
+    const backend = new GitHubIssuesBackend("/repo", "ninthwave", runner);
+
+    backend.removeAllStatusLabels("GHI-8");
+
+    expect(calls).toHaveLength(STATUS_LABELS.length);
+    for (let i = 0; i < STATUS_LABELS.length; i++) {
+      expect(calls[i].args).toEqual([
+        "issue", "edit", "8", "--remove-label", STATUS_LABELS[i],
+      ]);
+    }
+  });
+});
+
+// ---------------------------------------------------------------------------
+// STATUS_LABELS constant
+// ---------------------------------------------------------------------------
+describe("STATUS_LABELS", () => {
+  it("includes expected labels", () => {
+    expect(STATUS_LABELS).toContain("status:in-progress");
+    expect(STATUS_LABELS).toContain("status:pr-open");
   });
 });
