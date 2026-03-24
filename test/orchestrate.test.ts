@@ -300,6 +300,169 @@ describe("orchestrateLoop", () => {
     expect(complete!.stuck).toBe(1);
   });
 
+  it("runs worktree cleanup sweep for all managed items before orchestrate_complete", async () => {
+    const orch = new Orchestrator({ wipLimit: 2, mergeStrategy: "asap" });
+    orch.addItem(makeTodo("CL-1-1"));
+    orch.addItem(makeTodo("CL-1-2"));
+
+    let cycle = 0;
+    const logs: LogEntry[] = [];
+    const cleanedItemIds: string[] = [];
+
+    const buildSnapshot = (o: Orchestrator): PollSnapshot => {
+      cycle++;
+      const readyIds: string[] = [];
+      const items: ItemSnapshot[] = [];
+
+      for (const item of o.getAllItems()) {
+        if (item.state === "queued") {
+          readyIds.push(item.id);
+          continue;
+        }
+        if (item.state === "done" || item.state === "stuck") continue;
+
+        if (item.state === "launching") {
+          items.push({ id: item.id, workerAlive: true });
+        } else if (item.state === "implementing") {
+          items.push({ id: item.id, prNumber: cycle, prState: "open", ciStatus: "pass" });
+        } else if (item.state === "merging" || item.state === "merged") {
+          items.push({ id: item.id, prState: "merged" });
+        }
+      }
+
+      return { items, readyIds };
+    };
+
+    const actionDeps = mockActionDeps({
+      cleanSingleWorktree: vi.fn((id: string) => {
+        cleanedItemIds.push(id);
+        return true; // simulate stale worktree found and cleaned
+      }),
+    });
+
+    const deps: OrchestrateLoopDeps = {
+      buildSnapshot,
+      sleep: () => Promise.resolve(),
+      log: (entry) => logs.push(entry),
+      actionDeps,
+    };
+
+    await orchestrateLoop(orch, defaultCtx, deps);
+
+    // Both items completed
+    expect(orch.getItem("CL-1-1")!.state).toBe("done");
+    expect(orch.getItem("CL-1-2")!.state).toBe("done");
+
+    // Cleanup sweep ran for both items (final sweep calls cleanSingleWorktree for all managed items)
+    expect(cleanedItemIds).toContain("CL-1-1");
+    expect(cleanedItemIds).toContain("CL-1-2");
+
+    // worktree_cleanup_sweep log emitted before orchestrate_complete
+    const sweepLog = logs.find((l) => l.event === "worktree_cleanup_sweep");
+    expect(sweepLog).toBeDefined();
+    expect(sweepLog!.count).toBe(2);
+    expect(sweepLog!.cleanedIds).toEqual(expect.arrayContaining(["CL-1-1", "CL-1-2"]));
+
+    // Verify sweep log appears before complete log
+    const sweepIndex = logs.findIndex((l) => l.event === "worktree_cleanup_sweep");
+    const completeIndex = logs.findIndex((l) => l.event === "orchestrate_complete");
+    expect(sweepIndex).toBeLessThan(completeIndex);
+  });
+
+  it("cleanup sweep is no-op when no stale worktrees exist", async () => {
+    const orch = new Orchestrator({ wipLimit: 2, mergeStrategy: "asap" });
+    orch.addItem(makeTodo("CN-1-1"));
+
+    let cycle = 0;
+    const logs: LogEntry[] = [];
+
+    const buildSnapshot = (): PollSnapshot => {
+      cycle++;
+      if (cycle === 1) return { items: [], readyIds: ["CN-1-1"] };
+      if (cycle === 2) return { items: [{ id: "CN-1-1", workerAlive: true }], readyIds: [] };
+      if (cycle === 3)
+        return { items: [{ id: "CN-1-1", prNumber: 1, prState: "open", ciStatus: "pass" }], readyIds: [] };
+      return { items: [], readyIds: [] };
+    };
+
+    const actionDeps = mockActionDeps({
+      cleanSingleWorktree: vi.fn(() => false), // no stale worktree found
+    });
+
+    const deps: OrchestrateLoopDeps = {
+      buildSnapshot,
+      sleep: () => Promise.resolve(),
+      log: (entry) => logs.push(entry),
+      actionDeps,
+    };
+
+    await orchestrateLoop(orch, defaultCtx, deps);
+
+    // No sweep log emitted when nothing was cleaned
+    expect(logs.some((l) => l.event === "worktree_cleanup_sweep")).toBe(false);
+    // But orchestrate_complete still emitted
+    expect(logs.some((l) => l.event === "orchestrate_complete")).toBe(true);
+  });
+
+  it("cleanup sweep handles errors gracefully without blocking exit", async () => {
+    const orch = new Orchestrator({ wipLimit: 2, mergeStrategy: "asap" });
+    orch.addItem(makeTodo("CE-1-1"));
+    orch.addItem(makeTodo("CE-1-2"));
+
+    let cycle = 0;
+    const logs: LogEntry[] = [];
+
+    const buildSnapshot = (o: Orchestrator): PollSnapshot => {
+      cycle++;
+      const readyIds: string[] = [];
+      const items: ItemSnapshot[] = [];
+
+      for (const item of o.getAllItems()) {
+        if (item.state === "queued") {
+          readyIds.push(item.id);
+          continue;
+        }
+        if (item.state === "done" || item.state === "stuck") continue;
+
+        if (item.state === "launching") {
+          items.push({ id: item.id, workerAlive: true });
+        } else if (item.state === "implementing") {
+          items.push({ id: item.id, prNumber: cycle, prState: "open", ciStatus: "pass" });
+        } else if (item.state === "merging" || item.state === "merged") {
+          items.push({ id: item.id, prState: "merged" });
+        }
+      }
+
+      return { items, readyIds };
+    };
+
+    let callCount = 0;
+    const actionDeps = mockActionDeps({
+      cleanSingleWorktree: vi.fn(() => {
+        callCount++;
+        if (callCount === 1) throw new Error("git worktree remove failed");
+        return true; // second item cleaned successfully
+      }),
+    });
+
+    const deps: OrchestrateLoopDeps = {
+      buildSnapshot,
+      sleep: () => Promise.resolve(),
+      log: (entry) => logs.push(entry),
+      actionDeps,
+    };
+
+    await orchestrateLoop(orch, defaultCtx, deps);
+
+    // Loop completed despite error in cleanup
+    expect(logs.some((l) => l.event === "orchestrate_complete")).toBe(true);
+
+    // Sweep log only shows the successfully cleaned item
+    const sweepLog = logs.find((l) => l.event === "worktree_cleanup_sweep");
+    expect(sweepLog).toBeDefined();
+    expect(sweepLog!.count).toBe(1);
+  });
+
   it("stops on SIGINT and emits shutdown log", async () => {
     const orch = new Orchestrator({ wipLimit: 2, mergeStrategy: "asap" });
     orch.addItem(makeTodo("I-1-1"));

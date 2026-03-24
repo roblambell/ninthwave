@@ -309,6 +309,33 @@ export async function orchestrateLoop(
     const allItems = orch.getAllItems();
     const allTerminal = allItems.every((i) => i.state === "done" || i.state === "stuck");
     if (allTerminal) {
+      // Final cleanup sweep: remove any stale worktrees for managed items
+      const cleanedIds: string[] = [];
+      for (const item of allItems) {
+        try {
+          const cleaned = deps.actionDeps.cleanSingleWorktree(
+            item.id,
+            ctx.worktreeDir,
+            ctx.projectRoot,
+          );
+          if (cleaned) {
+            cleanedIds.push(item.id);
+          }
+        } catch {
+          // Non-fatal — best-effort cleanup
+        }
+      }
+
+      if (cleanedIds.length > 0) {
+        wrappedLog({
+          ts: new Date().toISOString(),
+          level: "info",
+          event: "worktree_cleanup_sweep",
+          cleanedIds,
+          count: cleanedIds.length,
+        });
+      }
+
       const doneCount = allItems.filter((i) => i.state === "done").length;
       const stuckCount = allItems.filter((i) => i.state === "stuck").length;
       wrappedLog({
