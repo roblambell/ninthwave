@@ -10,19 +10,28 @@ ninthwave is that orchestration layer. It doesn't write code. It manages the pip
 
 ## What Exists Today
 
-v0.1.0 shipped March 2026. This is what's real and working:
+v0.1.0 shipped March 2026. Three grind cycles have shipped since then.
 
+**Core pipeline (v0.1.0):**
 - **Decompose + orchestrate pipeline.** `/decompose` breaks a spec into batched work items (~200-400 LOC each). `ninthwave orchestrate` runs an event-driven daemon that launches workers, monitors CI and PR state, merges, cleans up, and recovers from crashes. The full cycle: spec in, merged PRs out.
-
-- **Deterministic orchestrator, intelligent workers.** The orchestrator is a TypeScript state machine with 13 states and pure transition functions. It never calls an LLM. Workers are the intelligent agents — full AI coding sessions that implement, test, review, and open PRs. This split keeps orchestration predictable, auditable, and cheap. Token costs scale with the number of work items, not with orchestration complexity.
-
-- **Multi-tool, no lock-in.** Works with Claude Code, OpenCode, Copilot CLI, and anything supporting the [Agent Skills standard](https://agentskills.io). Workers read your project's instruction files for conventions. No proxy, no billing layer, no API key management.
-
+- **Deterministic orchestrator, intelligent workers.** The orchestrator is a TypeScript state machine with 13 states and pure transition functions. It never calls an LLM. Workers are the intelligent agents. This split keeps orchestration predictable, auditable, and cheap.
+- **Multi-tool, no lock-in.** Works with Claude Code, OpenCode, Copilot CLI, and anything supporting the [Agent Skills standard](https://agentskills.io). No proxy, no billing layer, no API key management.
 - **Convention over configuration.** Cross-repo resolves via sibling directories. Port isolation via partition math. Domain slugs from section headers. Zero config for the common case.
 
-- **Self-developing.** ninthwave dogfoods itself. The friction log from that process has surfaced 11 issues and driven multiple improvements. The L-VIS recurring item in TODOS.md keeps the self-improvement loop running.
+**Shipped in grind cycles 0-1 (Phases 1-3 of the roadmap):**
+- **`ninthwave init`** — zero-config project onboarding with CI provider and test command auto-detection.
+- **Terminal status UI** — structured real-time display with color-coded agent states, auto-pane in cmux workspace.
+- **Webhook notifications** — Slack/Discord integration for orchestrator lifecycle events (start, merge, fail, complete).
+- **Structured analytics** — JSON metrics per run + `ninthwave analytics` trend display.
+- **Decomposition templates** — pre-built patterns for common work types (API endpoint, frontend component, migration).
+- **tmux adapter** — full orchestration on tmux with auto-detection (`--mux` flag).
+- **Orchestrator reliability** — CI failure detection, rebase on merge conflicts, crash recovery with state reconstruction, worker heartbeat monitoring, stale workspace cleanup.
+- **Wildcard dependencies** — pattern matching (`MUX-*`, `DF-*`) in dependency declarations.
+- **`/grind` skill** — continuous self-improvement loop (process TODOs → review friction → decompose → repeat).
 
-- **Competitive positioning (Q1 2026).** Parallel AI coding exploded: Claude Code Agent Teams (16+ agents), Cursor (8 agents), Superset IDE (10+ agents), dmux, Conductor. All launch parallel sessions. None decompose work, order dependencies, manage CI lifecycle, or orchestrate merges. ninthwave's moat is the integrated pipeline, not session launching. Agent Teams is complementary (intra-task collaboration on one item) while ninthwave is inter-task orchestration (N workers on N items).
+**Self-developing.** ninthwave dogfoods itself. The friction log has surfaced 14 issues across 2 grind cycles, driving multiple improvements. The L-VIS recurring item in TODOS.md keeps the self-improvement loop running.
+
+**Competitive positioning (Q1 2026).** Parallel AI coding exploded: Claude Code Agent Teams (16+ agents), Cursor (8 agents), Superset IDE (10+ agents), dmux, Conductor. All launch parallel sessions. None decompose work, order dependencies, manage CI lifecycle, or orchestrate merges. ninthwave's moat is the integrated pipeline, not session launching. Agent Teams is complementary (intra-task collaboration on one item) while ninthwave is inter-task orchestration (N workers on N items).
 
 ## Principles
 
@@ -44,35 +53,30 @@ v0.1.0 shipped March 2026. This is what's real and working:
 
 ## What's Next
 
-Six priority areas over the next 6-12 months. Not dated milestones — ordered by dependency and impact.
+Priority areas ordered by dependency and impact. Phases A through A-ter are complete.
 
-### A. Solidify the Foundation *(largely achieved)*
+### A. Solidify the Foundation *(complete)*
 
-Make what exists reliable, well-documented, and pleasant for a solo developer on a single repo.
+~~Make what exists reliable, well-documented, and pleasant for a solo developer on a single repo.~~ Done. All friction fixes (DF-1 through DF-5) shipped. `ninthwave init` with auto-detection (INI-1, INI-2) shipped. Exhaustive state machine tests (TST-1) shipped. Test plan field required for every work item.
 
-- ~~Resolve known friction: domain slug truncation, worker friction logging in dogfood mode.~~ Done. Friction fixes (DF-1 through DF-5) decomposed and in progress.
-- ~~Complete the orchestrate integration in `/work`.~~ Done. Phase 3 continuous delivery loop shipped.
-- First-run experience: `ninthwave init` for zero-config onboarding (INI-1, INI-2 in progress). Goal: any git repo → working parallel session in under 5 minutes with zero manual input.
-- ~~Exhaustive state machine testing.~~ Done (M-TST-1).
-- ~~Test confidence in decompose.~~ Done — `**Test plan:**` field is now required for every work item.
+### A-bis. Visibility & Developer Experience *(complete)*
 
-### A-bis. Visibility & Developer Experience *(new, from competitive analysis)*
+~~Make ninthwave's work visible, measurable, and professional-feeling.~~ Done. Terminal status UI with auto-pane (STU-1, STU-2, STU-3) shipped. Webhook notifications (WHK-1) shipped. Structured analytics + trends command (ANL-1, ANL-2) shipped. Web dashboard deferred to Phase 4.
 
-Make ninthwave's work visible, measurable, and professional-feeling.
+### A-ter. Decomposition Quality *(complete for Phase 3)*
 
-- **Terminal status UI** — beautiful real-time display with color-coded agent states, batch progress, and auto-pane in cmux (STU-1, STU-2).
-- **Webhook notifications** — Slack/Discord integration for orchestrator lifecycle events (WHK-1). Team visibility beyond the operator.
-- **Time-to-ship analytics** — structured metrics per run, `ninthwave analytics` command for trends (ANL-1, ANL-2). Data-driven pipeline improvement.
-- **Web dashboard** — local web UI at localhost:9876 for orchestration state visualization (Phase 4).
+~~Build the competitive moat.~~ Decomposition templates (TPL-1) shipped. Wildcard dependencies (WLD-1) shipped. Self-improving decomposition and community learning deferred to Phases 4-5.
 
-### A-ter. Decomposition Quality *(new, competitive moat)*
+### A-quater. Operational Maturity *(current — grind cycle 2)*
 
-The integrated pipeline (decompose → batch → orchestrate → merge) is ninthwave's moat. Parallel session launching is now commodity (5+ tools do it as of Q1 2026). Decomposition quality determines PR quality.
+Make ninthwave reliable enough for daily use without manual intervention. Addresses remaining friction (#2, #13, #14) and the most impactful feature-completeness gaps.
 
-- **Decomposition templates** — pre-built patterns for common work types: API endpoint, frontend component, database migration (TPL-1).
-- **Self-improving decomposition** — local learning from past orchestration runs. Items touching conflict-prone file pairs get auto-split (Phase 4).
-- **Community learning (opt-in)** — anonymized decomposition quality metrics contributed back to improve the product (Phase 5, SaaS-adjacent).
-- **Wildcard dependencies** — cleaner dependency declarations with pattern matching (WLD-1, already implemented).
+- **Analytics persistence** — auto-commit analytics JSON files at end of orchestration runs (ANL-3). Data should be durable, not lost on clean.
+- **Memory-aware WIP** — dynamic WIP limits based on available RAM (WIP-1). Prevent OOM on memory-constrained machines.
+- **Cost/token tracking** — parse worker session costs, aggregate in analytics (ANL-4). Enable ROI measurement.
+- **GitHub Issues adapter** — first external task backend (GHI-1, GHI-2). Read issues as work items, sync status, close on merge. Biggest reach expansion available.
+- **Orchestrator daemon mode** — fork to background, persist state to disk, `ninthwave stop` to terminate (DAE-1). Unblocks the conversation session.
+- **Automatic worker retry** — retry crashed workers once before marking stuck (RET-1). Resilience for production use.
 
 ### B. Sandboxed Workers
 
@@ -113,9 +117,9 @@ An optional advisory layer on top of the deterministic daemon.
 
 ### E. Expand the Surface Area
 
-- **External task backends.** Two categories: (1) Project management — Linear adapter first, then ClickUp, GitHub Issues. Work items created by humans or planning tools. (2) Observability/alerting — Sentry adapter first, then PagerDuty, CloudWatch. Work items created by production signals. Both use the same three-operation interface: list items, read item, mark done. TODOS.md remains the built-in default.
+- **External task backends.** Two categories: (1) Project management — GitHub Issues adapter first (GHI-1, GHI-2 in progress), then Linear, ClickUp. Work items created by humans or planning tools. (2) Observability/alerting — Sentry adapter first, then PagerDuty, CloudWatch. Work items created by production signals. Both use the same three-operation interface: list items, read item, mark done. TODOS.md remains the built-in default.
 - **GitHub Action for CI/CD failures.** `ninthwave-sh/create-todo` — a thin GitHub Action that appends a TODO to TODOS.md when a CD workflow fails. Bridges CI/CD signals into the work queue for teams using TODOS.md without an external task backend.
-- **Multiplexer abstraction.** tmux and zellij as alternative backends. Three operations to abstract: create session, send message, list sessions. cmux remains the default.
+- **Multiplexer abstraction.** ~~tmux~~ Done (MUX-3, MUX-4). zellij as the next alternative backend. Three operations to abstract: create session, send message, list sessions. cmux remains the default.
 - **Smarter resource management.** Memory-aware WIP limits based on available RAM. Adaptive scaling under load. Document: each worker consumes ~2-3GB (AI tool + language server + worktree).
 - **Cross-repo maturity.** Monorepo workspace support (pnpm/yarn/turborepo). Dependency ordering across repos.
 
@@ -141,18 +145,18 @@ What ninthwave will not become:
 
 ninthwave is feature-complete when:
 
-- A developer goes from spec to merged, reviewed PRs in a single command cycle.
-- The pipeline handles all common failure modes automatically: CI failures, merge conflicts, review feedback, worker crashes, dependency ordering.
+- A developer goes from spec to merged, reviewed PRs in a single command cycle. *(Achieved.)*
+- The pipeline handles all common failure modes automatically: CI failures, merge conflicts, review feedback, worker crashes, dependency ordering. *(Achieved — CI failure detection, rebase on conflicts, review dispatch, heartbeat monitoring, crash recovery. Worker retry in progress: RET-1.)*
 - Works with 3+ AI coding tools. *(Achieved: Claude Code, OpenCode, Copilot CLI.)*
-- Works with 2+ terminal multiplexers. *(In progress — tmux adapter in TODOS.md.)*
-- Connects to 2+ task backends. *(Not yet.)*
+- Works with 2+ terminal multiplexers. *(Achieved: cmux + tmux. zellij planned.)*
+- Connects to 2+ task backends. *(In progress — GitHub Issues adapter: GHI-1, GHI-2. Linear adapter planned.)*
 - Connects to 2+ observability/alerting backends (Sentry, PagerDuty). *(Not yet.)*
 - GitHub Action bridges CI/CD failures into TODOS.md. *(Not yet.)*
-- Every decomposed work item has a test plan with tracked outcomes. *(Test plan field required since v0.1.0. Outcome tracking via analytics — in progress.)*
+- Every decomposed work item has a test plan with tracked outcomes. *(Achieved — test plan field required since v0.1.0. Analytics tracks outcomes per run: ANL-1, ANL-2. Cost tracking in progress: ANL-4.)*
 - Workers run sandboxed by default. *(Not yet.)*
 - Remote session links posted on PRs with auth. *(Not yet.)*
-- Resource management is automatic — memory-aware WIP, no manual tuning. *(Not yet.)*
-- Install to working parallel session in under 10 minutes. *(`ninthwave init` in progress — targeting under 5 minutes with zero manual input.)*
+- Resource management is automatic — memory-aware WIP, no manual tuning. *(In progress: WIP-1.)*
+- Install to working parallel session in under 10 minutes. *(Achieved — `ninthwave init` with auto-detection ships zero-config onboarding.)*
 
 After feature-completeness, ninthwave enters maintenance: bug fixes, compatibility updates for new AI tools and platforms, and community-driven extensions.
 

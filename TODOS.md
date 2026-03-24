@@ -2,24 +2,216 @@
 
 <!-- Format guide: see $(cat .ninthwave/dir)/core/docs/todos-format.md -->
 
+## Operational Maturity (vision exploration, 2026-03-24)
+
+### Feat: Auto-commit analytics files after orchestration runs (H-ANL-3)
+
+**Priority:** High
+**Source:** Friction log #13 — analytics JSON files never committed
+**Depends on:** None
+
+The orchestrator writes `.ninthwave/analytics/*.json` per run but never commits them. Data accumulates locally and is lost on clean. At the end of a successful orchestration run, auto-commit analytics files to the current branch (or main if orchestrating from main). Use `git add .ninthwave/analytics/ && git commit` with a conventional commit message. Skip if no analytics files changed.
+
+**Test plan:**
+- Unit test: verify commit is created when analytics files exist after run
+- Unit test: verify no commit when no analytics files changed
+- Edge case: verify behavior when git working directory is dirty (other unstaged changes)
+
+Acceptance: Analytics JSON files are committed automatically at end of orchestration run. No commit is created if no analytics files changed. Existing dirty state is not accidentally committed (only stage analytics files). Tests pass.
+
+Key files: `core/commands/orchestrate.ts`, `core/analytics.ts`, `core/git.ts`
+
+---
+
+### Feat: Memory-aware dynamic WIP limits (H-WIP-1)
+
+**Priority:** High
+**Source:** Vision — prevent OOM on memory-constrained machines
+**Depends on:** None
+
+The WIP limit is currently a static number (default 5). Each worker consumes ~2.5GB (AI tool + language server + worktree). On a 16GB Mac with other processes, launching 5 workers risks OOM. Use `os.freemem()` and `os.totalmem()` to estimate available capacity at each batch launch. Cap WIP at `floor(availableMemory / 2.5GB)` with a minimum of 1 and a maximum of the configured limit. Log when WIP is reduced due to memory pressure.
+
+**Test plan:**
+- Unit test: WIP calculation returns correct values for various memory scenarios
+- Unit test: WIP never drops below 1
+- Unit test: WIP respects configured maximum even when memory allows more
+- Edge case: system reports 0 free memory (should still allow 1 worker)
+
+Acceptance: WIP limit is dynamically calculated based on available memory. Workers are queued when memory is constrained instead of launching immediately. Structured log emitted when WIP is reduced. Tests pass. No regression in orchestrator tests.
+
+Key files: `core/commands/orchestrate.ts`, `core/orchestrator.ts`
+
+---
+
+### Feat: Track token usage and cost per worker session (M-ANL-4)
+
+**Priority:** Medium
+**Source:** Friction log #14 — no model/token/cost tracking in analytics
+**Depends on:** None
+
+Add cost and token tracking to analytics. When a worker session exits, parse its summary output for token count and cost (Claude Code prints this on exit). Add optional `tokensUsed` and `costUsd` fields to `ItemMetric`. Aggregate totals in `RunMetrics`. Display cost summary in `ninthwave analytics` output. Gracefully handle tools that don't report cost (default to null).
+
+**Test plan:**
+- Unit test: parse Claude Code exit summary for tokens and cost
+- Unit test: aggregate cost across items in RunMetrics
+- Unit test: graceful handling when cost data is unavailable (null fields)
+- Integration: analytics display includes cost column when data exists
+
+Acceptance: `ItemMetric` has optional `tokensUsed` and `costUsd` fields. Cost data is parsed from worker exit output when available. `ninthwave analytics` displays cost totals per run. Fields are null (not 0) when cost data is unavailable. Tests pass.
+
+Key files: `core/analytics.ts`, `core/commands/analytics.ts`, `core/commands/orchestrate.ts`
+
+---
+
+### Feat: GitHub Issues adapter — read and list issues as work items (H-GHI-1)
+
+**Priority:** High
+**Source:** Vision — first external task backend for reach expansion
+**Depends on:** None
+
+Create a `TaskBackend` interface with three operations: `list()`, `read(id)`, `markDone(id)`. Implement `GitHubIssuesBackend` that reads issues from a GitHub repo using `gh` CLI. Map issue fields to `TodoItem` shape: title from issue title, priority from labels (e.g., `priority:high`), domain from milestone name, description from issue body. Filter by label (default: `ninthwave`). Support `ninthwave list --backend github-issues` to list issues from the current repo. This TODO covers read-only operations — write operations come in GHI-2.
+
+**Test plan:**
+- Unit test: parse GitHub issue JSON into TodoItem shape
+- Unit test: priority label mapping (`priority:high` → high, missing → medium default)
+- Unit test: list with label filter returns only matching issues
+- Edge case: issue with no body, no labels, no milestone (all fields have safe defaults)
+
+Acceptance: `TaskBackend` interface defined in `core/types.ts` with `list()`, `read(id)`, `markDone(id)` methods. `GitHubIssuesBackend` implements `list()` and `read(id)`. `ninthwave list --backend github-issues` displays issues from the current repo. Priority is derived from labels with medium as default. Tests pass.
+
+Key files: `core/backends/github-issues.ts`, `core/types.ts`, `core/commands/list.ts`, `core/gh.ts`
+
+---
+
+### Feat: Orchestrator daemon mode with state persistence (H-DAE-1)
+
+**Priority:** High
+**Source:** Friction log #2 — orchestrator blocks conversation session
+**Depends on:** None
+
+Add `--daemon` flag to `ninthwave orchestrate` that forks the process to background. Write PID to `.ninthwave/orchestrator.pid`. Serialize orchestrator state to `.ninthwave/orchestrator.state.json` each poll cycle (item states, PR numbers, timestamps). `ninthwave status` reads from state file when the orchestrator is running as daemon (detect via PID file). Add `ninthwave stop` command that sends SIGTERM to the daemon PID. Clean up PID file on graceful exit. Detect and clean up stale PID files from crashed daemons.
+
+**Test plan:**
+- Unit test: state serialization/deserialization roundtrips correctly
+- Unit test: PID file is written on daemon start and cleaned on exit
+- Unit test: `ninthwave stop` sends signal to correct PID
+- Edge case: stale PID file from crashed daemon (detect via process existence check and clean up)
+
+Acceptance: `ninthwave orchestrate --daemon` starts the orchestrator in background and returns immediately. PID file is written and cleaned up on exit. State file is updated each poll cycle. `ninthwave status` reads daemon state when available. `ninthwave stop` terminates the daemon gracefully. Tests pass.
+
+Key files: `core/commands/orchestrate.ts`, `core/commands/status.ts`, `core/cli.ts`
+
+---
+
+### Feat: GitHub Issues adapter — close issues on merge and sync status (M-GHI-2)
+
+**Priority:** Medium
+**Source:** Vision — complete the GitHub Issues lifecycle loop
+**Depends on:** H-GHI-1
+
+Implement `markDone(id)` on `GitHubIssuesBackend` to close the issue via `gh issue close`. During orchestration lifecycle, add status labels to issues: `status:in-progress` when worker starts, `status:pr-open` when PR is created, remove status labels and close issue on merge. Wire into orchestrator's state transition hooks so status syncs automatically when using the GitHub Issues backend.
+
+**Test plan:**
+- Unit test: markDone calls `gh issue close` with correct issue number
+- Unit test: status labels are added/removed at correct state transitions
+- Edge case: issue already closed (markDone is idempotent)
+- Edge case: status label doesn't exist on the repo (skip gracefully, don't error)
+
+Acceptance: Issues are automatically closed when their PRs merge. Status labels reflect orchestrator state during processing. Label operations are idempotent and skip gracefully on missing labels. Tests pass.
+
+Key files: `core/backends/github-issues.ts`, `core/commands/orchestrate.ts`
+
+---
+
+### Feat: Automatic worker retry on crash or OOM (M-RET-1)
+
+**Priority:** Medium
+**Source:** Vision — resilience improvement for production use
+**Depends on:** H-WIP-1
+
+When a worker transitions to "stuck" due to heartbeat timeout or workspace death, automatically retry once before marking as permanently stuck. Clean up the failed worktree, create a fresh one, and relaunch the worker. Add `retryCount` to `OrchestratorItem` and `maxRetries` to `OrchestratorConfig` (default: 1). Log retries as structured events. Only mark as permanently stuck after exhausting retries.
+
+**Test plan:**
+- Unit test: stuck worker triggers retry transition when retryCount < maxRetries
+- Unit test: retry creates fresh worktree and relaunches worker
+- Unit test: permanently stuck after maxRetries exhausted
+- Unit test: retryCount is tracked in item metrics for analytics
+- Edge case: worker crashes during retry (second attempt counts correctly)
+
+Acceptance: Workers that crash are retried once automatically with a fresh worktree. Retry count is tracked per item and reflected in analytics. Items are permanently stuck only after exhausting retries. Retries are logged as structured events. Tests pass. No regression in orchestrator state machine tests.
+
+Key files: `core/orchestrator.ts`, `core/commands/orchestrate.ts`, `core/commands/clean.ts`
+
+---
+
+## Engineering Review (vision exploration, 2026-03-24)
+
+### Docs: Engineering review — core orchestrator and state machine (H-ENG-1)
+
+**Priority:** High
+**Source:** Vision — comprehensive architecture audit
+**Depends on:** None
+
+Run `/plan-eng-review` on the core orchestrator: state machine (`core/orchestrator.ts`), command driver (`core/commands/orchestrate.ts`), and supporting modules (shell execution, git operations, lock management). Audit: state transition correctness, error handling at boundaries, race conditions in concurrent operations, recovery robustness, and test coverage gaps. Document findings in a `docs/reviews/eng-review-orchestrator.md` file. For each finding that requires a code change, add a new TODO item to TODOS.md with the appropriate priority, description, and test plan.
+
+**Test plan:**
+- Run `/plan-eng-review` targeting orchestrator modules
+- Verify review document is comprehensive (covers all 13 states and transitions)
+- Verify each actionable finding has a corresponding TODO with acceptance criteria
+
+Acceptance: `docs/reviews/eng-review-orchestrator.md` exists with structured findings. Every actionable finding (not just observations) has a corresponding TODO added to TODOS.md. Review covers: state transitions, error handling, race conditions, recovery paths, and test coverage. No code changes in this TODO — findings only.
+
+Key files: `core/orchestrator.ts`, `core/commands/orchestrate.ts`, `core/shell.ts`, `core/git.ts`, `core/lock.ts`, `test/orchestrator.test.ts`, `test/orchestrate.test.ts`
+
+---
+
+### Docs: Engineering review — worker lifecycle and communication (H-ENG-2)
+
+**Priority:** High
+**Source:** Vision — comprehensive architecture audit
+**Depends on:** None
+
+Run `/plan-eng-review` on the worker lifecycle: launch (`core/commands/start.ts`), multiplexer abstraction (`core/mux.ts`, `core/cmux.ts`), message sending (`core/send-message.ts`), heartbeat monitoring, cleanup (`core/commands/clean.ts`), and reconciliation (`core/commands/reconcile.ts`). Audit: worker launch reliability, message delivery guarantees, heartbeat accuracy, cleanup completeness, and cross-platform edge cases (cmux vs tmux). Document findings in `docs/reviews/eng-review-workers.md`. Add TODOs for actionable findings.
+
+**Test plan:**
+- Run `/plan-eng-review` targeting worker lifecycle modules
+- Verify review covers both cmux and tmux code paths
+- Verify each actionable finding has a corresponding TODO
+
+Acceptance: `docs/reviews/eng-review-workers.md` exists with structured findings. Every actionable finding has a corresponding TODO added to TODOS.md. Review covers: launch reliability, message delivery, heartbeat accuracy, cleanup completeness, and multiplexer edge cases. No code changes in this TODO — findings only.
+
+Key files: `core/commands/start.ts`, `core/mux.ts`, `core/cmux.ts`, `core/send-message.ts`, `core/commands/clean.ts`, `core/commands/reconcile.ts`, `test/start.test.ts`, `test/mux.test.ts`, `test/clean.test.ts`, `test/reconcile.test.ts`
+
+---
+
+### Docs: Engineering review — data pipeline (parser, analytics, webhooks, templates) (M-ENG-3)
+
+**Priority:** Medium
+**Source:** Vision — comprehensive architecture audit
+**Depends on:** None
+
+Run `/plan-eng-review` on the data pipeline: TODOS.md parser (`core/parser.ts`), analytics (`core/analytics.ts`, `core/commands/analytics.ts`), webhooks (`core/webhooks.ts`), decomposition templates (`core/templates.ts`), cross-repo resolution (`core/cross-repo.ts`), and configuration (`core/config.ts`). Audit: parser robustness with malformed input, analytics data integrity, webhook failure handling, template extensibility, and cross-repo edge cases. Document findings in `docs/reviews/eng-review-data-pipeline.md`. Add TODOs for actionable findings.
+
+**Test plan:**
+- Run `/plan-eng-review` targeting data pipeline modules
+- Verify review covers edge cases in parser (malformed TODOS.md, missing fields)
+- Verify each actionable finding has a corresponding TODO
+
+Acceptance: `docs/reviews/eng-review-data-pipeline.md` exists with structured findings. Every actionable finding has a corresponding TODO added to TODOS.md. Review covers: parser robustness, analytics integrity, webhook failure handling, template extensibility, and cross-repo edge cases. No code changes in this TODO — findings only.
+
+Key files: `core/parser.ts`, `core/analytics.ts`, `core/commands/analytics.ts`, `core/webhooks.ts`, `core/templates.ts`, `core/cross-repo.ts`, `core/config.ts`, `test/parser.test.ts`, `test/analytics.test.ts`, `test/webhooks.test.ts`, `test/templates.test.ts`
+
+---
+
 ## Vision (recurring, 2026-03-24)
 
-
-
-
-
-
-
-
-
-
-### Feat: Explore vision, scope next iteration, and decompose into TODOs (L-VIS-4)
+### Feat: Explore vision, scope next iteration, and decompose into TODOs (L-VIS-5)
 
 **Priority:** Low
 **Source:** Self-improvement loop
-**Depends on:** ORC-*, MUX-*, DF-*, WLD-*, INI-*, STU-*, WHK-*, TPL-*, ANL-*
+**Depends on:** ANL-*, WIP-*, GHI-*, DAE-*, RET-*, ENG-*
 
-This is a recurring meta-item. When all other TODOs are complete, this item triggers a new cycle: (1) Review the current state of ninthwave against the product vision — what's shipped, what's missing, what friction was logged. (2) Read the friction log and identify actionable improvements. (3) Identify the next most impactful capability or refinement. (4) Decompose it into TODO items following the standard format. (5) Add a new copy of this same item (L-VIS-5, etc.) depending on the new terminal items, so the cycle continues.
+This is a recurring meta-item. When all other TODOs are complete, this item triggers a new cycle: (1) Review the current state of ninthwave against the product vision — what's shipped, what's missing, what friction was logged. (2) Read the friction log and identify actionable improvements. (3) Identify the next most impactful capability or refinement. (4) Decompose it into TODO items following the standard format. (5) Add a new copy of this same item (L-VIS-6, etc.) depending on the new terminal items, so the cycle continues.
 
 Acceptance: New TODO items are written to TODOS.md. A new vision exploration item is added depending on the new terminal items. The friction log is reviewed and actionable items are addressed. TODOS.md is non-empty after this item completes.
 
