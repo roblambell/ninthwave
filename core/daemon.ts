@@ -20,6 +20,7 @@ export interface DaemonStateItem {
   title: string;
   lastTransition: string;
   ciFailCount: number;
+  retryCount: number;
 }
 
 export interface DaemonState {
@@ -199,6 +200,7 @@ export function serializeOrchestratorState(
       title: item.todo.title,
       lastTransition: item.lastTransition,
       ciFailCount: item.ciFailCount,
+      retryCount: item.retryCount,
     })),
   };
 }

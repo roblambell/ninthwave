@@ -719,6 +719,19 @@ export async function orchestrateLoop(
         error: result.error,
       });
 
+      // Structured log for retry events
+      if (action.type === "retry" && result.success) {
+        const orchItem = orch.getItem(action.itemId);
+        wrappedLog({
+          ts: new Date().toISOString(),
+          level: "info",
+          event: "worker_retry",
+          itemId: action.itemId,
+          retryCount: orchItem?.retryCount ?? 0,
+          maxRetries: orch.config.maxRetries,
+        });
+      }
+
       // Webhook: pr_merged on successful merge
       if (action.type === "merge" && result.success) {
         deps.notify?.("pr_merged", {

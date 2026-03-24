@@ -37,6 +37,8 @@ export interface OrchestratorItem {
   lastTransition: string;
   /** Number of times CI has failed for this item. */
   ciFailCount: number;
+  /** Number of times this item has been retried after worker crash/OOM. */
+  retryCount: number;
   /** ISO timestamp of the most recent commit on the worktree branch, or null if none. */
   lastCommitTime?: string | null;
 }
@@ -48,6 +50,8 @@ export interface OrchestratorConfig {
   mergeStrategy: MergeStrategy;
   /** Max CI failures before marking stuck. */
   maxCiRetries: number;
+  /** Max worker crash retries before marking permanently stuck. */
+  maxRetries: number;
 }
 
 // ── Poll snapshot ────────────────────────────────────────────────────
@@ -84,7 +88,8 @@ export type ActionType =
   | "notify-ci-failure"
   | "notify-review"
   | "clean"
-  | "rebase";
+  | "rebase"
+  | "retry";
 
 export interface Action {
   type: ActionType;
@@ -143,6 +148,7 @@ export const DEFAULT_CONFIG: OrchestratorConfig = {
   wipLimit: 4,
   mergeStrategy: "asap",
   maxCiRetries: 2,
+  maxRetries: 1,
 };
 
 // ── Memory-aware WIP limit ──────────────────────────────────────────
@@ -216,6 +222,7 @@ export class Orchestrator {
       partition,
       lastTransition: new Date().toISOString(),
       ciFailCount: 0,
+      retryCount: 0,
     });
   }
 
@@ -311,7 +318,7 @@ export class Orchestrator {
         if (snap?.workerAlive) {
           this.transition(item, "implementing");
         } else if (snap?.workerAlive === false) {
-          this.transition(item, "stuck");
+          return this.stuckOrRetry(item);
         }
         return [];
 
@@ -352,10 +359,25 @@ export class Orchestrator {
       // Fall through to handle CI status in the same cycle
       return this.handlePrLifecycle(item, snap);
     }
-    // If worker died without a PR, mark stuck
+    // If worker died without a PR, retry or mark stuck
     if (snap && snap.workerAlive === false && !snap.prNumber) {
-      this.transition(item, "stuck");
+      return this.stuckOrRetry(item);
     }
+    return [];
+  }
+
+  /**
+   * Check if an item should be retried or permanently stuck.
+   * When retries remain, cleans the old worktree and transitions to ready for relaunch.
+   * Returns retry action when retrying, empty array when permanently stuck.
+   */
+  private stuckOrRetry(item: OrchestratorItem): Action[] {
+    if (item.retryCount < this.config.maxRetries) {
+      item.retryCount++;
+      this.transition(item, "ready");
+      return [{ type: "retry", itemId: item.id }];
+    }
+    this.transition(item, "stuck");
     return [];
   }
 
@@ -557,10 +579,12 @@ export class Orchestrator {
         return this.executeClean(item, ctx, deps);
       case "rebase":
         return this.executeRebase(item, action, deps);
+      case "retry":
+        return this.executeRetry(item, ctx, deps);
     }
   }
 
-  /** Launch a worker for an item. Stores workspaceRef on success, marks stuck on failure. */
+  /** Launch a worker for an item. Stores workspaceRef on success, marks stuck or schedules retry on failure. */
   private executeLaunch(
     item: OrchestratorItem,
     ctx: ExecutionContext,
@@ -575,14 +599,24 @@ export class Orchestrator {
         ctx.aiTool,
       );
       if (!result) {
+        if (item.retryCount < this.config.maxRetries) {
+          item.retryCount++;
+          this.transition(item, "ready");
+          return { success: false, error: `Launch failed for ${item.id}, scheduled retry ${item.retryCount}/${this.config.maxRetries}` };
+        }
         this.transition(item, "stuck");
         return { success: false, error: `Launch failed for ${item.id}` };
       }
       item.workspaceRef = result.workspaceRef;
       return { success: true };
     } catch (e: unknown) {
-      this.transition(item, "stuck");
       const msg = e instanceof Error ? e.message : String(e);
+      if (item.retryCount < this.config.maxRetries) {
+        item.retryCount++;
+        this.transition(item, "ready");
+        return { success: false, error: `${msg}, scheduled retry ${item.retryCount}/${this.config.maxRetries}` };
+      }
+      this.transition(item, "stuck");
       return { success: false, error: msg };
     }
   }
@@ -731,6 +765,24 @@ export class Orchestrator {
     if (!sent) {
       return { success: false, error: `Failed to send rebase message to ${item.id}` };
     }
+
+    return { success: true };
+  }
+
+  /** Clean up a failed worker's worktree and workspace to prepare for retry. */
+  private executeRetry(
+    item: OrchestratorItem,
+    ctx: ExecutionContext,
+    deps: OrchestratorDeps,
+  ): ActionResult {
+    // Close the old workspace if it exists
+    if (item.workspaceRef) {
+      deps.closeWorkspace(item.workspaceRef);
+      item.workspaceRef = undefined;
+    }
+
+    // Clean the old worktree to prepare for a fresh launch
+    deps.cleanSingleWorktree(item.id, ctx.worktreeDir, ctx.projectRoot);
 
     return { success: true };
   }

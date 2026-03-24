@@ -52,6 +52,7 @@ function makeOrchestratorItem(
     prNumber,
     lastTransition: "2026-03-24T10:00:00.000Z",
     ciFailCount: 0,
+    retryCount: 0,
   };
 }
 
@@ -229,6 +230,7 @@ describe("state file management", () => {
           title: "Test",
           lastTransition: "2026-03-24T10:00:00.000Z",
           ciFailCount: 0,
+          retryCount: 0,
         },
       ],
     };
@@ -321,6 +323,7 @@ describe("serializeOrchestratorState", () => {
       title: "TODO A-1-1",
       lastTransition: "2026-03-24T10:00:00.000Z",
       ciFailCount: 0,
+      retryCount: 0,
     });
     expect(state.items[1]).toEqual({
       id: "A-1-2",
@@ -329,6 +332,7 @@ describe("serializeOrchestratorState", () => {
       title: "TODO A-1-2",
       lastTransition: "2026-03-24T10:00:00.000Z",
       ciFailCount: 0,
+      retryCount: 0,
     });
   });
 

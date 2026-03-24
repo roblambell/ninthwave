@@ -183,7 +183,23 @@ describe("Orchestrator", () => {
     expect(orch.getItem("H-1-1")!.state).toBe("implementing");
   });
 
-  it("transitions launching to stuck when worker dies", () => {
+  it("retries launching when worker dies and retries remain", () => {
+    orch.addItem(makeTodo("H-1-1"));
+    orch.setState("H-1-1", "launching");
+
+    const actions = orch.processTransitions(
+      snapshotWith([{ id: "H-1-1", workerAlive: false }]),
+    );
+
+    // Item goes ready → launching in same cycle
+    expect(orch.getItem("H-1-1")!.state).toBe("launching");
+    expect(orch.getItem("H-1-1")!.retryCount).toBe(1);
+    expect(actions.some((a) => a.type === "retry")).toBe(true);
+    expect(actions.some((a) => a.type === "launch")).toBe(true);
+  });
+
+  it("transitions launching to stuck when worker dies and retries exhausted", () => {
+    orch = new Orchestrator({ maxRetries: 0 });
     orch.addItem(makeTodo("H-1-1"));
     orch.setState("H-1-1", "launching");
 
@@ -210,7 +226,23 @@ describe("Orchestrator", () => {
     expect(orch.getItem("H-1-1")!.prNumber).toBe(42);
   });
 
-  it("marks implementing as stuck when worker dies without PR", () => {
+  it("retries implementing when worker dies without PR and retries remain", () => {
+    orch.addItem(makeTodo("H-1-1"));
+    orch.setState("H-1-1", "implementing");
+
+    const actions = orch.processTransitions(
+      snapshotWith([{ id: "H-1-1", workerAlive: false }]),
+    );
+
+    // Item goes ready → launching in same cycle
+    expect(orch.getItem("H-1-1")!.state).toBe("launching");
+    expect(orch.getItem("H-1-1")!.retryCount).toBe(1);
+    expect(actions.some((a) => a.type === "retry")).toBe(true);
+    expect(actions.some((a) => a.type === "launch")).toBe(true);
+  });
+
+  it("marks implementing as stuck when worker dies without PR and retries exhausted", () => {
+    orch = new Orchestrator({ maxRetries: 0 });
     orch.addItem(makeTodo("H-1-1"));
     orch.setState("H-1-1", "implementing");
 
@@ -715,7 +747,25 @@ describe("Orchestrator", () => {
       expect(orch.getItem("H-1-1")!.workspaceRef).toBe("workspace:1");
     });
 
-    it("launch: marks stuck when launchSingleItem returns null", () => {
+    it("launch: retries when launchSingleItem returns null and retries remain", () => {
+      const deps = mockDeps({ launchSingleItem: vi.fn(() => null) });
+      orch.addItem(makeTodo("H-1-1"));
+      orch.setState("H-1-1", "launching");
+
+      const result = orch.executeAction(
+        { type: "launch", itemId: "H-1-1" },
+        defaultCtx,
+        deps,
+      );
+
+      expect(result.success).toBe(false);
+      expect(result.error).toContain("scheduled retry");
+      expect(orch.getItem("H-1-1")!.state).toBe("ready");
+      expect(orch.getItem("H-1-1")!.retryCount).toBe(1);
+    });
+
+    it("launch: marks stuck when launchSingleItem returns null and retries exhausted", () => {
+      orch = new Orchestrator({ maxRetries: 0 });
       const deps = mockDeps({ launchSingleItem: vi.fn(() => null) });
       orch.addItem(makeTodo("H-1-1"));
       orch.setState("H-1-1", "launching");
@@ -731,7 +781,28 @@ describe("Orchestrator", () => {
       expect(orch.getItem("H-1-1")!.state).toBe("stuck");
     });
 
-    it("launch: marks stuck when launchSingleItem throws", () => {
+    it("launch: retries when launchSingleItem throws and retries remain", () => {
+      const deps = mockDeps({
+        launchSingleItem: vi.fn(() => { throw new Error("cmux not running"); }),
+      });
+      orch.addItem(makeTodo("H-1-1"));
+      orch.setState("H-1-1", "launching");
+
+      const result = orch.executeAction(
+        { type: "launch", itemId: "H-1-1" },
+        defaultCtx,
+        deps,
+      );
+
+      expect(result.success).toBe(false);
+      expect(result.error).toContain("cmux not running");
+      expect(result.error).toContain("scheduled retry");
+      expect(orch.getItem("H-1-1")!.state).toBe("ready");
+      expect(orch.getItem("H-1-1")!.retryCount).toBe(1);
+    });
+
+    it("launch: marks stuck when launchSingleItem throws and retries exhausted", () => {
+      orch = new Orchestrator({ maxRetries: 0 });
       const deps = mockDeps({
         launchSingleItem: vi.fn(() => { throw new Error("cmux not running"); }),
       });
@@ -1108,13 +1179,60 @@ describe("Orchestrator", () => {
       );
     });
 
+    // ── retry ──────────────────────────────────────────────────
+
+    it("retry: closes workspace and cleans worktree for fresh relaunch", () => {
+      const deps = mockDeps();
+      orch.addItem(makeTodo("H-1-1"));
+      orch.setState("H-1-1", "ready");
+      orch.getItem("H-1-1")!.workspaceRef = "workspace:1";
+      orch.getItem("H-1-1")!.retryCount = 1;
+
+      const result = orch.executeAction(
+        { type: "retry", itemId: "H-1-1" },
+        defaultCtx,
+        deps,
+      );
+
+      expect(result.success).toBe(true);
+      expect(deps.closeWorkspace).toHaveBeenCalledWith("workspace:1");
+      expect(deps.cleanSingleWorktree).toHaveBeenCalledWith(
+        "H-1-1",
+        defaultCtx.worktreeDir,
+        defaultCtx.projectRoot,
+      );
+      // workspaceRef should be cleared for the fresh launch
+      expect(orch.getItem("H-1-1")!.workspaceRef).toBeUndefined();
+    });
+
+    it("retry: skips workspace close when no ref", () => {
+      const deps = mockDeps();
+      orch.addItem(makeTodo("H-1-1"));
+      orch.setState("H-1-1", "ready");
+      orch.getItem("H-1-1")!.retryCount = 1;
+
+      const result = orch.executeAction(
+        { type: "retry", itemId: "H-1-1" },
+        defaultCtx,
+        deps,
+      );
+
+      expect(result.success).toBe(true);
+      expect(deps.closeWorkspace).not.toHaveBeenCalled();
+      expect(deps.cleanSingleWorktree).toHaveBeenCalledWith(
+        "H-1-1",
+        defaultCtx.worktreeDir,
+        defaultCtx.projectRoot,
+      );
+    });
+
     // ── mark-done removed (workers remove their own TODO in PR) ──
 
     it("mark-done action type no longer exists in ActionType", () => {
       // mark-done was removed: workers remove their TODO item in their PR branch.
       // Orchestrator no longer pushes to main after merge.
       const actionTypes: string[] = [
-        "launch", "merge", "notify-ci-failure", "notify-review", "clean", "rebase",
+        "launch", "merge", "notify-ci-failure", "notify-review", "clean", "rebase", "retry",
       ];
       expect(actionTypes).not.toContain("mark-done");
     });
@@ -1262,7 +1380,21 @@ describe("Orchestrator", () => {
         expect(orch.getItem("X-1-1")!.state).toBe("implementing");
       });
 
-      it("→ stuck when worker dead", () => {
+      it("→ launching (retry) when worker dead and retries remain", () => {
+        orch.addItem(makeTodo("X-1-1"));
+        orch.setState("X-1-1", "launching");
+        const actions = orch.processTransitions(
+          snapshotWith([{ id: "X-1-1", workerAlive: false }]),
+        );
+        // Item goes ready → launching in same cycle (launchReadyItems re-launches)
+        expect(orch.getItem("X-1-1")!.state).toBe("launching");
+        expect(orch.getItem("X-1-1")!.retryCount).toBe(1);
+        expect(actions.some((a) => a.type === "retry")).toBe(true);
+        expect(actions.some((a) => a.type === "launch")).toBe(true);
+      });
+
+      it("→ stuck when worker dead and retries exhausted", () => {
+        orch = new Orchestrator({ maxRetries: 0 });
         orch.addItem(makeTodo("X-1-1"));
         orch.setState("X-1-1", "launching");
         orch.processTransitions(
@@ -1299,7 +1431,21 @@ describe("Orchestrator", () => {
         expect(orch.getItem("X-1-1")!.state).toBe("pr-open");
       });
 
-      it("→ stuck when worker dies without PR", () => {
+      it("→ launching (retry) when worker dies without PR and retries remain", () => {
+        orch.addItem(makeTodo("X-1-1"));
+        orch.setState("X-1-1", "implementing");
+        const actions = orch.processTransitions(
+          snapshotWith([{ id: "X-1-1", workerAlive: false }]),
+        );
+        // Item goes ready → launching in same cycle (launchReadyItems re-launches)
+        expect(orch.getItem("X-1-1")!.state).toBe("launching");
+        expect(orch.getItem("X-1-1")!.retryCount).toBe(1);
+        expect(actions.some((a) => a.type === "retry")).toBe(true);
+        expect(actions.some((a) => a.type === "launch")).toBe(true);
+      });
+
+      it("→ stuck when worker dies without PR and retries exhausted", () => {
+        orch = new Orchestrator({ maxRetries: 0 });
         orch.addItem(makeTodo("X-1-1"));
         orch.setState("X-1-1", "implementing");
         orch.processTransitions(
@@ -2470,6 +2616,165 @@ describe("Orchestrator", () => {
       expect(orch.getItem("H-1-1")!.state).toBe("launching");
       expect(orch.getItem("H-1-2")!.state).toBe("ready");
       expect(orch.getItem("H-1-3")!.state).toBe("ready");
+    });
+  });
+
+  // ── Worker crash retry (M-RET-1) ──────────────────────────────
+
+  describe("Worker crash retry", () => {
+    it("stuck worker triggers retry transition when retryCount < maxRetries", () => {
+      orch = new Orchestrator({ maxRetries: 1 });
+      orch.addItem(makeTodo("R-1-1"));
+      orch.setState("R-1-1", "implementing");
+
+      const actions = orch.processTransitions(
+        snapshotWith([{ id: "R-1-1", workerAlive: false }]),
+      );
+
+      // Should retry (ready → launching) instead of going stuck
+      expect(orch.getItem("R-1-1")!.state).toBe("launching");
+      expect(orch.getItem("R-1-1")!.retryCount).toBe(1);
+      const retryActions = actions.filter((a) => a.type === "retry");
+      expect(retryActions).toHaveLength(1);
+      expect(retryActions[0]!.itemId).toBe("R-1-1");
+    });
+
+    it("retry creates fresh worktree and relaunches worker", () => {
+      const deps = mockDeps();
+      orch = new Orchestrator({ maxRetries: 1 });
+      orch.addItem(makeTodo("R-1-1"));
+      orch.setState("R-1-1", "implementing");
+      orch.getItem("R-1-1")!.workspaceRef = "workspace:1";
+
+      // Simulate worker death → processTransitions detects and emits retry + launch actions
+      const actions = orch.processTransitions(
+        snapshotWith([{ id: "R-1-1", workerAlive: false }]),
+      );
+
+      // Execute retry action — cleans old worktree
+      const retryAction = actions.find((a) => a.type === "retry")!;
+      const retryResult = orch.executeAction(retryAction, defaultCtx, deps);
+      expect(retryResult.success).toBe(true);
+      expect(deps.closeWorkspace).toHaveBeenCalledWith("workspace:1");
+      expect(deps.cleanSingleWorktree).toHaveBeenCalledWith(
+        "R-1-1",
+        defaultCtx.worktreeDir,
+        defaultCtx.projectRoot,
+      );
+      expect(orch.getItem("R-1-1")!.workspaceRef).toBeUndefined();
+
+      // Execute launch action — creates fresh worktree
+      const launchAction = actions.find((a) => a.type === "launch")!;
+      const launchResult = orch.executeAction(launchAction, defaultCtx, deps);
+      expect(launchResult.success).toBe(true);
+      expect(orch.getItem("R-1-1")!.workspaceRef).toBe("workspace:1");
+    });
+
+    it("permanently stuck after maxRetries exhausted", () => {
+      orch = new Orchestrator({ maxRetries: 1 });
+      orch.addItem(makeTodo("R-1-1"));
+      orch.setState("R-1-1", "launching");
+      orch.getItem("R-1-1")!.retryCount = 1; // already retried once
+
+      const actions = orch.processTransitions(
+        snapshotWith([{ id: "R-1-1", workerAlive: false }]),
+      );
+
+      expect(orch.getItem("R-1-1")!.state).toBe("stuck");
+      expect(actions.filter((a) => a.type === "retry")).toHaveLength(0);
+    });
+
+    it("retryCount is tracked in item for analytics", () => {
+      orch = new Orchestrator({ maxRetries: 2 });
+      orch.addItem(makeTodo("R-1-1"));
+      orch.setState("R-1-1", "implementing");
+
+      // First crash
+      orch.processTransitions(
+        snapshotWith([{ id: "R-1-1", workerAlive: false }]),
+      );
+      expect(orch.getItem("R-1-1")!.retryCount).toBe(1);
+
+      // Simulate worker alive, then second crash
+      orch.processTransitions(
+        snapshotWith([{ id: "R-1-1", workerAlive: true }]),
+      );
+      expect(orch.getItem("R-1-1")!.state).toBe("implementing");
+
+      orch.processTransitions(
+        snapshotWith([{ id: "R-1-1", workerAlive: false }]),
+      );
+      expect(orch.getItem("R-1-1")!.retryCount).toBe(2);
+    });
+
+    it("worker crashes during retry (second attempt counts correctly)", () => {
+      orch = new Orchestrator({ maxRetries: 2 });
+      orch.addItem(makeTodo("R-1-1"));
+      orch.setState("R-1-1", "launching");
+
+      // First crash → retry (retryCount: 0 → 1)
+      let actions = orch.processTransitions(
+        snapshotWith([{ id: "R-1-1", workerAlive: false }]),
+      );
+      expect(orch.getItem("R-1-1")!.retryCount).toBe(1);
+      expect(orch.getItem("R-1-1")!.state).toBe("launching");
+      expect(actions.some((a) => a.type === "retry")).toBe(true);
+
+      // Second crash → retry (retryCount: 1 → 2)
+      actions = orch.processTransitions(
+        snapshotWith([{ id: "R-1-1", workerAlive: false }]),
+      );
+      expect(orch.getItem("R-1-1")!.retryCount).toBe(2);
+      expect(orch.getItem("R-1-1")!.state).toBe("launching");
+      expect(actions.some((a) => a.type === "retry")).toBe(true);
+
+      // Third crash → permanently stuck (retryCount: 2, maxRetries: 2)
+      actions = orch.processTransitions(
+        snapshotWith([{ id: "R-1-1", workerAlive: false }]),
+      );
+      expect(orch.getItem("R-1-1")!.retryCount).toBe(2);
+      expect(orch.getItem("R-1-1")!.state).toBe("stuck");
+      expect(actions.some((a) => a.type === "retry")).toBe(false);
+    });
+
+    it("defaults maxRetries to 1", () => {
+      expect(DEFAULT_CONFIG.maxRetries).toBe(1);
+    });
+
+    it("retryCount initializes to 0", () => {
+      orch.addItem(makeTodo("R-1-1"));
+      expect(orch.getItem("R-1-1")!.retryCount).toBe(0);
+    });
+
+    it("CI failures do not trigger retry (only worker crash)", () => {
+      orch = new Orchestrator({ maxCiRetries: 0, maxRetries: 1 });
+      orch.addItem(makeTodo("R-1-1"));
+      orch.setState("R-1-1", "ci-failed");
+      orch.getItem("R-1-1")!.ciFailCount = 1;
+
+      orch.processTransitions(
+        snapshotWith([{ id: "R-1-1", ciStatus: "fail", prState: "open" }]),
+      );
+
+      // CI exhaustion goes to stuck, not retried via worker retry
+      expect(orch.getItem("R-1-1")!.state).toBe("stuck");
+      expect(orch.getItem("R-1-1")!.retryCount).toBe(0);
+    });
+
+    it("retry from launching state re-launches in same cycle", () => {
+      orch = new Orchestrator({ maxRetries: 1, wipLimit: 5 });
+      orch.addItem(makeTodo("R-1-1"));
+      orch.setState("R-1-1", "launching");
+
+      const actions = orch.processTransitions(
+        snapshotWith([{ id: "R-1-1", workerAlive: false }]),
+      );
+
+      // Should have both retry and launch actions
+      expect(actions.some((a) => a.type === "retry" && a.itemId === "R-1-1")).toBe(true);
+      expect(actions.some((a) => a.type === "launch" && a.itemId === "R-1-1")).toBe(true);
+      // Final state is launching (ready → launching happened in same cycle)
+      expect(orch.getItem("R-1-1")!.state).toBe("launching");
     });
   });
 });

@@ -10,6 +10,8 @@ export interface ItemMetric {
   id: string;
   state: string;
   ciRetryCount: number;
+  /** Number of worker crash retries for this item. */
+  retryCount: number;
   tool: string;
   prNumber?: number;
   /** Total tokens used by this item's worker session. Null when cost data is unavailable. */
@@ -115,6 +117,7 @@ export function collectRunMetrics(
       id: item.id,
       state: item.state,
       ciRetryCount: item.ciFailCount,
+      retryCount: item.retryCount,
       tool: aiTool,
       ...(item.prNumber != null ? { prNumber: item.prNumber } : {}),
       tokensUsed: cost?.tokensUsed ?? null,
