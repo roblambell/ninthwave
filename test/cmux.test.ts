@@ -178,9 +178,35 @@ describe("sendMessageImpl", () => {
     expect(runner).toHaveBeenCalledTimes(3);
   });
 
-  it("returns false when paste-buffer fails on every attempt", () => {
+  it("falls back to cmux send when paste-buffer fails (TUI surface)", () => {
     const runner = vi.fn((_cmd: string, args: string[]): RunResult => {
-      if (args[0] === "paste-buffer") return fail("paste failed");
+      if (args[0] === "paste-buffer") return fail("Surface is not a terminal");
+      if (args[0] === "read-screen") return ok("claude> ");
+      return ok();
+    });
+    const sleep = vi.fn();
+
+    const result = sendMessageImpl("workspace:1", "msg", {
+      runner,
+      sleep,
+      maxRetries: 1,
+      baseDelayMs: 50,
+    });
+
+    // Should succeed via direct send fallback
+    expect(result).toBe(true);
+    // Verify cmux send was called with \n appended
+    const sendCall = runner.mock.calls.find(
+      ([, args]) => args[0] === "send",
+    );
+    expect(sendCall).toBeTruthy();
+    expect(sendCall![1]).toEqual(["send", "--workspace", "workspace:1", "msg\n"]);
+  });
+
+  it("returns false when both paste-buffer and cmux send fail", () => {
+    const runner = vi.fn((_cmd: string, args: string[]): RunResult => {
+      if (args[0] === "paste-buffer") return fail("Surface is not a terminal");
+      if (args[0] === "send") return fail("send failed too");
       return ok();
     });
     const sleep = vi.fn();

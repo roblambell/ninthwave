@@ -60,7 +60,12 @@ function attemptSend(
     "--workspace",
     workspaceRef,
   ]);
-  if (paste.exitCode !== 0) return false;
+
+  if (paste.exitCode !== 0) {
+    // Paste failed — surface is likely a TUI (e.g., Claude Code), not a raw
+    // terminal. Fall back to `cmux send` which delivers via keystrokes.
+    return attemptDirectSend(workspaceRef, message, runner, sleep);
+  }
 
   // 3. Let the terminal process the pasted text
   sleep(50);
@@ -75,6 +80,28 @@ function attemptSend(
   if (key.exitCode !== 0) return false;
 
   // 5. Verify delivery
+  sleep(100);
+  return verifyDelivery(workspaceRef, message, runner);
+}
+
+/** Fallback: use `cmux send` for non-terminal surfaces (TUIs like Claude Code). */
+function attemptDirectSend(
+  workspaceRef: string,
+  message: string,
+  runner: Runner,
+  sleep: Sleeper,
+): boolean {
+  // cmux send interprets \n as Enter, so append it to submit
+  const text = message.endsWith("\n") ? message : message + "\n";
+  const result = runner("cmux", [
+    "send",
+    "--workspace",
+    workspaceRef,
+    text,
+  ]);
+  if (result.exitCode !== 0) return false;
+
+  // Brief wait then verify
   sleep(100);
   return verifyDelivery(workspaceRef, message, runner);
 }
