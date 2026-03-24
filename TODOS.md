@@ -56,25 +56,6 @@ Key files: `core/parser.ts`, `test/parser.test.ts`
 
 ---
 
-### Fix: Tighten parseCostSummary regex to avoid false positives (L-DP-6)
-
-**Priority:** Low
-**Source:** Eng review M-ENG-3 finding 2.1
-**Depends on:** None
-
-The token-matching regex `tokens?\s*[:=]\s*([\d,]+)` can match false positives like "CSRF token: 12345". Anchor the match more tightly — require "total tokens" or a more specific prefix to reduce false positives.
-
-**Test plan:**
-- Unit test: "CSRF token: 12345" does not produce a token count
-- Unit test: "Total tokens: 42,567" still matches correctly
-- Unit test: existing cost parsing tests still pass
-
-Acceptance: False positive cases are rejected. Legitimate cost summaries are still parsed correctly. Tests cover both cases.
-
-Key files: `core/analytics.ts`, `test/analytics.test.ts`
-
----
-
 ### Fix: commitAnalyticsFiles should unstage on dirty_index (L-DP-7)
 
 **Priority:** Low
