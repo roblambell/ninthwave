@@ -61,7 +61,7 @@ Key files: `README.md`, `core/commands/setup.ts`, `test/setup.test.ts`
 
 **Priority:** Low
 **Source:** Self-improvement loop
-**Depends on:** H-MUX-2, M-MUX-3, M-MUX-4, H-DF-1, H-DF-2, M-DF-3, M-DF-4, L-DF-5
+**Depends on:** H-MUX-2, M-MUX-3, M-MUX-4, H-DF-2, M-DF-3, M-DF-4, L-DF-5
 
 This is a recurring meta-item. When all other TODOs are complete, this item triggers a new cycle: (1) Review the current state of ninthwave against the product vision — what's shipped, what's missing, what friction was logged. (2) Read the friction log and identify actionable improvements. (3) Identify the next most impactful capability or refinement. (4) Decompose it into TODO items following the standard format. (5) Add a new copy of this same item (L-VIS-5, etc.) depending on the new terminal items, so the cycle continues.
 
@@ -75,29 +75,6 @@ Key files: `TODOS.md`, `CLAUDE.md`, `README.md`, `vision.md`
 
 
 
-
-
-
-
-### Refactor: Workers remove their own TODO item in PRs instead of orchestrator push (H-DF-1)
-
-**Priority:** High
-**Source:** Friction #23 — mark-done push race with concurrent auto-merges
-**Depends on:** None
-
-Pivot mark-done ownership: workers remove their TODO item from TODOS.md as part of their PR branch (before opening the PR), so merging the PR automatically removes the item from main. Remove `executeMarkDone()` from the orchestrator state machine — no more raw commit+push to main after merge. Update `todo-worker.md` to instruct workers to delete their `### ... (ID)` block from TODOS.md before creating the PR. The orchestrator's `done` transition no longer needs a mark-done action. Reconcile remains as a safety net for edge cases (PRs that merge without removing their TODO).
-
-**Test plan:**
-- Unit test: orchestrator state machine no longer emits `mark-done` action after merge
-- Unit test: `done` transition succeeds without mark-done side effect
-- Integration test: verify reconcile still catches items merged without TODO removal
-- Review: todo-worker.md includes instruction to remove TODO item before PR
-
-Acceptance: Workers remove their own `### ... (ID)` block from TODOS.md in their PR branch. Orchestrator no longer calls `executeMarkDone()` or pushes to main. No push race condition possible. Reconcile still catches edge cases where a PR merges without removing its TODO.
-
-Key files: `core/orchestrator.ts`, `agents/todo-worker.md`, `test/orchestrator.test.ts`
-
----
 
 ### Feat: Reconcile closes stale cmux workspaces for done items (H-DF-2)
 

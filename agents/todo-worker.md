@@ -125,7 +125,19 @@ For UI/visual changes, run `/design-review` if available. For bug fixes with UI 
 cmux set-status "todo-YOUR_TODO_ID" "Reviewed" --icon "eye.fill" --color "#7c3aed"
 ```
 
-## 8. Create the PR
+## 8. Remove Your TODO from TODOS.md
+
+Before creating the PR, remove your `### ... (YOUR_TODO_ID)` block from `TODOS.md` so that merging the PR automatically marks the item as done. This eliminates the need for the orchestrator to push directly to main after merge.
+
+1. Open `${HUB_ROOT}/TODOS.md`
+2. Find your TODO block: the `### ...` heading line containing `(YOUR_TODO_ID)` and all lines below it up to (but not including) the next `### ` heading or `## ` section heading or end of file
+3. Delete the entire block (heading + body + trailing `---` separator if present)
+4. If removing the item leaves a `## ` section with no remaining `### ` items, remove the empty section too (header + any blank lines / comment lines between the header and the next section)
+5. Commit: `git add TODOS.md && git commit -m "chore: remove YOUR_TODO_ID from TODOS.md"`
+
+> **Why?** The orchestrator used to push a mark-done commit to main after merge, which caused race conditions with concurrent auto-merges. Having workers include TODO removal in their PR branch eliminates the race entirely. Reconcile still runs as a safety net for edge cases.
+
+## 9. Create the PR
 
 ### Push and create the PR
 
@@ -191,7 +203,7 @@ gh pr merge --squash --auto
 cmux set-status "todo-YOUR_TODO_ID" "PR Created" --icon "checkmark.circle.fill" --color "#22c55e"
 ```
 
-## 9. Dogfooding Friction Log (ninthwave projects only)
+## 10. Dogfooding Friction Log (ninthwave projects only)
 
 If the project being worked on is the ninthwave repo itself (dogfooding mode), log any friction encountered during this TODO's implementation. **Skip this step entirely for non-ninthwave projects.**
 
@@ -217,15 +229,16 @@ When logging friction:
 - Be specific: mention the tool, command, or workflow step that caused friction
 - One entry per TODO — keep descriptions concise (1-2 sentences)
 
-## 10. Idle -- Wait for Orchestrator Daemon
+## 11. Idle -- Wait for Orchestrator Daemon
 
 After creating the PR, your implementation work is done. The **orchestrator daemon** (`ninthwave orchestrate`) is a deterministic TypeScript process -- not an LLM -- that handles the entire post-PR lifecycle automatically:
 
 - **Polls GitHub** for CI status, review state, and mergeability
 - **Merges** PRs automatically when CI passes and reviews are approved
-- **Marks TODOs as done** in `TODOS.md` after successful merge
 - **Cleans up** branches and worktrees after merge
 - **Rebases** branches when they fall behind main
+
+> **Note:** TODO removal from `TODOS.md` happens via your PR branch (step 8), not by the orchestrator. Reconcile runs as a safety net for edge cases where a PR merges without removing its TODO.
 
 You do NOT need to poll, watch, or take any post-PR action. The daemon handles it.
 
@@ -291,7 +304,8 @@ Ignore comments prefixed with `[Orchestrator]` -- these are audit trail entries 
 
 ## Constraints (CRITICAL)
 
-- **Do NOT modify** `VERSION`, `CHANGELOG.md`, or `TODOS.md`
+- **Do NOT modify** `VERSION` or `CHANGELOG.md`
+- **TODOS.md**: Only remove your own `### ... (YOUR_TODO_ID)` block (step 8). Do not modify other items.
 - **Do NOT expand scope** beyond the TODO. Note related issues in the PR body but don't fix them.
 - **Do NOT run shipping/deploy workflows**. Version bumping is deferred to post-merge.
 - **Keep changes scoped** to files mentioned in the TODO.

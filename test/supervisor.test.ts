@@ -82,7 +82,6 @@ function mockActionDeps(overrides?: Partial<OrchestratorDeps>): OrchestratorDeps
       workspaceRef: "workspace:1",
     })),
     cleanSingleWorktree: vi.fn(() => true),
-    cmdMarkDone: vi.fn(),
     prMerge: vi.fn(() => true),
     prComment: vi.fn(() => true),
     sendMessage: vi.fn(() => true),

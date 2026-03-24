@@ -62,16 +62,12 @@ function mockDeps(overrides?: Partial<OrchestratorDeps>): OrchestratorDeps {
       workspaceRef: "workspace:1",
     })),
     cleanSingleWorktree: vi.fn(() => true),
-    cmdMarkDone: vi.fn(),
     prMerge: vi.fn(() => true),
     prComment: vi.fn(() => true),
     sendMessage: vi.fn(() => true),
     closeWorkspace: vi.fn(() => true),
     fetchOrigin: vi.fn(),
     ffMerge: vi.fn(),
-    gitAdd: vi.fn(),
-    gitCommit: vi.fn(),
-    gitPush: vi.fn(),
     ...overrides,
   };
 }
@@ -344,14 +340,14 @@ describe("Orchestrator", () => {
 
   // ── 10. Merged → Done ─────────────────────────────────────────
 
-  it("merged transitions to done and emits mark-done action", () => {
+  it("merged transitions to done without emitting mark-done action", () => {
     orch.addItem(makeTodo("H-1-1"));
     orch.setState("H-1-1", "merged");
 
     const actions = orch.processTransitions(emptySnapshot());
 
     expect(orch.getItem("H-1-1")!.state).toBe("done");
-    expect(actions).toContainEqual({ type: "mark-done", itemId: "H-1-1" });
+    expect(actions.every((a) => a.type !== "mark-done")).toBe(true);
   });
 
   // ── 11. Batch complete → launch next ───────────────────────────
@@ -1061,46 +1057,15 @@ describe("Orchestrator", () => {
       );
     });
 
-    // ── mark-done ─────────────────────────────────────────────
+    // ── mark-done removed (workers remove their own TODO in PR) ──
 
-    it("mark-done: calls cmdMarkDone, commits, pushes, and transitions to done", () => {
-      const deps = mockDeps();
-      orch.addItem(makeTodo("H-1-1"));
-      orch.setState("H-1-1", "merged");
-
-      const result = orch.executeAction(
-        { type: "mark-done", itemId: "H-1-1" },
-        defaultCtx,
-        deps,
-      );
-
-      expect(result.success).toBe(true);
-      expect(deps.cmdMarkDone).toHaveBeenCalledWith(["H-1-1"], defaultCtx.todosFile);
-      expect(deps.gitAdd).toHaveBeenCalledWith(defaultCtx.projectRoot, [defaultCtx.todosFile]);
-      expect(deps.gitCommit).toHaveBeenCalledWith(
-        defaultCtx.projectRoot,
-        "chore: mark H-1-1 done in TODOS.md",
-      );
-      expect(deps.gitPush).toHaveBeenCalledWith(defaultCtx.projectRoot);
-      expect(orch.getItem("H-1-1")!.state).toBe("done");
-    });
-
-    it("mark-done: handles cmdMarkDone failure gracefully", () => {
-      const deps = mockDeps({
-        cmdMarkDone: vi.fn(() => { throw new Error("TODOS.md not found"); }),
-      });
-      orch.addItem(makeTodo("H-1-1"));
-      orch.setState("H-1-1", "merged");
-
-      const result = orch.executeAction(
-        { type: "mark-done", itemId: "H-1-1" },
-        defaultCtx,
-        deps,
-      );
-
-      expect(result.success).toBe(false);
-      expect(result.error).toContain("TODOS.md not found");
-      expect(orch.getItem("H-1-1")!.state).toBe("merged");
+    it("mark-done action type no longer exists in ActionType", () => {
+      // mark-done was removed: workers remove their TODO item in their PR branch.
+      // Orchestrator no longer pushes to main after merge.
+      const actionTypes: string[] = [
+        "launch", "merge", "notify-ci-failure", "notify-review", "clean", "rebase",
+      ];
+      expect(actionTypes).not.toContain("mark-done");
     });
 
     // ── rebase ────────────────────────────────────────────────
@@ -1757,12 +1722,12 @@ describe("Orchestrator", () => {
     // ── merged ─────────────────────────────────────────────────────
 
     describe("merged →", () => {
-      it("→ done (always, unconditionally) with mark-done action", () => {
+      it("→ done (always, unconditionally) without mark-done action", () => {
         orch.addItem(makeTodo("X-1-1"));
         orch.setState("X-1-1", "merged");
         const actions = orch.processTransitions(emptySnapshot());
         expect(orch.getItem("X-1-1")!.state).toBe("done");
-        expect(actions).toContainEqual({ type: "mark-done", itemId: "X-1-1" });
+        expect(actions.every((a) => a.type !== "mark-done")).toBe(true);
       });
     });
 
@@ -2144,7 +2109,7 @@ describe("Orchestrator", () => {
 
       expect(orch.getItem("A-1-1")!.state).toBe("done");
       expect(orch.getItem("B-1-1")!.state).toBe("launching");
-      expect(actions.some((a) => a.type === "mark-done" && a.itemId === "A-1-1")).toBe(true);
+      expect(actions.every((a) => a.type !== "mark-done")).toBe(true);
       expect(actions.some((a) => a.type === "launch" && a.itemId === "B-1-1")).toBe(true);
     });
 

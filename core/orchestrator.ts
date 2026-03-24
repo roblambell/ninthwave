@@ -84,7 +84,6 @@ export type ActionType =
   | "notify-ci-failure"
   | "notify-review"
   | "clean"
-  | "mark-done"
   | "rebase";
 
 export interface Action {
@@ -120,16 +119,12 @@ export interface OrchestratorDeps {
     worktreeDir: string,
     projectRoot: string,
   ) => boolean;
-  cmdMarkDone: (ids: string[], todosFile: string) => void;
   prMerge: (repoRoot: string, prNumber: number) => boolean;
   prComment: (repoRoot: string, prNumber: number, body: string) => boolean;
   sendMessage: (workspaceRef: string, message: string) => boolean;
   closeWorkspace: (workspaceRef: string) => boolean;
   fetchOrigin: (repoRoot: string, branch: string) => void;
   ffMerge: (repoRoot: string, branch: string) => void;
-  gitAdd: (repoRoot: string, files: string[]) => void;
-  gitCommit: (repoRoot: string, message: string) => void;
-  gitPush: (repoRoot: string) => void;
   /** Check if a PR is mergeable (no conflicts). Returns true if mergeable, false if conflicting. */
   checkPrMergeable?: (repoRoot: string, prNumber: number) => boolean;
   /** Log a warning message (for situations that need human attention). */
@@ -298,7 +293,7 @@ export class Orchestrator {
 
       case "merged":
         this.transition(item, "done");
-        return [{ type: "mark-done", itemId: item.id }];
+        return [];
 
       case "done":
       case "stuck":
@@ -507,8 +502,6 @@ export class Orchestrator {
         return this.executeNotifyReview(item, action, deps);
       case "clean":
         return this.executeClean(item, ctx, deps);
-      case "mark-done":
-        return this.executeMarkDone(item, ctx, deps);
       case "rebase":
         return this.executeRebase(item, action, deps);
     }
@@ -667,25 +660,6 @@ export class Orchestrator {
     deps.cleanSingleWorktree(item.id, ctx.worktreeDir, ctx.projectRoot);
 
     return { success: true };
-  }
-
-  /** Mark an item as done in TODOS.md, commit, and push. */
-  private executeMarkDone(
-    item: OrchestratorItem,
-    ctx: ExecutionContext,
-    deps: OrchestratorDeps,
-  ): ActionResult {
-    try {
-      deps.cmdMarkDone([item.id], ctx.todosFile);
-      deps.gitAdd(ctx.projectRoot, [ctx.todosFile]);
-      deps.gitCommit(ctx.projectRoot, `chore: mark ${item.id} done in TODOS.md`);
-      deps.gitPush(ctx.projectRoot);
-      this.transition(item, "done");
-      return { success: true };
-    } catch (e: unknown) {
-      const msg = e instanceof Error ? e.message : String(e);
-      return { success: false, error: msg };
-    }
   }
 
   /** Send rebase request to a worker. */

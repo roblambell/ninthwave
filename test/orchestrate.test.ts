@@ -49,16 +49,12 @@ function mockActionDeps(overrides?: Partial<OrchestratorDeps>): OrchestratorDeps
       workspaceRef: "workspace:1",
     })),
     cleanSingleWorktree: vi.fn(() => true),
-    cmdMarkDone: vi.fn(),
     prMerge: vi.fn(() => true),
     prComment: vi.fn(() => true),
     sendMessage: vi.fn(() => true),
     closeWorkspace: vi.fn(() => true),
     fetchOrigin: vi.fn(),
     ffMerge: vi.fn(),
-    gitAdd: vi.fn(),
-    gitCommit: vi.fn(),
-    gitPush: vi.fn(),
     ...overrides,
   };
 }
@@ -578,7 +574,7 @@ describe("orchestrateLoop", () => {
     expect(logs.some((l) => l.event === "orchestrate_complete")).toBe(false);
   });
 
-  it("calls mark-done with commit+push on transition to done", async () => {
+  it("transitions to done without mark-done action (workers remove their own TODO)", async () => {
     const orch = new Orchestrator({ wipLimit: 2, mergeStrategy: "asap" });
     orch.addItem(makeTodo("D-1-1"));
 
@@ -598,7 +594,7 @@ describe("orchestrateLoop", () => {
             items: [{ id: "D-1-1", prNumber: 1, prState: "open", ciStatus: "pass" }],
             readyIds: [],
           };
-        case 4: // After merge, item in merged state → mark-done
+        case 4: // After merge, item transitions merged → done without mark-done
           return { items: [], readyIds: [] };
         default:
           return { items: [], readyIds: [] };
@@ -617,20 +613,9 @@ describe("orchestrateLoop", () => {
     // Item reaches done
     expect(orch.getItem("D-1-1")!.state).toBe("done");
 
-    // mark-done was called
-    expect(actionDeps.cmdMarkDone).toHaveBeenCalledWith(["D-1-1"], defaultCtx.todosFile);
-
-    // git add, commit, push were called to persist the change
-    expect(actionDeps.gitAdd).toHaveBeenCalledWith(defaultCtx.projectRoot, [defaultCtx.todosFile]);
-    expect(actionDeps.gitCommit).toHaveBeenCalledWith(
-      defaultCtx.projectRoot,
-      "chore: mark D-1-1 done in TODOS.md",
-    );
-    expect(actionDeps.gitPush).toHaveBeenCalledWith(defaultCtx.projectRoot);
-
-    // mark-done action was logged
+    // No mark-done action — workers remove their own TODO in their PR branch
     expect(
-      logs.some((l) => l.event === "action_execute" && l.action === "mark-done" && l.itemId === "D-1-1"),
+      logs.every((l) => !(l.event === "action_execute" && l.action === "mark-done")),
     ).toBe(true);
   });
 

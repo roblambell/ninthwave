@@ -21,9 +21,8 @@ import { parseTodos } from "../parser.ts";
 import { checkPrStatus } from "./watch.ts";
 import { launchSingleItem, detectAiTool } from "./start.ts";
 import { cleanSingleWorktree } from "./clean.ts";
-import { cmdMarkDone } from "./mark-done.ts";
 import { prMerge, prComment, getRepoOwner } from "../gh.ts";
-import { fetchOrigin, ffMerge, gitAdd, gitCommit, gitPush } from "../git.ts";
+import { fetchOrigin, ffMerge } from "../git.ts";
 import { type Multiplexer, getMux } from "../mux.ts";
 import { reconcile } from "./reconcile.ts";
 import { die } from "../output.ts";
@@ -693,16 +692,12 @@ export async function cmdOrchestrate(
   const actionDeps: OrchestratorDeps = {
     launchSingleItem,
     cleanSingleWorktree,
-    cmdMarkDone,
     prMerge: (repoRoot, prNumber) => prMerge(repoRoot, prNumber),
     prComment: (repoRoot, prNumber, body) => prComment(repoRoot, prNumber, body),
     sendMessage: (ref, msg) => mux.sendMessage(ref, msg),
     closeWorkspace: (ref) => mux.closeWorkspace(ref),
     fetchOrigin,
     ffMerge,
-    gitAdd,
-    gitCommit,
-    gitPush,
   };
 
   // Graceful SIGINT handling
