@@ -17,10 +17,24 @@ import {
   setupGlobal,
   createSkillSymlinks,
   generateShimContent,
+  checkPrerequisites,
 } from "../core/commands/setup.ts";
+import type { CommandChecker, AuthChecker } from "../core/commands/setup.ts";
 
 // Store original env
 const originalEnv = { ...process.env };
+
+/**
+ * Stub deps where all prerequisites are present and authenticated.
+ * Passed to setupProject so tests don't depend on host machine state.
+ */
+const allPresentDeps = {
+  commandExists: (() => true) as CommandChecker,
+  ghAuthCheck: (() => ({
+    authenticated: true,
+    stderr: "",
+  })) as AuthChecker,
+};
 
 /**
  * Create a minimal fake bundle directory with the expected structure.
@@ -74,12 +88,134 @@ afterEach(() => {
   process.env = { ...originalEnv };
 });
 
+// --- checkPrerequisites ---
+
+describe("checkPrerequisites", () => {
+  it("returns allPresent=true when cmux and gh are available", () => {
+    const commandExists: CommandChecker = () => true;
+    const ghAuthCheck: AuthChecker = () => ({
+      authenticated: true,
+      stderr: "",
+    });
+
+    const result = checkPrerequisites(commandExists, ghAuthCheck);
+
+    expect(result.allPresent).toBe(true);
+    expect(result.missing).toEqual([]);
+    expect(result.warnings).toEqual([]);
+  });
+
+  it("detects missing cmux and prints install instructions", () => {
+    const logs: string[] = [];
+    const origLog = console.log;
+    console.log = (...args: unknown[]) => logs.push(args.join(" "));
+
+    const commandExists: CommandChecker = (cmd) => cmd !== "cmux";
+    const ghAuthCheck: AuthChecker = () => ({
+      authenticated: true,
+      stderr: "",
+    });
+
+    const result = checkPrerequisites(commandExists, ghAuthCheck);
+
+    console.log = origLog;
+
+    expect(result.allPresent).toBe(false);
+    expect(result.missing).toContain("cmux");
+
+    // Should print install instructions
+    const output = logs.join("\n");
+    expect(output).toContain("cmux");
+    expect(output).toContain("brew install --cask manaflow-ai/cmux/cmux");
+  });
+
+  it("detects missing gh and prints install instructions", () => {
+    const logs: string[] = [];
+    const origLog = console.log;
+    console.log = (...args: unknown[]) => logs.push(args.join(" "));
+
+    const commandExists: CommandChecker = (cmd) => cmd !== "gh";
+    const ghAuthCheck: AuthChecker = () => ({
+      authenticated: true,
+      stderr: "",
+    });
+
+    const result = checkPrerequisites(commandExists, ghAuthCheck);
+
+    console.log = origLog;
+
+    expect(result.allPresent).toBe(false);
+    expect(result.missing).toContain("gh");
+
+    // Should print install instructions
+    const output = logs.join("\n");
+    expect(output).toContain("gh");
+    expect(output).toContain("brew install gh");
+  });
+
+  it("detects both cmux and gh missing", () => {
+    const commandExists: CommandChecker = () => false;
+    const ghAuthCheck: AuthChecker = () => ({
+      authenticated: false,
+      stderr: "",
+    });
+
+    const result = checkPrerequisites(commandExists, ghAuthCheck);
+
+    expect(result.allPresent).toBe(false);
+    expect(result.missing).toContain("cmux");
+    expect(result.missing).toContain("gh");
+  });
+
+  it("warns when gh is installed but not authenticated", () => {
+    const logs: string[] = [];
+    const origLog = console.log;
+    console.log = (...args: unknown[]) => logs.push(args.join(" "));
+
+    const commandExists: CommandChecker = () => true;
+    const ghAuthCheck: AuthChecker = () => ({
+      authenticated: false,
+      stderr: "not logged in",
+    });
+
+    const result = checkPrerequisites(commandExists, ghAuthCheck);
+
+    console.log = origLog;
+
+    // Prerequisites are still "present" (installed) — auth is a warning
+    expect(result.allPresent).toBe(true);
+    expect(result.missing).toEqual([]);
+    expect(result.warnings).toHaveLength(1);
+    expect(result.warnings[0]).toContain("not authenticated");
+    expect(result.warnings[0]).toContain("gh auth login");
+
+    // Should print actionable auth instructions
+    const output = logs.join("\n");
+    expect(output).toContain("gh auth login");
+  });
+
+  it("does not check gh auth when gh is missing", () => {
+    let authCheckCalled = false;
+    const commandExists: CommandChecker = (cmd) => cmd !== "gh";
+    const ghAuthCheck: AuthChecker = () => {
+      authCheckCalled = true;
+      return { authenticated: false, stderr: "" };
+    };
+
+    checkPrerequisites(commandExists, ghAuthCheck);
+
+    expect(authCheckCalled).toBe(false);
+  });
+});
+
+// --- setupProject ---
+
 describe("setupProject", () => {
   it("creates .ninthwave/ directory with work shim, config, and domains.conf", () => {
     const projectDir = setupTempRepo();
     const bundleDir = createFakeBundle(projectDir + "-bundle-parent");
 
-    setupProject(projectDir, bundleDir);
+    setupProject(projectDir, bundleDir, allPresentDeps);
 
     // .ninthwave/dir should NOT exist (no longer created)
     expect(existsSync(join(projectDir, ".ninthwave/dir"))).toBe(false);
@@ -116,7 +252,7 @@ describe("setupProject", () => {
     const projectDir = setupTempRepo();
     const bundleDir = createFakeBundle(projectDir + "-bundle-parent");
 
-    setupProject(projectDir, bundleDir);
+    setupProject(projectDir, bundleDir, allPresentDeps);
 
     expect(existsSync(join(projectDir, "TODOS.md"))).toBe(true);
     const content = readFileSync(join(projectDir, "TODOS.md"), "utf-8");
@@ -127,7 +263,7 @@ describe("setupProject", () => {
     const projectDir = setupTempRepo();
     const bundleDir = createFakeBundle(projectDir + "-bundle-parent");
 
-    setupProject(projectDir, bundleDir);
+    setupProject(projectDir, bundleDir, allPresentDeps);
 
     for (const skill of [
       "work",
@@ -149,7 +285,7 @@ describe("setupProject", () => {
     const projectDir = setupTempRepo();
     const bundleDir = createFakeBundle(projectDir + "-bundle-parent");
 
-    setupProject(projectDir, bundleDir);
+    setupProject(projectDir, bundleDir, allPresentDeps);
 
     expect(
       existsSync(join(projectDir, ".claude/agents/todo-worker.md")),
@@ -173,7 +309,7 @@ describe("setupProject", () => {
     const projectDir = setupTempRepo();
     const bundleDir = createFakeBundle(projectDir + "-bundle-parent");
 
-    setupProject(projectDir, bundleDir);
+    setupProject(projectDir, bundleDir, allPresentDeps);
 
     expect(existsSync(join(projectDir, ".gitignore"))).toBe(true);
     const content = readFileSync(join(projectDir, ".gitignore"), "utf-8");
@@ -187,14 +323,14 @@ describe("setupProject", () => {
     // Pre-create .gitignore with some content
     writeFileSync(join(projectDir, ".gitignore"), "node_modules/\n");
 
-    setupProject(projectDir, bundleDir);
+    setupProject(projectDir, bundleDir, allPresentDeps);
 
     const content = readFileSync(join(projectDir, ".gitignore"), "utf-8");
     expect(content).toContain("node_modules/");
     expect(content).toContain(".worktrees/");
 
     // Run again — should not duplicate
-    setupProject(projectDir, bundleDir);
+    setupProject(projectDir, bundleDir, allPresentDeps);
 
     const content2 = readFileSync(join(projectDir, ".gitignore"), "utf-8");
     const matches = content2.match(/\.worktrees\//g);
@@ -205,7 +341,7 @@ describe("setupProject", () => {
     const projectDir = setupTempRepo();
     const bundleDir = createFakeBundle(projectDir + "-bundle-parent");
 
-    setupProject(projectDir, bundleDir);
+    setupProject(projectDir, bundleDir, allPresentDeps);
 
     expect(existsSync(join(projectDir, ".ninthwave/version"))).toBe(true);
     const version = readFileSync(
@@ -215,6 +351,52 @@ describe("setupProject", () => {
     // Should have some version string (git describe output)
     expect(version.trim()).toBeTruthy();
   });
+
+  it("aborts when prerequisites are missing", () => {
+    const projectDir = setupTempRepo();
+    const bundleDir = createFakeBundle(projectDir + "-bundle-parent");
+
+    const missingDeps = {
+      commandExists: (() => false) as CommandChecker,
+      ghAuthCheck: (() => ({
+        authenticated: false,
+        stderr: "",
+      })) as AuthChecker,
+    };
+
+    // setupProject calls die() which calls process.exit(1)
+    // We catch the exit to verify it aborts
+    const origExit = process.exit;
+    let exitCode: number | undefined;
+    process.exit = ((code: number) => {
+      exitCode = code;
+      throw new Error("process.exit called");
+    }) as never;
+
+    try {
+      setupProject(projectDir, bundleDir, missingDeps);
+    } catch (e: unknown) {
+      // Expected — die() calls process.exit
+    } finally {
+      process.exit = origExit;
+    }
+
+    expect(exitCode).toBe(1);
+    // Should NOT have created project files since prerequisites failed
+    expect(existsSync(join(projectDir, ".ninthwave/work"))).toBe(false);
+  });
+
+  it("completes successfully when all prerequisites are met", () => {
+    const projectDir = setupTempRepo();
+    const bundleDir = createFakeBundle(projectDir + "-bundle-parent");
+
+    // Should not throw
+    setupProject(projectDir, bundleDir, allPresentDeps);
+
+    // Verify setup completed
+    expect(existsSync(join(projectDir, ".ninthwave/work"))).toBe(true);
+    expect(existsSync(join(projectDir, "TODOS.md"))).toBe(true);
+  });
 });
 
 describe("setupProject — idempotency", () => {
@@ -223,7 +405,7 @@ describe("setupProject — idempotency", () => {
     const bundleDir = createFakeBundle(projectDir + "-bundle-parent");
 
     // First run
-    setupProject(projectDir, bundleDir);
+    setupProject(projectDir, bundleDir, allPresentDeps);
 
     // Capture state after first run
     const firstShim = readFileSync(
@@ -245,7 +427,7 @@ describe("setupProject — idempotency", () => {
     );
 
     // Second run
-    setupProject(projectDir, bundleDir);
+    setupProject(projectDir, bundleDir, allPresentDeps);
 
     // Verify state is identical
     expect(readFileSync(join(projectDir, ".ninthwave/work"), "utf-8")).toBe(
@@ -294,7 +476,7 @@ describe("setupProject — relative symlinks survive directory moves", () => {
 
     const bundleDir = createFakeBundle(join(container, "bundle-parent"));
 
-    setupProject(projectDir, bundleDir);
+    setupProject(projectDir, bundleDir, allPresentDeps);
 
     // Verify symlinks work before the move
     expect(existsSync(join(projectDir, ".claude/skills/work"))).toBe(true);
@@ -340,7 +522,7 @@ describe("setupProject — preserves existing config", () => {
       "CUSTOM_SETTING=true\n",
     );
 
-    setupProject(projectDir, bundleDir);
+    setupProject(projectDir, bundleDir, allPresentDeps);
 
     const config = readFileSync(
       join(projectDir, ".ninthwave/config"),
@@ -360,7 +542,7 @@ describe("setupProject — preserves existing config", () => {
       "auth=auth\n",
     );
 
-    setupProject(projectDir, bundleDir);
+    setupProject(projectDir, bundleDir, allPresentDeps);
 
     const domains = readFileSync(
       join(projectDir, ".ninthwave/domains.conf"),
@@ -379,7 +561,7 @@ describe("setupProject — preserves existing config", () => {
       "# My Project TODOs\n\n- [ ] Task 1\n",
     );
 
-    setupProject(projectDir, bundleDir);
+    setupProject(projectDir, bundleDir, allPresentDeps);
 
     const todos = readFileSync(join(projectDir, "TODOS.md"), "utf-8");
     expect(todos).toContain("My Project TODOs");
@@ -506,7 +688,7 @@ describe("setupProject — legacy cleanup", () => {
     writeFileSync(join(projectDir, ".ninthwave/dir"), "/old/path\n");
     expect(existsSync(join(projectDir, ".ninthwave/dir"))).toBe(true);
 
-    setupProject(projectDir, bundleDir);
+    setupProject(projectDir, bundleDir, allPresentDeps);
 
     // Legacy file should be cleaned up
     expect(existsSync(join(projectDir, ".ninthwave/dir"))).toBe(false);

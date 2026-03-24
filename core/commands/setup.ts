@@ -15,8 +15,118 @@ import {
 } from "fs";
 import { join, relative, dirname } from "path";
 import { getBundleDir } from "../paths.ts";
-import { info, die } from "../output.ts";
+import { info, die, warn, RED, YELLOW, GREEN, RESET, BOLD, DIM } from "../output.ts";
 import { run } from "../shell.ts";
+
+/**
+ * Prerequisite descriptor for a required external tool.
+ */
+interface Prerequisite {
+  name: string;
+  installCmd: string;
+  purpose: string;
+}
+
+const PREREQUISITES: Prerequisite[] = [
+  {
+    name: "cmux",
+    installCmd: "brew install --cask manaflow-ai/cmux/cmux",
+    purpose: "Parallel terminal sessions with visual sidebar",
+  },
+  {
+    name: "gh",
+    installCmd: "brew install gh",
+    purpose: "GitHub PR operations",
+  },
+];
+
+/**
+ * Check whether a command is available on PATH.
+ * Default implementation uses `which`; tests can inject a stub.
+ */
+export type CommandChecker = (cmd: string) => boolean;
+
+const defaultCommandExists: CommandChecker = (cmd: string): boolean => {
+  const result = run("which", [cmd]);
+  return result.exitCode === 0;
+};
+
+/**
+ * Check whether `gh` is authenticated.
+ * Default implementation runs `gh auth status`; tests can inject a stub.
+ */
+export type AuthChecker = () => { authenticated: boolean; stderr: string };
+
+const defaultGhAuthCheck: AuthChecker = (): {
+  authenticated: boolean;
+  stderr: string;
+} => {
+  const result = run("gh", ["auth", "status"]);
+  return {
+    authenticated: result.exitCode === 0,
+    stderr: result.stderr,
+  };
+};
+
+export interface PrerequisiteResult {
+  /** true if all required prerequisites are present */
+  allPresent: boolean;
+  /** names of missing prerequisites */
+  missing: string[];
+  /** warnings (e.g. gh not authenticated) */
+  warnings: string[];
+}
+
+/**
+ * Check for required prerequisites and print actionable messages.
+ *
+ * Returns a result object describing what's missing/warning.
+ * Callers decide whether to abort.
+ */
+export function checkPrerequisites(
+  commandExists: CommandChecker = defaultCommandExists,
+  ghAuthCheck: AuthChecker = defaultGhAuthCheck,
+): PrerequisiteResult {
+  const missing: string[] = [];
+  const warnings: string[] = [];
+
+  console.log("Checking prerequisites...");
+
+  for (const prereq of PREREQUISITES) {
+    if (commandExists(prereq.name)) {
+      console.log(`  ${GREEN}✓${RESET} ${prereq.name} ${DIM}(${prereq.purpose})${RESET}`);
+    } else {
+      console.log(`  ${RED}✗${RESET} ${prereq.name} ${DIM}(${prereq.purpose})${RESET}`);
+      console.log(`    Install: ${BOLD}${prereq.installCmd}${RESET}`);
+      missing.push(prereq.name);
+    }
+  }
+
+  // If gh is present, check authentication
+  if (!missing.includes("gh") && commandExists("gh")) {
+    const auth = ghAuthCheck();
+    if (!auth.authenticated) {
+      console.log(`  ${YELLOW}⚠${RESET} gh is not authenticated`);
+      console.log(`    Run: ${BOLD}gh auth login${RESET}`);
+      warnings.push("gh is installed but not authenticated — run: gh auth login");
+    }
+  }
+
+  console.log();
+
+  if (missing.length > 0) {
+    console.log(
+      `${RED}Missing prerequisites:${RESET} ${missing.join(", ")}. Install them and re-run ${BOLD}ninthwave setup${RESET}.`,
+    );
+    console.log();
+  }
+
+  return {
+    allPresent: missing.length === 0,
+    missing,
+    warnings,
+  };
+}
 
 const SKILLS = ["work", "decompose", "todo-preview", "ninthwave-upgrade"];
 
@@ -107,11 +217,26 @@ exit 1
 
 /**
  * Project setup: seed .ninthwave/, TODOS.md, skill symlinks, agent copies, .gitignore.
+ *
+ * Optional `deps` parameter allows injecting stubs for testing.
  */
-export function setupProject(projectDir: string, bundleDir: string): void {
+export function setupProject(
+  projectDir: string,
+  bundleDir: string,
+  deps?: {
+    commandExists?: CommandChecker;
+    ghAuthCheck?: AuthChecker;
+  },
+): void {
   console.log(`Setting up ninthwave in: ${projectDir}`);
   console.log(`Bundle location: ${bundleDir}`);
   console.log();
+
+  // Check prerequisites before proceeding
+  const prereqs = checkPrerequisites(deps?.commandExists, deps?.ghAuthCheck);
+  if (!prereqs.allPresent) {
+    die(`Missing required tools: ${prereqs.missing.join(", ")}`);
+  }
 
   // --- .ninthwave/ config ---
   console.log("Config (.ninthwave/)...");

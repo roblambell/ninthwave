@@ -159,7 +159,7 @@ curl -fsSL https://raw.githubusercontent.com/ninthwave-sh/ninthwave/main/install
 |------------|---------|---------|
 | AI coding tool | Runs the sessions | [Claude Code](https://claude.ai/download), [OpenCode](https://opencode.ai), or [Copilot CLI](https://docs.github.com/en/copilot) |
 | [cmux](https://cmux.com) | Parallel terminal sessions with visual sidebar | `brew install --cask manaflow-ai/cmux/cmux` |
-| [gh](https://cli.github.com) | PR operations | `brew install gh` |
+| [gh](https://cli.github.com) | PR operations | `brew install gh && gh auth login` |
 
 ### Set up a project
 
@@ -263,7 +263,6 @@ Workers reference these skill names during execution. If available, they're used
 | Path | Purpose |
 |------|---------|
 | `.ninthwave/work` | CLI shim that calls the ninthwave binary |
-| `.ninthwave/dir` | Points to the ninthwave resource directory |
 | `.ninthwave/config` | Project settings (LOC extensions, domain mappings) |
 | `.ninthwave/domains.conf` | Custom domain slug mappings |
 | `.claude/skills/*` | Symlinks to skills (for discovery) |
