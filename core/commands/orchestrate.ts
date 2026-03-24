@@ -23,7 +23,7 @@ import { cleanSingleWorktree } from "./clean.ts";
 import { cmdMarkDone } from "./mark-done.ts";
 import { prMerge, prComment, getRepoOwner } from "../gh.ts";
 import { fetchOrigin, ffMerge, gitAdd, gitCommit, gitPush } from "../git.ts";
-import * as cmux from "../cmux.ts";
+import { type Multiplexer, getMux } from "../mux.ts";
 import { reconcile } from "./reconcile.ts";
 import { die } from "../output.ts";
 import type { TodoItem } from "../types.ts";
@@ -62,6 +62,7 @@ export function buildSnapshot(
   orch: Orchestrator,
   projectRoot: string,
   _worktreeDir: string,
+  mux: Multiplexer = getMux(),
 ): PollSnapshot {
   const items: ItemSnapshot[] = [];
   const readyIds: string[] = [];
@@ -124,7 +125,7 @@ export function buildSnapshot(
 
     // Check worker alive for early-stage items
     if (orchItem.state === "launching" || orchItem.state === "implementing") {
-      snap.workerAlive = isWorkerAlive(orchItem);
+      snap.workerAlive = isWorkerAlive(orchItem, mux);
     }
 
     items.push(snap);
@@ -134,9 +135,9 @@ export function buildSnapshot(
 }
 
 /** Check if a worker's cmux workspace is still running. */
-function isWorkerAlive(item: OrchestratorItem): boolean {
+function isWorkerAlive(item: OrchestratorItem, mux: Multiplexer): boolean {
   if (!item.workspaceRef) return false;
-  const workspaces = cmux.listWorkspaces();
+  const workspaces = mux.listWorkspaces();
   if (!workspaces) return false;
   return workspaces.includes(item.workspaceRef) || workspaces.includes(item.id);
 }
@@ -614,14 +615,15 @@ export async function cmdOrchestrate(
   const ctx: ExecutionContext = { projectRoot, worktreeDir, todosFile, aiTool };
 
   // Real action dependencies
+  const mux = getMux();
   const actionDeps: OrchestratorDeps = {
     launchSingleItem,
     cleanSingleWorktree,
     cmdMarkDone,
     prMerge: (repoRoot, prNumber) => prMerge(repoRoot, prNumber),
     prComment: (repoRoot, prNumber, body) => prComment(repoRoot, prNumber, body),
-    sendMessage: cmux.sendMessage,
-    closeWorkspace: cmux.closeWorkspace,
+    sendMessage: (ref, msg) => mux.sendMessage(ref, msg),
+    closeWorkspace: (ref) => mux.closeWorkspace(ref),
     fetchOrigin,
     ffMerge,
     gitAdd,
@@ -661,7 +663,7 @@ export async function cmdOrchestrate(
   }
 
   const loopDeps: OrchestrateLoopDeps = {
-    buildSnapshot,
+    buildSnapshot: (o, pr, wd) => buildSnapshot(o, pr, wd, mux),
     sleep: (ms) => interruptibleSleep(ms, abortController.signal),
     log: structuredLog,
     actionDeps,

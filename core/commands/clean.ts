@@ -5,7 +5,7 @@ import { join, basename } from "path";
 import { die, warn, info, GREEN, RESET } from "../output.ts";
 import { isBranchMerged, removeWorktree, deleteBranch, deleteRemoteBranch } from "../git.ts";
 import { prList } from "../gh.ts";
-import * as cmux from "../cmux.ts";
+import { type Multiplexer, getMux } from "../mux.ts";
 import { releasePartition } from "../partitions.ts";
 import {
   getWorktreeInfo,
@@ -13,13 +13,13 @@ import {
 } from "../cross-repo.ts";
 
 /** Close all cmux workspaces that belong to todo items. */
-export function cmdCloseWorkspaces(): void {
-  if (!cmux.isAvailable()) {
+export function cmdCloseWorkspaces(mux: Multiplexer = getMux()): void {
+  if (!mux.isAvailable()) {
     warn("cmux not available, skipping workspace close");
     return;
   }
 
-  const workspaces = cmux.listWorkspaces();
+  const workspaces = mux.listWorkspaces();
   if (!workspaces) {
     console.log("No cmux workspaces found");
     return;
@@ -34,7 +34,7 @@ export function cmdCloseWorkspaces(): void {
       const wsRef = wsMatch[0];
       const todoId = todoMatch[1];
       info(`Closing workspace ${wsRef} (${todoId})`);
-      if (!cmux.closeWorkspace(wsRef)) {
+      if (!mux.closeWorkspace(wsRef)) {
         warn(`Failed to close ${wsRef}`);
       }
       closed++;
@@ -45,15 +45,15 @@ export function cmdCloseWorkspaces(): void {
 }
 
 /** Close cmux workspace for a specific TODO ID. */
-export function cmdCloseWorkspace(targetId: string): void {
+export function cmdCloseWorkspace(targetId: string, mux: Multiplexer = getMux()): void {
   if (!targetId) die("Usage: ninthwave close-workspace <ID>");
 
-  if (!cmux.isAvailable()) {
+  if (!mux.isAvailable()) {
     warn(`cmux not available, skipping workspace close for ${targetId}`);
     return;
   }
 
-  const workspaces = cmux.listWorkspaces();
+  const workspaces = mux.listWorkspaces();
   if (!workspaces) return;
 
   for (const line of workspaces.split("\n")) {
@@ -61,7 +61,7 @@ export function cmdCloseWorkspace(targetId: string): void {
     if (wsMatch && line.includes(targetId)) {
       const wsRef = wsMatch[0];
       info(`Closing workspace ${wsRef} for ${targetId}`);
-      if (!cmux.closeWorkspace(wsRef)) {
+      if (!mux.closeWorkspace(wsRef)) {
         warn(`Failed to close ${wsRef}`);
       }
       return;
@@ -92,14 +92,15 @@ export function cmdClean(
   args: string[],
   worktreeDir: string,
   projectRoot: string,
+  mux: Multiplexer = getMux(),
 ): void {
   const targetId = args[0] ?? "";
 
   // Close workspaces — scoped to target when cleaning a specific item
   if (targetId) {
-    cmdCloseWorkspace(targetId);
+    cmdCloseWorkspace(targetId, mux);
   } else {
-    cmdCloseWorkspaces();
+    cmdCloseWorkspaces(mux);
   }
 
   if (!existsSync(worktreeDir)) {

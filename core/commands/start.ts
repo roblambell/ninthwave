@@ -13,7 +13,7 @@ import {
   deleteBranch,
   createWorktree,
 } from "../git.ts";
-import * as cmux from "../cmux.ts";
+import { type Multiplexer, getMux } from "../mux.ts";
 import {
   allocatePartition,
   getPartitionFor,
@@ -88,6 +88,7 @@ function launchAiSession(
   id: string,
   safeTitle: string,
   promptFile: string,
+  mux: Multiplexer,
 ): string | null {
   let cmd = "";
   let initialPrompt = "Start";
@@ -110,7 +111,7 @@ function launchAiSession(
       );
   }
 
-  const wsRef = cmux.launchWorkspace(worktreePath, cmd);
+  const wsRef = mux.launchWorkspace(worktreePath, cmd);
   if (!wsRef) {
     warn(`cmux launch failed for ${id} -- is cmux running?`);
     return null;
@@ -118,7 +119,7 @@ function launchAiSession(
 
   // Give the workspace a moment to initialize, then send initial prompt
   Bun.sleepSync(2000);
-  if (!cmux.sendMessage(wsRef, initialPrompt + "\n")) {
+  if (!mux.sendMessage(wsRef, initialPrompt + "\n")) {
     warn(`Failed to send initial prompt to ${wsRef} for ${id}`);
   }
 
@@ -163,6 +164,7 @@ export function launchSingleItem(
   worktreeDir: string,
   projectRoot: string,
   aiTool: string,
+  mux: Multiplexer = getMux(),
 ): LaunchResult | null {
   const targetRepo = resolveRepo(item.repoAlias, projectRoot);
   const branchName = `todo/${item.id}`;
@@ -259,6 +261,7 @@ ${todoText}`;
       item.id,
       safeTitle,
       promptFile,
+      mux,
     );
     if (!workspaceRef) return null;
     return { worktreePath, workspaceRef };
@@ -356,11 +359,12 @@ export function cmdStart(
     getWorktreeInfo(todoId, crossRepoIndex, worktreeDir),
   );
 
+  const mux = getMux();
   const launched: string[] = [];
 
   for (const id of ids) {
     const item = itemMap.get(id)!;
-    launchSingleItem(item, todosFile, worktreeDir, projectRoot, aiTool);
+    launchSingleItem(item, todosFile, worktreeDir, projectRoot, aiTool, mux);
     launched.push(id);
   }
 
