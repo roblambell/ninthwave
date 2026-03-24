@@ -566,6 +566,35 @@ export async function orchestrateLoop(
   }
 }
 
+// ── Status pane management ──────────────────────────────────────────
+
+/** Status pane workspace name used for identification. */
+export const STATUS_PANE_NAME = "nw-status";
+
+/**
+ * Launch a dedicated status pane that runs `ninthwave status --watch`.
+ * Returns the workspace ref or null if mux is not available.
+ */
+export function launchStatusPane(
+  mux: Multiplexer,
+  projectRoot: string,
+): string | null {
+  if (!mux.isAvailable()) return null;
+  return mux.launchWorkspace(projectRoot, "ninthwave status --watch");
+}
+
+/**
+ * Close the status pane opened by launchStatusPane.
+ */
+export function closeStatusPane(
+  mux: Multiplexer,
+  ref: string | null,
+): void {
+  if (ref) {
+    mux.closeWorkspace(ref);
+  }
+}
+
 // ── Memory-aware WIP default ────────────────────────────────────────
 
 /**
@@ -769,6 +798,18 @@ export async function cmdOrchestrate(
     ...(repoUrl ? { repoUrl } : {}),
   };
 
+  // Launch status pane if running inside a multiplexer
+  const statusPaneRef = launchStatusPane(mux, projectRoot);
+  if (statusPaneRef) {
+    structuredLog({
+      ts: new Date().toISOString(),
+      level: "info",
+      event: "status_pane_opened",
+      ref: statusPaneRef,
+      name: STATUS_PANE_NAME,
+    });
+  }
+
   try {
     await orchestrateLoop(
       orch,
@@ -778,6 +819,16 @@ export async function cmdOrchestrate(
       abortController.signal,
     );
   } finally {
+    // Close status pane on completion (or SIGINT)
+    if (statusPaneRef) {
+      closeStatusPane(mux, statusPaneRef);
+      structuredLog({
+        ts: new Date().toISOString(),
+        level: "info",
+        event: "status_pane_closed",
+        ref: statusPaneRef,
+      });
+    }
     process.removeListener("SIGINT", sigintHandler);
   }
 }

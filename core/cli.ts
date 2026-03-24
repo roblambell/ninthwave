@@ -11,7 +11,7 @@ import { cmdDeps } from "./commands/deps.ts";
 import { cmdConflicts } from "./commands/conflicts.ts";
 import { cmdBatchOrder } from "./commands/batch-order.ts";
 import { cmdRepos } from "./commands/repos.ts";
-import { cmdStatus, cmdPartitions } from "./commands/status.ts";
+import { cmdStatus, cmdStatusWatch, cmdPartitions } from "./commands/status.ts";
 import { cmdStart } from "./commands/start.ts";
 import {
   cmdCloseWorkspaces,
@@ -110,7 +110,7 @@ if (!command) {
     "  start <ID1> [ID2]... [--mux cmux|tmux]        Launch parallel sessions",
   );
   console.log(
-    "  status                                        Show active worktrees",
+    "  status [--watch]                              Show active worktrees (--watch: refresh every 5s)",
   );
   console.log(
     "  close-workspaces                              Close all cmux todo workspaces",
@@ -202,7 +202,11 @@ switch (command) {
     cmdRepos(projectRoot);
     break;
   case "status":
-    cmdStatus(worktreeDir, projectRoot);
+    if (args.includes("--watch")) {
+      await cmdStatusWatch(worktreeDir, projectRoot);
+    } else {
+      cmdStatus(worktreeDir, projectRoot);
+    }
     break;
   case "partitions":
     cmdPartitions(partitionDir);
