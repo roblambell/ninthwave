@@ -65,7 +65,7 @@ describe("truncateTitle", () => {
     const long = "This is a very long title that exceeds the limit";
     const result = truncateTitle(long, 20);
     expect(result.length).toBe(20);
-    expect(result).toEndWith("...");
+    expect(result.endsWith("...")).toBe(true);
   });
 
   it("returns exact-length title unchanged", () => {
