@@ -94,22 +94,25 @@ Key files: `core/orchestrator.ts`, `test/orchestrator.test.ts`
 
 ---
 
-### Test: Add tests for review-pending with CHANGES_REQUESTED (M-TST-3)
+### Test: Add tests for lock.ts timeout and backoff behavior (M-TST-4)
 
 **Priority:** Medium
-**Source:** Eng review H-ENG-1 — finding F14
+**Source:** Eng review H-ENG-1 — finding F15
 **Depends on:** None
 
-The `handleReviewPending` handler has no test for `CHANGES_REQUESTED` review decision or CI regression while in review-pending. Add tests verifying: review-pending stays in review-pending when review is CHANGES_REQUESTED, review-pending behavior when CI regresses to fail.
+`acquireLock` has exponential backoff (10ms → 200ms cap) and timeout (default 5s) with zero test coverage. Also untested: stale lock detection, PID file contents, and `releaseLock` cleanup. Add comprehensive tests for the lock module.
 
 **Test plan:**
-- Unit test: review-pending with CHANGES_REQUESTED and CI pass → stays review-pending
-- Unit test: review-pending with CHANGES_REQUESTED and CI fail → behavior documented
-- Unit test: review-pending with external merge → transitions to merged
+- Unit test: acquireLock succeeds immediately when lock is free
+- Unit test: acquireLock throws after timeout when lock is held
+- Unit test: acquireLock detects stale lock (dead PID) and recovers
+- Unit test: releaseLock cleans up PID file and directory
+- Unit test: isLockStale returns true for missing PID file
+- Unit test: isLockStale returns true for dead process PID
 
-Acceptance: Review-pending edge cases are covered by unit tests. Tests pass.
+Acceptance: Lock module has comprehensive test coverage including timeout, backoff, stale detection, and cleanup. Tests pass.
 
-Key files: `core/orchestrator.ts`, `test/orchestrator.test.ts`
+Key files: `core/lock.ts`, `test/lock.test.ts`
 
 ---
 
