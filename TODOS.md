@@ -2,38 +2,8 @@
 
 <!-- Format guide: see $(cat .ninthwave/dir)/core/docs/todos-format.md -->
 
-## Event-Driven Orchestrator (orchestrator pivot, 2026-03-23)
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-### Docs: Update /work skill to use orchestrate command (M-ORCH-9)
-
-**Priority:** Medium
-**Source:** Orchestrator pivot
-**Depends on:** H-ORCH-8
-
-Rewrite Phases 2-5 of `skills/work/SKILL.md`. Phase 1 (SELECT) stays interactive. After selection, the skill launches `ninthwave orchestrate --items <IDs> --merge-strategy <strategy> --wip-limit <N>` instead of manually calling `start` and polling. Phases 3 (WAIT), 4 (MERGE), 5 (FINALIZE) collapse into monitoring the daemon's output. Add a note that users can also run `ninthwave orchestrate` directly from a terminal without an AI tool session.
-
-Acceptance: The `/work` skill delegates orchestration to the daemon after item selection. The skill no longer contains manual poll/merge/clean logic. Documentation is clear about both usage modes (skill-driven and CLI-driven).
-
-Key files: `skills/work/SKILL.md`
-
----
-
 ## Vision (recurring, 2026-03-23)
+
 
 
 
