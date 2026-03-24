@@ -24,28 +24,6 @@ Key files: `core/commands/watch.ts:47-100`, `core/orchestrator.ts:343-376`, `cor
 
 ---
 
-## Status command (dogfood friction, 2026-03-24)
-
-### Feat: Open status pane in current workspace instead of new workspace (M-MUX-1)
-
-**Priority:** Medium
-**Source:** Dogfood friction #12
-**Depends on:** H-STU-3
-
-`launchStatusPane` calls `mux.launchWorkspace()` which always creates a new workspace. VISION.md says "auto-pane in cmux." Add a `splitPane()` method to the Multiplexer interface that creates a pane in the current workspace. Use `CMUX_WORKSPACE_ID` or `TMUX` env vars to detect the current workspace context and split there. Fall back to `launchWorkspace()` if not running inside a workspace.
-
-**Test plan:**
-- Unit test: `splitPane` on CmuxAdapter calls appropriate cmux CLI command
-- Unit test: `splitPane` on TmuxAdapter calls `tmux split-window`
-- Test fallback: when not in a workspace context, `launchStatusPane` creates a new workspace
-- Test detection: `CMUX_WORKSPACE_ID` env var triggers pane split behavior
-
-Acceptance: When the orchestrator runs inside an existing workspace, the status pane opens as a split pane in that workspace (not a new workspace). When running outside a workspace, falls back to creating a new workspace. Multiplexer interface has a `splitPane()` method implemented for both adapters.
-
-Key files: `core/mux.ts:15-28`, `core/cmux.ts:16-30`, `core/commands/orchestrate.ts:673-679`
-
----
-
 ## Vision (recurring, 2026-03-24)
 
 
