@@ -234,26 +234,24 @@ describe("TmuxAdapter", () => {
   });
 
   describe("splitPane", () => {
-    it("calls tmux split-window with the command", () => {
+    it("uses split-window -P -F to get the new pane ID directly", () => {
       const { runner, calls } = fakeRunner([
-        { stdout: "", stderr: "", exitCode: 0 }, // split-window
-        { stdout: "%5", stderr: "", exitCode: 0 }, // display-message
+        { stdout: "%5\n", stderr: "", exitCode: 0 }, // split-window -P -F
       ]);
       const adapter = new TmuxAdapter(runner);
 
       const ref = adapter.splitPane("ninthwave status --watch");
 
       expect(ref).toBe("%5");
+      // Only one shell call — no separate display-message
+      expect(calls).toHaveLength(1);
       expect(calls[0].cmd).toBe("tmux");
       expect(calls[0].args).toEqual([
         "split-window",
-        "ninthwave status --watch",
-      ]);
-      // Second call gets the pane ID
-      expect(calls[1].args).toEqual([
-        "display-message",
-        "-p",
+        "-P",
+        "-F",
         "#{pane_id}",
+        "ninthwave status --watch",
       ]);
     });
 
@@ -266,16 +264,24 @@ describe("TmuxAdapter", () => {
       expect(adapter.splitPane("cmd")).toBeNull();
     });
 
-    it("returns fallback pane ref when display-message fails", () => {
+    it("returns fallback pane ref when -P output is empty", () => {
       const { runner } = fakeRunner([
-        { stdout: "", stderr: "", exitCode: 0 }, // split-window OK
-        { stdout: "", stderr: "error", exitCode: 1 }, // display-message fails
+        { stdout: "", stderr: "", exitCode: 0 }, // split-window succeeds but empty stdout
       ]);
       const adapter = new TmuxAdapter(runner);
 
       const ref = adapter.splitPane("cmd");
       // Falls back to counter-based name
       expect(ref).toMatch(/^nw-pane-/);
+    });
+
+    it("trims whitespace from pane ID output", () => {
+      const { runner } = fakeRunner([
+        { stdout: "  %12  \n", stderr: "", exitCode: 0 },
+      ]);
+      const adapter = new TmuxAdapter(runner);
+
+      expect(adapter.splitPane("cmd")).toBe("%12");
     });
   });
 

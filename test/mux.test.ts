@@ -89,6 +89,84 @@ describe("CmuxAdapter", () => {
   });
 });
 
+// ── TmuxAdapter tests ─────────────────────────────────────────────
+
+describe("TmuxAdapter", () => {
+  /** Helper: build a ShellRunner mock that returns canned results by command. */
+  function mockRunner(
+    responses: Record<string, { exitCode: number; stdout: string; stderr: string }>,
+  ) {
+    return (cmd: string, args: string[]) => {
+      // Key on the first tmux subcommand (e.g., "split-window", "display-message")
+      const subcommand = args[0] ?? cmd;
+      return responses[subcommand] ?? { exitCode: 1, stdout: "", stderr: "unknown" };
+    };
+  }
+
+  describe("splitPane", () => {
+    it("returns the pane ID from split-window -P -F output", () => {
+      const runner = mockRunner({
+        "split-window": { exitCode: 0, stdout: "%42\n", stderr: "" },
+      });
+      const adapter = new TmuxAdapter(runner);
+      const result = adapter.splitPane("echo hello");
+      expect(result).toBe("%42");
+    });
+
+    it("passes -P -F '#{pane_id}' and the command to split-window", () => {
+      const calls: Array<{ cmd: string; args: string[] }> = [];
+      const runner = (cmd: string, args: string[]) => {
+        calls.push({ cmd, args });
+        return { exitCode: 0, stdout: "%99\n", stderr: "" };
+      };
+      const adapter = new TmuxAdapter(runner);
+      adapter.splitPane("my-command");
+
+      expect(calls).toHaveLength(1);
+      expect(calls[0].cmd).toBe("tmux");
+      expect(calls[0].args).toEqual([
+        "split-window",
+        "-P",
+        "-F",
+        "#{pane_id}",
+        "my-command",
+      ]);
+    });
+
+    it("returns fallback when -P flag output is empty", () => {
+      const runner = mockRunner({
+        "split-window": { exitCode: 0, stdout: "", stderr: "" },
+      });
+      const adapter = new TmuxAdapter(runner);
+      const result = adapter.splitPane("echo hello");
+      // Falls back to nw-pane-<counter> pattern
+      expect(result).toMatch(/^nw-pane-\d+$/);
+    });
+
+    it("returns null when split-window fails", () => {
+      const runner = mockRunner({
+        "split-window": { exitCode: 1, stdout: "", stderr: "no server" },
+      });
+      const adapter = new TmuxAdapter(runner);
+      const result = adapter.splitPane("echo hello");
+      expect(result).toBeNull();
+    });
+
+    it("does not call display-message (single command only)", () => {
+      const calls: string[] = [];
+      const runner = (cmd: string, args: string[]) => {
+        calls.push(args[0]);
+        return { exitCode: 0, stdout: "%10\n", stderr: "" };
+      };
+      const adapter = new TmuxAdapter(runner);
+      adapter.splitPane("test-cmd");
+
+      expect(calls).toEqual(["split-window"]);
+      expect(calls).not.toContain("display-message");
+    });
+  });
+});
+
 // ── detectMuxType tests ─────────────────────────────────────────────
 
 describe("detectMuxType", () => {

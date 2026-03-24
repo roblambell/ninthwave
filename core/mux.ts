@@ -90,21 +90,17 @@ export class TmuxAdapter implements Multiplexer {
   }
 
   splitPane(command: string): string | null {
+    // Use -P -F to print the new pane's ID directly from split-window.
+    // Without -P, display-message returns the *active* pane which may differ.
     const result = this.run("tmux", [
       "split-window",
+      "-P",
+      "-F",
+      "#{pane_id}",
       command,
     ]);
     if (result.exitCode !== 0) return null;
-    // Return the pane identifier from tmux (e.g., "%5")
-    // Use list-panes to find the most recently created pane
-    const listResult = this.run("tmux", [
-      "display-message",
-      "-p",
-      "#{pane_id}",
-    ]);
-    return listResult.exitCode === 0 && listResult.stdout
-      ? listResult.stdout
-      : `nw-pane-${this.counter}`;
+    return result.stdout?.trim() || `nw-pane-${this.counter}`;
   }
 
   sendMessage(ref: string, message: string): boolean {
