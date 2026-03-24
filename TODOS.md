@@ -13,20 +13,6 @@
 
 
 
-### Feat: Create Homebrew tap and formula (H-BREW-4)
-
-**Priority:** High
-**Source:** Brew distribution pivot
-**Depends on:** H-BREW-3
-**Repo:** homebrew-tap
-
-Create the `ninthwave-sh/homebrew-tap` repository with a Homebrew formula at `Formula/ninthwave.rb`. The formula downloads the source tarball, compiles via `bun build --compile`, installs the binary to `bin/`, and installs resource files (skills, agents, docs, VERSION) to `share/ninthwave/`. Symlinks should use the Homebrew `opt` prefix for stability across upgrades. Test with `brew install --build-from-source`.
-
-Acceptance: `brew tap ninthwave-sh/tap && brew install ninthwave` installs successfully. `ninthwave version` works after install. `ninthwave setup` in a project creates correct symlinks pointing into the Homebrew share directory.
-
-Key files: `Formula/ninthwave.rb` (new, in homebrew-tap repo)
-
----
 
 ### Docs: Update README and CONTRIBUTING for brew distribution (M-BREW-6)
 
@@ -43,6 +29,7 @@ Key files: `README.md`, `CONTRIBUTING.md`, `setup` (delete), `remote-install.sh`
 ---
 
 ## Security Hardening (prompt injection mitigation, 2026-03-24)
+
 
 ### Feat: Lock PRs and filter comments by author association (H-SEC-1)
 
@@ -65,6 +52,7 @@ Key files: `core/gh.ts`, `core/commands/watch.ts`, `agents/todo-worker.md`, `tes
 
 ## Developer Experience (dogfood friction, 2026-03-24)
 
+
 ### Docs: Document bun test vs vitest mock isolation constraint (D-TEST-1)
 
 **Priority:** Medium
@@ -79,6 +67,7 @@ Key files: `CLAUDE.md`
 ---
 
 ## Event-Driven Orchestrator (orchestrator pivot, 2026-03-23)
+
 
 
 
@@ -132,6 +121,7 @@ Key files: `agents/todo-worker.md`
 ---
 
 ## Vision (recurring, 2026-03-23)
+
 
 
 
