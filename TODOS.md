@@ -175,22 +175,24 @@ Key files: `core/commands/orchestrate.ts`, `test/orchestrate.test.ts`
 
 ---
 
-### Fix: Include TODO ID in tmux session names for workspace identification (L-WRK-10)
+### Test: Add tests for extractTodoText and cross-repo cleanup paths (L-WRK-11)
 
 **Priority:** Low
-**Source:** Eng review W-26 — `docs/reviews/eng-review-workers.md`
+**Source:** Eng review — `docs/reviews/eng-review-workers.md`
 **Depends on:** None
 
-`TmuxAdapter` uses session names like `nw-1`, `nw-2` which don't include the TODO ID. `closeWorkspacesForIds` and `isWorkerAlive` rely on the TODO ID appearing in workspace listings. Change tmux session names to include the TODO ID (e.g., `nw-H-WRK-1-1`) for reliable workspace identification.
+`extractTodoText` in `core/commands/start.ts` has no tests (edge cases: missing ID, duplicate ID, malformed headers). The cross-repo worktree cleanup path in `cmdClean` (lines 199-214) is also untested. Add tests for both.
 
 **Test plan:**
-- Unit test: tmux session name includes TODO ID when provided
-- Unit test: closeWorkspacesForIds finds tmux sessions by TODO ID
-- Unit test: isWorkerAlive correctly matches tmux sessions
+- Unit test: extractTodoText with valid ID returns correct text
+- Unit test: extractTodoText with missing ID returns empty string
+- Unit test: extractTodoText with duplicate IDs returns first match
+- Unit test: cmdClean handles cross-repo worktrees from index file
+- Unit test: cmdClean handles malformed cross-repo index entries
 
-Acceptance: Tmux session names include the TODO ID. Workspace identification functions reliably match tmux sessions. Tests verify ID-based matching. No regression.
+Acceptance: `extractTodoText` has unit tests covering edge cases. Cross-repo cleanup path in `cmdClean` has tests. All new tests pass. No regression.
 
-Key files: `core/mux.ts`, `core/commands/orchestrate.ts`, `test/mux.test.ts`
+Key files: `core/commands/start.ts`, `core/commands/clean.ts`, `test/start.test.ts`, `test/clean.test.ts`
 
 ---
 
