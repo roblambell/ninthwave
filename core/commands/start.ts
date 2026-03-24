@@ -206,13 +206,17 @@ export function launchSingleItem(
     );
     try {
       fetchOrigin(targetRepo, "main");
-    } catch {
-      // fetch may fail if no remote
+    } catch (e) {
+      warn(
+        `Failed to fetch origin/main in ${basename(targetRepo)} for ${item.id}: ${e instanceof Error ? e.message : e}. Worktree will be based on local main (may be outdated).`,
+      );
     }
     try {
       ffMerge(targetRepo, "main");
-    } catch {
-      // ff-merge may fail
+    } catch (e) {
+      warn(
+        `Failed to fast-forward main in ${basename(targetRepo)} for ${item.id}: ${e instanceof Error ? e.message : e}. Worktree may be based on outdated code.`,
+      );
     }
 
     // Handle branch collision

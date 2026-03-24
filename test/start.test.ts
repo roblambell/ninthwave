@@ -20,6 +20,7 @@ vi.mock("../core/git.ts", () => ({
 
 import { detectAiTool, cmdStart, launchSingleItem, sanitizeTitle } from "../core/commands/start.ts";
 import { parseTodos } from "../core/parser.ts";
+import { fetchOrigin, ffMerge } from "../core/git.ts";
 
 /** Create a mock Multiplexer for dependency injection (avoids vi.mock leaking). */
 function createMockMux(): Multiplexer & Record<string, Mock> {
@@ -267,6 +268,85 @@ describe("launchSingleItem", () => {
 
     const { existsSync } = require("fs");
     expect(existsSync(worktreeDir)).toBe(true);
+  });
+
+  it("logs warning when fetchOrigin fails but still creates worktree", () => {
+    const mockMux = createMockMux();
+    const repo = setupTempRepo();
+    useFixture(repo, "valid.md");
+    const todosFile = join(repo, "TODOS.md");
+    const worktreeDir = join(repo, ".worktrees");
+    const items = parseTodos(todosFile, worktreeDir);
+    const item = items.find((i) => i.id === "M-CI-1")!;
+
+    (fetchOrigin as Mock).mockImplementationOnce(() => {
+      throw new Error("network timeout");
+    });
+
+    const output = captureOutput(() => {
+      const res = launchSingleItem(item, todosFile, worktreeDir, repo, "claude", mockMux);
+      expect(res).not.toBeNull();
+      expect(res!.worktreePath).toContain("todo-M-CI-1");
+    });
+
+    expect(output).toContain("Failed to fetch origin/main");
+    expect(output).toContain("network timeout");
+    expect(output).toContain("may be outdated");
+    expect(mockMux.launchWorkspace).toHaveBeenCalled();
+  });
+
+  it("logs warning when ffMerge fails but still creates worktree", () => {
+    const mockMux = createMockMux();
+    const repo = setupTempRepo();
+    useFixture(repo, "valid.md");
+    const todosFile = join(repo, "TODOS.md");
+    const worktreeDir = join(repo, ".worktrees");
+    const items = parseTodos(todosFile, worktreeDir);
+    const item = items.find((i) => i.id === "M-CI-1")!;
+
+    (ffMerge as Mock).mockImplementationOnce(() => {
+      throw new Error("not a fast-forward");
+    });
+
+    const output = captureOutput(() => {
+      const res = launchSingleItem(item, todosFile, worktreeDir, repo, "claude", mockMux);
+      expect(res).not.toBeNull();
+      expect(res!.worktreePath).toContain("todo-M-CI-1");
+    });
+
+    expect(output).toContain("Failed to fast-forward main");
+    expect(output).toContain("not a fast-forward");
+    expect(output).toContain("may be based on outdated code");
+    expect(mockMux.launchWorkspace).toHaveBeenCalled();
+  });
+
+  it("warning includes actionable context about stale worktree", () => {
+    const mockMux = createMockMux();
+    const repo = setupTempRepo();
+    useFixture(repo, "valid.md");
+    const todosFile = join(repo, "TODOS.md");
+    const worktreeDir = join(repo, ".worktrees");
+    const items = parseTodos(todosFile, worktreeDir);
+    const item = items.find((i) => i.id === "M-CI-1")!;
+
+    (fetchOrigin as Mock).mockImplementationOnce(() => {
+      throw new Error("Could not resolve host: github.com");
+    });
+    (ffMerge as Mock).mockImplementationOnce(() => {
+      throw new Error("diverged branches");
+    });
+
+    const output = captureOutput(() => {
+      launchSingleItem(item, todosFile, worktreeDir, repo, "claude", mockMux);
+    });
+
+    // Both warnings should appear
+    expect(output).toContain("Failed to fetch origin/main");
+    expect(output).toContain("Could not resolve host: github.com");
+    expect(output).toContain("Failed to fast-forward main");
+    expect(output).toContain("diverged branches");
+    // Both should include the item ID for context
+    expect(output).toContain("M-CI-1");
   });
 
   it("returns correct worktreePath for hub repo items", () => {
