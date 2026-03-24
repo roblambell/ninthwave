@@ -74,23 +74,23 @@ Key files: `core/lock.ts`, `test/lock.test.ts`
 
 ---
 
-### Fix: Persist ciFailCount across crash recovery (M-REC-1)
+### Test: Add unit tests for executeRebase action handler (M-TST-2)
 
 **Priority:** Medium
-**Source:** Eng review H-ENG-1 — finding F11
+**Source:** Eng review H-ENG-1 — finding F13
 **Depends on:** None
 
-`reconstructState` rebuilds items from disk/GitHub but resets `ciFailCount` to 0. After a restart, an item that already exhausted its CI retries gets a fresh budget, wasting CI resources on persistently failing items. The daemon state file already serializes item state via `serializeOrchestratorState`. Extend it to include `ciFailCount` and restore it during `reconstructState` when the state file is available.
+The `executeRebase` method in `core/orchestrator.ts` has no direct unit tests. It handles rebase message delivery to workers and is a critical recovery mechanism. Add tests covering: successful message send, failure when workspaceRef is missing, failure when `sendMessage` returns false.
 
 **Test plan:**
-- Unit test: ciFailCount is included in serialized daemon state
-- Unit test: reconstructState restores ciFailCount from state file when available
-- Unit test: reconstructState defaults to 0 when no state file exists
-- Edge case: state file has higher ciFailCount than maxCiRetries (item goes stuck immediately)
+- Unit test: executeRebase sends message to workspace and returns success
+- Unit test: executeRebase returns error when workspaceRef is undefined
+- Unit test: executeRebase returns error when sendMessage returns false
+- Unit test: executeRebase uses action.message when provided, falls back to default
 
-Acceptance: `ciFailCount` survives orchestrator restarts when daemon state file is present. Items that exhausted retries before a crash don't get additional retries. Serialization format is backward-compatible. Tests pass.
+Acceptance: All four `executeRebase` paths are covered by unit tests. Tests pass.
 
-Key files: `core/daemon.ts`, `core/commands/orchestrate.ts`, `test/orchestrate.test.ts`
+Key files: `core/orchestrator.ts`, `test/orchestrator.test.ts`
 
 ---
 
