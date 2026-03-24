@@ -9,27 +9,6 @@
 
 
 
-### Feat: Emit structured metrics from orchestrator runs (H-ANL-1)
-
-**Priority:** High
-**Source:** CEO roadmap — data-driven pipeline improvement
-**Depends on:** INI-*
-
-After each orchestration run, write a structured JSON metrics file to `.ninthwave/analytics/`. Include: run timestamp, wall-clock duration, items attempted, items completed, items failed, CI retry count per item, merge strategy used, tool used per item (from worktree config). The existing `orchestrate_complete` event already has most of this data — extract and persist it. One file per run, named by timestamp.
-
-**Test plan:**
-- Unit test: metrics file written on orchestrate_complete
-- Unit test: file contains wall-clock duration and item counts
-- Unit test: CI retry count is tracked per item
-- Unit test: metrics directory created if not exists
-- Unit test: handles zero-item run gracefully
-
-Acceptance: After every `ninthwave orchestrate` run, a JSON metrics file appears in `.ninthwave/analytics/`. File contains all required fields. Data is accurate (matches actual orchestration events).
-
-Key files: `core/commands/orchestrate.ts`, `core/analytics.ts` (new), `test/analytics.test.ts` (new)
-
----
-
 ### Feat: Add ninthwave analytics command to display trends (M-ANL-2)
 
 **Priority:** Medium
