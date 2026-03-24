@@ -19,6 +19,8 @@ Read the full TODO details from the appended system prompt, including: title, de
 
 **Acceptance criteria** (the `Acceptance:` line) define when this TODO is done. They are your checklist -- every criterion must be satisfied before you create the PR. If a criterion is ambiguous, interpret it conservatively (do the more thorough thing).
 
+**Test plan** (the `**Test plan:**` section, if present) specifies what tests to write or run and what edge cases to cover. Use it as your testing checklist during Phase 6.
+
 ## 2. Read Before You Write
 
 Before making any changes, read the following documents:
@@ -81,6 +83,15 @@ Common patterns:
 - Run frontend tests if you touched frontend files
 
 All tests must pass. Fix any failures before proceeding.
+
+### Execute the test plan
+
+If the TODO has a `**Test plan:**` section, work through it:
+- Write any new tests specified in the plan
+- Run the tests and verify they pass
+- Cover the edge cases listed
+
+If no test plan is present, proceed to acceptance criteria verification.
 
 ### Verify acceptance criteria
 

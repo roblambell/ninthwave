@@ -53,6 +53,46 @@ export function normalizeDomain(
 }
 
 /**
+ * Extract test plan from a TodoItem's rawText.
+ * The test plan starts with **Test plan:** and includes subsequent bullet lines.
+ */
+export function extractTestPlan(rawText: string): string {
+  const lines = rawText.split("\n");
+  let collecting = false;
+  const planLines: string[] = [];
+
+  for (const line of lines) {
+    if (line.startsWith("**Test plan:**")) {
+      collecting = true;
+      // Check if there's inline content after the header
+      const inline = line.replace("**Test plan:**", "").trim();
+      if (inline) planLines.push(inline);
+      continue;
+    }
+
+    if (collecting) {
+      // Stop collecting at next metadata field, "Acceptance:", "Key files:", or section boundary
+      if (
+        line.startsWith("**") ||
+        line.startsWith("Acceptance:") ||
+        line.startsWith("Key files:") ||
+        line.startsWith("### ") ||
+        line.startsWith("## ")
+      ) {
+        break;
+      }
+      // Include bullet lines and non-empty continuation lines
+      const trimmed = line.trim();
+      if (trimmed) {
+        planLines.push(trimmed);
+      }
+    }
+  }
+
+  return planLines.join("\n");
+}
+
+/**
  * Extract file paths from a TodoItem's rawText.
  * Only scans lines starting with "Key files:" to avoid false positives
  * from paths mentioned incidentally in description or acceptance text.
@@ -184,6 +224,8 @@ export function parseTodos(
       }
     }
 
+    const rawText = rawLines.join("\n");
+
     const item: TodoItem = {
       id,
       priority: (priority || "medium") as Priority,
@@ -195,8 +237,9 @@ export function parseTodos(
       lineNumber: itemStartLine,
       lineEndNumber: endLine,
       repoAlias,
-      rawText: rawLines.join("\n"),
+      rawText,
       filePaths: [],
+      testPlan: extractTestPlan(rawText),
     };
 
     // Extract file paths from the raw text

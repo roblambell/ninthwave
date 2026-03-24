@@ -38,6 +38,8 @@ v0.1.0 shipped March 2026. This is what's real and working:
 
 7. **Delegate, don't debug.** The orchestrator's job is to detect problems and dispatch them to workers. It doesn't read source code, diagnose root causes, or attempt patches. When CI fails, tell the worker. When a review comment appears, forward it. The orchestrator manages the pipeline; workers do the thinking.
 
+8. **Test confidence is merge confidence.** Every work item has a test plan. Every PR has verified test outcomes. The orchestrator surfaces aggregate test confidence so humans review with context. ninthwave doesn't run tests — it tracks and surfaces the results of tests that workers and CI already run.
+
 ## What's Next
 
 Five priority areas over the next 6-12 months. Not dated milestones — ordered by dependency and impact.
@@ -50,6 +52,7 @@ Make what exists reliable, well-documented, and pleasant for a solo developer on
 - Complete the orchestrate integration in `/work` (M-ORCH-9) — the skill delegates to the daemon after item selection.
 - First-run experience: `brew install` to a working parallel session in under 10 minutes.
 - Exhaustive state machine testing — the orchestrator has 13 states and multiple transition paths; all must be covered.
+- Test confidence in decompose: every work item gets a `**Test plan:**` field specifying what tests verify it, expected coverage, and edge cases. Workers execute the plan; the orchestrator tracks outcomes.
 
 ### B. Sandboxed Workers
 
@@ -90,7 +93,8 @@ An optional advisory layer on top of the deterministic daemon.
 
 ### E. Expand the Surface Area
 
-- **External task backends.** Linear adapter first — three operations: list items, read item, mark done. Minimal surface. TODOS.md remains the built-in default.
+- **External task backends.** Two categories: (1) Project management — Linear adapter first, then ClickUp, GitHub Issues. Work items created by humans or planning tools. (2) Observability/alerting — Sentry adapter first, then PagerDuty, CloudWatch. Work items created by production signals. Both use the same three-operation interface: list items, read item, mark done. TODOS.md remains the built-in default.
+- **GitHub Action for CI/CD failures.** `ninthwave-sh/create-todo` — a thin GitHub Action that appends a TODO to TODOS.md when a CD workflow fails. Bridges CI/CD signals into the work queue for teams using TODOS.md without an external task backend.
 - **Multiplexer abstraction.** tmux and zellij as alternative backends. Three operations to abstract: create session, send message, list sessions. cmux remains the default.
 - **Smarter resource management.** Memory-aware WIP limits based on available RAM. Adaptive scaling under load. Document: each worker consumes ~2-3GB (AI tool + language server + worktree).
 - **Cross-repo maturity.** Monorepo workspace support (pnpm/yarn/turborepo). Dependency ordering across repos.
@@ -111,6 +115,8 @@ What ninthwave will not become:
 
 6. **Not a monolithic agent.** Many small workers plus a deterministic orchestrator is the architecture. It's not a stepping stone to a single agent that handles everything in one session. Decomposition and parallel execution is the point.
 
+7. **Not a monitoring system.** ninthwave doesn't collect metrics, set alert thresholds, or evaluate production health. It accepts work items from systems that do — via task backend adapters (Sentry, PagerDuty) or the `create-todo` GitHub Action for CI/CD failures. Production signals flow through your existing tools into ninthwave's work queue.
+
 ## Feature-Completeness
 
 ninthwave is feature-complete when:
@@ -120,6 +126,9 @@ ninthwave is feature-complete when:
 - Works with 3+ AI coding tools. *(Achieved: Claude Code, OpenCode, Copilot CLI.)*
 - Works with 2+ terminal multiplexers. *(Not yet.)*
 - Connects to 2+ task backends. *(Not yet.)*
+- Connects to 2+ observability/alerting backends (Sentry, PagerDuty). *(Not yet.)*
+- GitHub Action bridges CI/CD failures into TODOS.md. *(Not yet.)*
+- Every decomposed work item has a test plan with tracked outcomes. *(Not yet.)*
 - Workers run sandboxed by default. *(Not yet.)*
 - Remote session links posted on PRs with auth. *(Not yet.)*
 - Resource management is automatic — memory-aware WIP, no manual tuning. *(Not yet.)*

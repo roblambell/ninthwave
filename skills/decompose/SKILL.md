@@ -119,6 +119,15 @@ Work from the bottom of the stack up:
 
 When a TODO targets a repo other than the hub repo, include the `**Repo:** <alias>` metadata field. Omit the field for items that target the hub repo itself.
 
+#### Test plan
+
+Each TODO gets a `**Test plan:**` field specifying:
+- What tests will verify this item (new tests to write vs. existing test coverage)
+- Expected coverage areas (which paths/behaviors are tested)
+- Key edge cases that must be tested
+
+The test plan makes testability expectations explicit. Workers use it as a checklist during implementation. Keep test plans concise — 2-4 bullet points per item.
+
 #### Dependency mapping
 
 Group TODOs into **batches**. Items within a batch can run in parallel. Batches run sequentially.
@@ -139,8 +148,8 @@ Format: `[CHML]-<feature_code>-<seq>`
 
 Present the decomposition as a table:
 
-| Batch | ID | Title | Scope | Key Files | Depends On |
-|-------|-----|-------|-------|-----------|------------|
+| Batch | ID | Title | Scope | Test Plan | Key Files | Depends On |
+|-------|-----|-------|-------|-----------|-----------|------------|
 
 Show totals and ask for approval. Options: looks good, adjust, re-decompose.
 

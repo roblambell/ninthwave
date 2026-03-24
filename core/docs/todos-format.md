@@ -38,6 +38,10 @@ The section name is normalised by the ninthwave CLI into a domain slug for filte
 
 <Description -- 2-4 sentences explaining what to build/fix and key decisions.>
 
+**Test plan:**
+- <what tests will verify this item>
+- <key edge cases to test>
+
 Acceptance: <Conditions that make this TODO "done". Concrete, verifiable statements. Each condition should be testable -- either by automated tests or manual verification.>
 
 Key files: `path/to/file.ex`, `path/to/component.tsx:42`
@@ -64,7 +68,27 @@ Key files: `path/to/file.ex`, `path/to/component.tsx:42`
 |-------|----------|--------|
 | Bundle with | Metadata line | `**Bundle with:** <ID>` |
 | Repo | Metadata line | `**Repo:** <alias>` -- target repo for cross-repo items |
+| Test plan | Body | `**Test plan:**` followed by bullet points (see below) |
 | Key files | Body | Backtick-quoted paths, `file:line` references |
+
+### Writing Good Test Plans
+
+The `**Test plan:**` field specifies how this TODO will be verified. It sits between the description and acceptance criteria.
+
+**A good test plan includes:**
+- **What tests** -- new tests to write, or existing tests that cover the change
+- **Coverage areas** -- which code paths and behaviors are tested
+- **Edge cases** -- specific scenarios that must be tested
+
+**Example:**
+```
+**Test plan:**
+- Add unit test for `parseTodos` with new field extraction
+- Verify existing integration tests still pass (no regressions)
+- Edge case: TODO item with missing test plan field (should default to empty)
+```
+
+Test plans are optional but recommended. When present, workers use them as a checklist during the testing phase.
 
 ### Writing Good Acceptance Criteria
 
@@ -128,6 +152,7 @@ Each TODO should target one human-reviewable PR:
 - **Depends on**: from `**Depends on:**` line, comma/space-separated IDs
 - **Bundle with**: from `**Bundle with:**` line (optional)
 - **Repo**: from `**Repo:**` line (optional, defaults to hub repo)
+- **Test plan**: from `**Test plan:**` line and subsequent bullet lines (optional)
 - **Domain**: from the `## ` section header, auto-slugified
 - **File paths**: from backtick-quoted paths and `file:line` patterns in the body
 

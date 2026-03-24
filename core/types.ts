@@ -16,6 +16,7 @@ export interface TodoItem {
   repoAlias: string; // "" | "self" | "hub" | repo name
   rawText: string; // full markdown text of the TODO item
   filePaths: string[]; // extracted file paths mentioned in the item
+  testPlan: string; // extracted from **Test plan:** section (empty if not present)
 }
 
 export interface ProjectConfig {
