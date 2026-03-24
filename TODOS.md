@@ -825,6 +825,128 @@ Key files: `core/commands/orchestrate.ts`, `test/orchestrate.test.ts`
 
 ---
 
+## Detection Latency & Auto-Rebase (friction #17/#18, 2026-03-24)
+
+
+### Fix: Wire checkPrMergeable in production orchestrate command (H-DET-1)
+
+**Priority:** High
+**Source:** Friction #18 — post-merge sibling conflict detection is defined but never wired
+**Depends on:** None
+
+`checkPrMergeable` is defined as an optional dependency in the orchestrator interface (`core/orchestrator.ts`) and used in the post-merge conflict detection logic (lines 638-659), but it's never provided in the production `cmdOrchestrate` function (`core/commands/orchestrate.ts` lines 1104-1114). This means after a PR merges, the orchestrator never checks whether sibling PRs now have conflicts — they sit in `ci-pending` until the next full poll cycle detects the conflict. Wire `checkPrMergeable` by providing the `prView` call that returns the mergeable field for a given PR number.
+
+**Test plan:**
+- Unit test: after a merge, sibling PRs are checked for mergeable status
+- Unit test: conflicting siblings get rebase messages sent
+- Unit test: non-conflicting siblings are left alone
+- Integration: verify the dependency is provided in cmdOrchestrate
+
+Acceptance: `checkPrMergeable` is wired in `cmdOrchestrate`. After a PR merges, all in-flight sibling PRs are checked for conflicts. Conflicting siblings receive rebase messages. Tests cover the wiring and the behavior. No regression.
+
+Key files: `core/commands/orchestrate.ts`, `core/orchestrator.ts`, `test/orchestrator.test.ts`
+
+---
+
+### Feat: Add detection latency timestamps to state transitions (M-DET-2)
+
+**Priority:** Medium
+**Source:** Friction #17 — no measurement of detection latency
+**Depends on:** None
+
+Add `eventTime` and `detectedTime` fields to state transition records. `eventTime` is the timestamp from the external system (e.g., GitHub's `completedAt` for CI checks, `mergedAt` for merges, `updatedAt` for mergeable status changes). `detectedTime` is `Date.now()` when the orchestrator's poll cycle picks up the change. Store these in `OrchestratorItem` alongside `lastTransition`. Calculate `detectionLatencyMs = detectedTime - eventTime` and emit as a structured log event.
+
+**Test plan:**
+- Unit test: state transition records both eventTime and detectedTime
+- Unit test: detectionLatencyMs is calculated correctly
+- Unit test: missing eventTime (not available from API) falls back to detectedTime
+- Verify latency appears in structured log output
+
+Acceptance: State transitions include `eventTime`, `detectedTime`, and `detectionLatencyMs`. The orchestrator logs detection latency on every state change. Fields are optional/backward-compatible with existing state. Tests pass.
+
+Key files: `core/orchestrator.ts`, `core/commands/orchestrate.ts`, `core/commands/watch.ts`, `test/orchestrator.test.ts`
+
+---
+
+### Feat: Surface detection latency in analytics summaries (L-DET-3)
+
+**Priority:** Low
+**Source:** Friction #17 — detection latency should feed into analytics
+**Depends on:** M-DET-2
+
+Include p50, p95, and max detection latency in per-run analytics summaries (`core/analytics.ts`). Flag runs where p95 detection latency exceeds a threshold (e.g., 60s) as having "slow detection" in the summary. This gives visibility into whether poll intervals are appropriate.
+
+**Test plan:**
+- Unit test: analytics summary includes latency percentiles
+- Unit test: threshold flag is set when p95 exceeds limit
+- Unit test: empty latency data (no transitions) produces clean output
+
+Acceptance: Analytics run summaries include detection latency percentiles. Slow detection is flagged. Tests pass.
+
+Key files: `core/analytics.ts`, `test/analytics.test.ts`
+
+---
+
+### Feat: Daemon-side auto-rebase for TODOS.md-only conflicts (H-DET-4)
+
+**Priority:** High
+**Source:** Friction #18 — TODOS.md conflicts are predictable and should be auto-resolved
+**Depends on:** H-DET-1
+
+When the orchestrator detects a PR with `mergeable: CONFLICTING`, check if TODOS.md is the only conflicting file. If so, instead of sending a rebase message to the worker, perform the rebase directly: `git fetch origin main`, `git checkout <branch>`, `git rebase origin/main` (auto-resolve TODOS.md by keeping the branch's deletion + preserving other items), `git push --force-with-lease`. This eliminates the most common bottleneck in parallel processing. Fall back to worker-message rebase for non-TODOS.md conflicts.
+
+**Test plan:**
+- Unit test: TODOS.md-only conflict triggers daemon-side rebase
+- Unit test: non-TODOS.md conflict falls back to worker rebase message
+- Unit test: rebase failure (e.g., unexpected conflict) falls back to worker message
+- Unit test: force-push uses --force-with-lease for safety
+- Edge case: branch doesn't exist locally (need to fetch first)
+
+Acceptance: TODOS.md-only conflicts are auto-resolved by the daemon without worker involvement. Non-TODOS.md conflicts still use the worker message path. Force-push uses --force-with-lease. Tests cover both paths and fallback. No regression.
+
+Key files: `core/orchestrator.ts`, `core/commands/orchestrate.ts`, `core/git.ts`, `test/orchestrator.test.ts`
+
+---
+
+### Feat: Priority-ordered merge queue (M-DET-5)
+
+**Priority:** Medium
+**Source:** Friction #18 — parallel PRs should merge in priority order to minimize conflict cascades
+**Depends on:** H-DET-1
+
+When multiple PRs are in `ci-passed` state simultaneously, merge them in priority order (high → medium → low, then by item ID as tiebreaker) rather than racing. After each merge, trigger auto-rebase on remaining PRs before merging the next. This prevents the cascade where all PRs conflict with each other and need individual manual rebases.
+
+**Test plan:**
+- Unit test: multiple ci-passed items are merged in priority order
+- Unit test: after each merge, remaining items are checked for conflicts
+- Unit test: equal-priority items are merged by ID order
+- Unit test: single ci-passed item skips queue logic
+
+Acceptance: The orchestrator merges PRs sequentially in priority order when multiple are ready. Rebase checks happen between merges. Tests cover ordering and conflict detection. No regression.
+
+Key files: `core/orchestrator.ts`, `core/commands/orchestrate.ts`, `test/orchestrator.test.ts`
+
+---
+
+### Feat: Worker no-op PR path for TODOs that need no code change (M-DET-6)
+
+**Priority:** Medium
+**Source:** Grind cycle 2 observation — workers with no code changes have no clean exit path
+**Depends on:** None
+
+When a worker determines that a TODO requires no code change (already fixed, not applicable, or findings-only), the worker should create a "no-op" PR that only removes the TODO entry from TODOS.md. The PR body should explain why no code change was needed. This keeps the orchestrator's PR-based lifecycle working and provides an audit trail. Update the worker agent prompt (`agents/todo-worker.md`) to explicitly instruct workers that "no code change needed" is a valid outcome with a defined action: create a TODOS.md-only PR with an explanation.
+
+**Test plan:**
+- Verify worker agent prompt includes no-op PR instructions
+- Manual test: worker processes a TODO that needs no code change and creates a TODOS.md-only PR
+- Verify orchestrator correctly handles TODOS.md-only PRs through the merge lifecycle
+
+Acceptance: Worker agent prompt includes explicit instructions for the no-op case. Workers create TODOS.md-only PRs when no code change is needed. PR body explains the rationale. Orchestrator handles these PRs normally. No regression.
+
+Key files: `agents/todo-worker.md`, `core/orchestrator.ts`
+
+---
+
 ## Vision (recurring, 2026-03-24)
 
 
@@ -833,7 +955,7 @@ Key files: `core/commands/orchestrate.ts`, `test/orchestrate.test.ts`
 
 **Priority:** Low
 **Source:** Self-improvement loop
-**Depends on:** ANL-*, WIP-*, GHI-*, DAE-*, RET-*, ENG-*, DP-*
+**Depends on:** ANL-*, WIP-*, GHI-*, DAE-*, RET-*, ENG-*, DP-*, DET-*, WRK-*, SHL-*, LCK-*, ORC-*, REC-*, TST-*, CLN-*, REF-*
 
 This is a recurring meta-item. When all other TODOs are complete, this item triggers a new cycle: (1) Review the current state of ninthwave against the product vision — what's shipped, what's missing, what friction was logged. (2) Read the friction log and identify actionable improvements. (3) Identify the next most impactful capability or refinement. (4) Decompose it into TODO items following the standard format. (5) Add a new copy of this same item (L-VIS-6, etc.) depending on the new terminal items, so the cycle continues.
 
