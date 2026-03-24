@@ -137,6 +137,57 @@ describe("acquireLock / releaseLock", () => {
     expect(existsSync(join(lockPath, "pid"))).toBe(true);
     releaseLock(lockPath);
   });
+
+  it("acquires immediately when lock is free (no delay)", () => {
+    const lockPath = join(TEST_DIR, "immediate.lock");
+    const start = Date.now();
+    acquireLock(lockPath);
+    const elapsed = Date.now() - start;
+    // Should be near-instant — well under the initial 10ms backoff
+    expect(elapsed).toBeLessThan(50);
+    releaseLock(lockPath);
+  });
+
+  it("timeout error includes lock path and timeout duration", () => {
+    const lockPath = join(TEST_DIR, "errmsg.lock");
+    mkdirSync(lockPath);
+    writeFileSync(join(lockPath, "pid"), String(process.pid));
+
+    try {
+      acquireLock(lockPath, 50);
+      expect.unreachable("should have thrown");
+    } catch (e: any) {
+      expect(e.message).toContain(lockPath);
+      expect(e.message).toContain("50ms");
+    }
+    releaseLock(lockPath);
+  });
+
+  it("backoff is capped so timeout is not wildly exceeded", () => {
+    const lockPath = join(TEST_DIR, "cap.lock");
+    mkdirSync(lockPath);
+    writeFileSync(join(lockPath, "pid"), String(process.pid));
+
+    const timeoutMs = 500;
+    const start = Date.now();
+    expect(() => acquireLock(lockPath, timeoutMs)).toThrow(
+      /Failed to acquire lock/,
+    );
+    const elapsed = Date.now() - start;
+    // With 200ms backoff cap, we shouldn't overshoot by more than one backoff cycle
+    expect(elapsed).toBeLessThan(timeoutMs + 250);
+    releaseLock(lockPath);
+  });
+
+  it("can re-acquire a lock after release", () => {
+    const lockPath = join(TEST_DIR, "reacquire.lock");
+    acquireLock(lockPath);
+    releaseLock(lockPath);
+    // Should succeed on re-acquire
+    acquireLock(lockPath);
+    expect(existsSync(join(lockPath, "pid"))).toBe(true);
+    releaseLock(lockPath);
+  });
 });
 
 describe("isLockStale", () => {
@@ -153,10 +204,51 @@ describe("isLockStale", () => {
     expect(isLockStale(lockPath)).toBe(true);
   });
 
+  it("returns true when pid file contains non-numeric content", () => {
+    const lockPath = join(TEST_DIR, "nan.lock");
+    mkdirSync(lockPath);
+    writeFileSync(join(lockPath, "pid"), "not-a-number");
+    expect(isLockStale(lockPath)).toBe(true);
+  });
+
+  it("returns true when pid file is empty", () => {
+    const lockPath = join(TEST_DIR, "empty-pid.lock");
+    mkdirSync(lockPath);
+    writeFileSync(join(lockPath, "pid"), "");
+    expect(isLockStale(lockPath)).toBe(true);
+  });
+
   it("returns false when pid is the current process", () => {
     const lockPath = join(TEST_DIR, "alive.lock");
     mkdirSync(lockPath);
     writeFileSync(join(lockPath, "pid"), String(process.pid));
     expect(isLockStale(lockPath)).toBe(false);
+  });
+});
+
+describe("releaseLock", () => {
+  it("cleans up both pid file and lock directory", () => {
+    const lockPath = join(TEST_DIR, "cleanup.lock");
+    acquireLock(lockPath);
+    // Verify lock artifacts exist before release
+    expect(existsSync(join(lockPath, "pid"))).toBe(true);
+    expect(existsSync(lockPath)).toBe(true);
+
+    releaseLock(lockPath);
+    expect(existsSync(join(lockPath, "pid"))).toBe(false);
+    expect(existsSync(lockPath)).toBe(false);
+  });
+
+  it("does not throw when lock does not exist (idempotent)", () => {
+    const lockPath = join(TEST_DIR, "nonexistent.lock");
+    expect(() => releaseLock(lockPath)).not.toThrow();
+  });
+
+  it("cleans up directory even when pid file is already missing", () => {
+    const lockPath = join(TEST_DIR, "nopid-release.lock");
+    mkdirSync(lockPath);
+    // No pid file — releaseLock should still remove the directory
+    releaseLock(lockPath);
+    expect(existsSync(lockPath)).toBe(false);
   });
 });
