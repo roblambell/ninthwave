@@ -3,7 +3,7 @@
 // emits structured JSON logs, and handles graceful SIGINT shutdown.
 // Optionally runs an LLM supervisor tick for anomaly detection and friction logging.
 
-import { existsSync } from "fs";
+import { existsSync, mkdirSync, writeFileSync } from "fs";
 import { join } from "path";
 import { totalmem } from "os";
 import { run } from "../shell.ts";
@@ -43,6 +43,11 @@ import {
   createWebhookNotifier,
   type WebhookNotifyFn,
 } from "../webhooks.ts";
+import {
+  collectRunMetrics,
+  writeRunMetrics,
+  type AnalyticsIO,
+} from "../analytics.ts";
 
 // ── Structured logging ─────────────────────────────────────────────
 
@@ -327,6 +332,8 @@ export interface OrchestrateLoopDeps {
   supervisorDeps?: SupervisorDeps;
   /** Webhook notifier for lifecycle events (fire-and-forget). No-op when absent. */
   notify?: WebhookNotifyFn;
+  /** File I/O for analytics metrics (injectable for testing). When absent, analytics is skipped. */
+  analyticsIO?: AnalyticsIO;
 }
 
 export interface OrchestrateLoopConfig {
@@ -336,6 +343,10 @@ export interface OrchestrateLoopConfig {
   supervisor?: SupervisorConfig;
   /** GitHub repo URL (e.g., "https://github.com/owner/repo") for constructing PR URLs. */
   repoUrl?: string;
+  /** Directory to write analytics metrics files. When set, metrics are emitted on run completion. */
+  analyticsDir?: string;
+  /** AI tool identifier for per-item metrics (e.g., "claude", "cursor"). */
+  aiTool?: string;
 }
 
 /**
@@ -374,8 +385,10 @@ export async function orchestrateLoop(
     }
   };
 
+  const runStartTime = new Date().toISOString();
+
   wrappedLog({
-    ts: new Date().toISOString(),
+    ts: runStartTime,
     level: "info",
     event: "orchestrate_start",
     items: orch.getAllItems().map((i) => i.id),
@@ -445,6 +458,36 @@ export async function orchestrateLoop(
         items: allItems.map((i) => ({ id: i.id, state: i.state, prNumber: i.prNumber })),
         summary: { done: doneCount, stuck: stuckCount, total: allItems.length },
       });
+
+      // Analytics: write structured metrics file
+      if (config.analyticsDir && deps.analyticsIO) {
+        try {
+          const endTime = new Date().toISOString();
+          const metrics = collectRunMetrics(
+            allItems,
+            orch.config,
+            runStartTime,
+            endTime,
+            config.aiTool ?? "unknown",
+          );
+          const metricsPath = writeRunMetrics(metrics, config.analyticsDir, deps.analyticsIO);
+          wrappedLog({
+            ts: new Date().toISOString(),
+            level: "info",
+            event: "analytics_written",
+            path: metricsPath,
+          });
+        } catch (e: unknown) {
+          // Non-fatal — analytics failure shouldn't block the orchestrator
+          const msg = e instanceof Error ? e.message : String(e);
+          wrappedLog({
+            ts: new Date().toISOString(),
+            level: "warn",
+            event: "analytics_error",
+            error: msg,
+          });
+        }
+      }
 
       break;
     }
@@ -840,6 +883,9 @@ export async function cmdOrchestrate(
     });
   }
 
+  // Analytics directory — always enabled, writes to .ninthwave/analytics/
+  const analyticsDir = join(projectRoot, ".ninthwave", "analytics");
+
   const loopDeps: OrchestrateLoopDeps = {
     buildSnapshot: (o, pr, wd) => buildSnapshot(o, pr, wd, mux),
     sleep: (ms) => interruptibleSleep(ms, abortController.signal),
@@ -848,6 +894,7 @@ export async function cmdOrchestrate(
     reconcile,
     supervisorDeps: supervisorActive ? createSupervisorDeps(structuredLog) : undefined,
     notify,
+    analyticsIO: { mkdirSync, writeFileSync },
   };
 
   // Resolve repo URL for PR URL construction in completion event
@@ -863,6 +910,8 @@ export async function cmdOrchestrate(
     ...(pollIntervalOverride ? { pollIntervalMs: pollIntervalOverride } : {}),
     ...(supervisorConfig ? { supervisor: supervisorConfig } : {}),
     ...(repoUrl ? { repoUrl } : {}),
+    analyticsDir,
+    aiTool,
   };
 
   // Launch status pane if running inside a multiplexer
