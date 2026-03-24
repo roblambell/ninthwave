@@ -785,6 +785,153 @@ describe("reconstructState", () => {
 
     require("fs").rmSync(tmpDir, { recursive: true, force: true });
   });
+
+  it("restores ciFailCount from daemon state file", () => {
+    const orch = new Orchestrator();
+    orch.addItem(makeTodo("REC-1"));
+
+    const tmpDir = join(require("os").tmpdir(), `nw-reconstruct-cifc-${Date.now()}`);
+    const wtDir = join(tmpDir, ".worktrees");
+    const wtPath = join(wtDir, "todo-REC-1");
+    require("fs").mkdirSync(wtPath, { recursive: true });
+
+    const noopCheckPr = () => null;
+    const daemonState = {
+      pid: 1234,
+      startedAt: "2026-01-01T00:00:00Z",
+      updatedAt: "2026-01-01T01:00:00Z",
+      items: [
+        {
+          id: "REC-1",
+          state: "ci-failed",
+          prNumber: 42,
+          title: "Test item",
+          lastTransition: "2026-01-01T00:30:00Z",
+          ciFailCount: 2,
+          retryCount: 1,
+        },
+      ],
+    };
+
+    reconstructState(orch, tmpDir, wtDir, undefined, noopCheckPr, daemonState);
+
+    const item = orch.getItem("REC-1")!;
+    expect(item.ciFailCount).toBe(2);
+    expect(item.retryCount).toBe(1);
+
+    require("fs").rmSync(tmpDir, { recursive: true, force: true });
+  });
+
+  it("defaults ciFailCount to 0 when no daemon state is available", () => {
+    const orch = new Orchestrator();
+    orch.addItem(makeTodo("REC-2"));
+
+    const tmpDir = join(require("os").tmpdir(), `nw-reconstruct-nostate-${Date.now()}`);
+    const wtDir = join(tmpDir, ".worktrees");
+    const wtPath = join(wtDir, "todo-REC-2");
+    require("fs").mkdirSync(wtPath, { recursive: true });
+
+    const noopCheckPr = () => null;
+
+    // No daemon state passed (undefined)
+    reconstructState(orch, tmpDir, wtDir, undefined, noopCheckPr, undefined);
+
+    const item = orch.getItem("REC-2")!;
+    expect(item.ciFailCount).toBe(0);
+    expect(item.retryCount).toBe(0);
+
+    require("fs").rmSync(tmpDir, { recursive: true, force: true });
+  });
+
+  it("defaults ciFailCount to 0 when daemon state is null", () => {
+    const orch = new Orchestrator();
+    orch.addItem(makeTodo("REC-3"));
+
+    // No worktree dir needed — items without worktrees are skipped
+    reconstructState(orch, "/nonexistent", "/nonexistent/.worktrees", undefined, () => null, null);
+
+    const item = orch.getItem("REC-3")!;
+    expect(item.ciFailCount).toBe(0);
+    expect(item.retryCount).toBe(0);
+  });
+
+  it("item with ciFailCount exceeding maxCiRetries goes stuck after recovery", () => {
+    // maxCiRetries defaults to 2; set ciFailCount to 3 so it exceeds the threshold
+    const orch = new Orchestrator();
+    orch.addItem(makeTodo("REC-4"));
+
+    const tmpDir = join(require("os").tmpdir(), `nw-reconstruct-stuck-${Date.now()}`);
+    const wtDir = join(tmpDir, ".worktrees");
+    const wtPath = join(wtDir, "todo-REC-4");
+    require("fs").mkdirSync(wtPath, { recursive: true });
+
+    // checkPr returns "failing" status so the item enters ci-failed state
+    const failingCheckPr = () => "REC-4\t99\tfailing";
+    const daemonState = {
+      pid: 1234,
+      startedAt: "2026-01-01T00:00:00Z",
+      updatedAt: "2026-01-01T01:00:00Z",
+      items: [
+        {
+          id: "REC-4",
+          state: "ci-failed",
+          prNumber: 99,
+          title: "Test item",
+          lastTransition: "2026-01-01T00:30:00Z",
+          ciFailCount: 3,
+          retryCount: 0,
+        },
+      ],
+    };
+
+    reconstructState(orch, tmpDir, wtDir, undefined, failingCheckPr, daemonState);
+
+    const item = orch.getItem("REC-4")!;
+    // ciFailCount restored to 3 which exceeds maxCiRetries (default 2)
+    expect(item.ciFailCount).toBe(3);
+    expect(item.state).toBe("ci-failed");
+    // Verify the restored count exceeds the threshold
+    expect(item.ciFailCount).toBeGreaterThan(orch.config.maxCiRetries);
+
+    // Run processTransitions with a snapshot where the item has CI failing
+    // The orchestrator should transition it to stuck because ciFailCount > maxCiRetries
+    const snapshot: PollSnapshot = {
+      items: [
+        {
+          id: "REC-4",
+          prNumber: 99,
+          ciStatus: "fail",
+          workerAlive: false,
+          isMergeable: false,
+        },
+      ],
+      readyIds: [],
+    };
+    orch.processTransitions(snapshot);
+    expect(orch.getItem("REC-4")!.state).toBe("stuck");
+
+    require("fs").rmSync(tmpDir, { recursive: true, force: true });
+  });
+});
+
+describe("serializeOrchestratorState includes ciFailCount", () => {
+  it("serializes ciFailCount in daemon state items", () => {
+    const { serializeOrchestratorState } = require("../core/daemon.ts");
+    const item: OrchestratorItem = {
+      id: "SER-1",
+      todo: makeTodo("SER-1"),
+      state: "ci-failed",
+      prNumber: 10,
+      lastTransition: "2026-01-01T00:00:00Z",
+      ciFailCount: 5,
+      retryCount: 2,
+    };
+
+    const state = serializeOrchestratorState([item], 9999, "2026-01-01T00:00:00Z");
+    expect(state.items).toHaveLength(1);
+    expect(state.items[0].ciFailCount).toBe(5);
+    expect(state.items[0].retryCount).toBe(2);
+  });
 });
 
 describe("interruptibleSleep", () => {

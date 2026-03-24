@@ -63,9 +63,11 @@ import {
   isDaemonRunning,
   serializeOrchestratorState,
   writeStateFile,
+  readStateFile,
   logFilePath,
   stateFilePath,
   type DaemonIO,
+  type DaemonState,
 } from "../daemon.ts";
 
 // ── Structured logging ─────────────────────────────────────────────
@@ -257,11 +259,27 @@ export function reconstructState(
   worktreeDir: string,
   mux?: Multiplexer,
   checkPr: (id: string, root: string) => string | null = checkPrStatus,
+  daemonState?: DaemonState | null,
 ): void {
+  // Build a lookup map from saved daemon state for restoring persisted counters
+  const savedItems = new Map<string, { ciFailCount: number; retryCount: number }>();
+  if (daemonState?.items) {
+    for (const si of daemonState.items) {
+      savedItems.set(si.id, { ciFailCount: si.ciFailCount, retryCount: si.retryCount });
+    }
+  }
+
   // Pre-fetch workspace list once (avoid per-item shell calls)
   const workspaceList = mux ? mux.listWorkspaces() : "";
 
   for (const item of orch.getAllItems()) {
+    // Restore persisted counters from daemon state (before any state transitions)
+    const saved = savedItems.get(item.id);
+    if (saved) {
+      item.ciFailCount = saved.ciFailCount;
+      item.retryCount = saved.retryCount;
+    }
+
     const wtPath = join(worktreeDir, `todo-${item.id}`);
     if (!existsSync(wtPath)) continue;
 
@@ -1152,7 +1170,9 @@ export async function cmdOrchestrate(
   const mux = getMux();
 
   // Reconstruct state from disk + GitHub (crash recovery)
-  reconstructState(orch, projectRoot, worktreeDir, mux);
+  // Pass saved daemon state so counters (ciFailCount, retryCount) survive restarts
+  const savedDaemonState = readStateFile(projectRoot);
+  reconstructState(orch, projectRoot, worktreeDir, mux, undefined, savedDaemonState);
 
   // Detect AI tool
   const aiTool = detectAiTool();
