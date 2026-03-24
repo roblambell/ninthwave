@@ -97,24 +97,6 @@ Key files: `core/templates.ts`, `test/templates.test.ts`
 
 ---
 
-### Fix: Strip Keywords section from template body (L-DP-13)
-
-**Priority:** Low
-**Source:** Eng review M-ENG-3 finding 5.2
-**Depends on:** None
-
-The `body` field stores the full markdown content including the `## Keywords` section. When templates are rendered to users, this metadata section is confusing. Strip it during parsing.
-
-**Test plan:**
-- Unit test: parsed template body does not contain `## Keywords` section
-- Unit test: template body preserves all other sections
-
-Acceptance: Template body excludes the Keywords section. All other content is preserved. Tests verify the stripping behavior.
-
-Key files: `core/templates.ts`, `test/templates.test.ts`
-
----
-
 ### Refactor: Replace die() with throw in resolveRepo (M-DP-14)
 
 **Priority:** Medium
