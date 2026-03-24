@@ -4,7 +4,7 @@ import { describe, it, expect, afterEach } from "vitest";
 import { mkdirSync, readFileSync, writeFileSync, rmSync, existsSync } from "fs";
 import { join } from "path";
 import { tmpdir } from "os";
-import { reconcile, type ReconcileDeps } from "../core/commands/reconcile.ts";
+import { reconcile, mergeTodosThreeWay, parseTodosForMerge, type ReconcileDeps } from "../core/commands/reconcile.ts";
 
 // --- Test helpers ---
 
@@ -335,5 +335,538 @@ describe("reconcile", () => {
 
     reconcile(todosFile, worktreeDir, projectRoot, deps);
     expect(commitCalled).toBe(false);
+  });
+});
+
+// --- Three-way merge tests ---
+
+describe("parseTodosForMerge", () => {
+  it("parses preamble, sections, and items", () => {
+    const parsed = parseTodosForMerge(SAMPLE_TODOS);
+    expect(parsed.preamble).toEqual(["# TODOS", ""]);
+    expect(parsed.sections).toHaveLength(2);
+    expect(parsed.sections[0]!.header).toBe("## Cloud Infrastructure");
+    expect(parsed.sections[0]!.items).toHaveLength(2);
+    expect(parsed.sections[0]!.items[0]!.id).toBe("M-CI-1");
+    expect(parsed.sections[0]!.items[1]!.id).toBe("H-CI-2");
+    expect(parsed.sections[1]!.header).toBe("## User Onboarding");
+    expect(parsed.sections[1]!.items).toHaveLength(2);
+    expect(parsed.sections[1]!.items[0]!.id).toBe("C-UO-1");
+    expect(parsed.sections[1]!.items[1]!.id).toBe("H-UO-2");
+  });
+
+  it("preserves item lines including content and blank lines", () => {
+    const parsed = parseTodosForMerge(SAMPLE_TODOS);
+    const item = parsed.sections[0]!.items[0]!;
+    expect(item.lines[0]).toBe("### Upgrade CI runners (M-CI-1)");
+    expect(item.lines).toContain("**Priority:** Medium");
+  });
+
+  it("handles empty content", () => {
+    const parsed = parseTodosForMerge("");
+    expect(parsed.preamble).toEqual([""]);
+    expect(parsed.sections).toHaveLength(0);
+  });
+
+  it("handles items without IDs", () => {
+    const content = `# TODOS\n\n## Section\n\n### Item without ID\n\nSome text\n`;
+    const parsed = parseTodosForMerge(content);
+    expect(parsed.sections[0]!.items[0]!.id).toBe("");
+    expect(parsed.sections[0]!.items[0]!.lines[0]).toBe("### Item without ID");
+  });
+});
+
+describe("mergeTodosThreeWay", () => {
+  // Helper to extract IDs from merged output
+  function extractItemIds(content: string): string[] {
+    const ids: string[] = [];
+    for (const line of content.split("\n")) {
+      if (!line.startsWith("### ")) continue;
+      const match = line.match(/\(([A-Z]-[A-Za-z0-9]+-[0-9]+)/);
+      if (match) ids.push(match[1]!);
+    }
+    return ids;
+  }
+
+  it("preserves removals from ours (upstream) and additions from theirs (local)", () => {
+    // Base: A, B, C, D
+    // Ours (upstream): A, C, D (B removed — marked done upstream)
+    // Theirs (local): A, B, C, D, E (E added locally)
+    // Expected: A, C, D, E (B removed by upstream, E added by local)
+    const base = SAMPLE_TODOS; // M-CI-1, H-CI-2, C-UO-1, H-UO-2
+
+    // Ours: remove M-CI-1
+    const ours = `# TODOS
+
+## Cloud Infrastructure
+
+### Flaky connection pool (H-CI-2)
+
+**Priority:** High
+
+## User Onboarding
+
+### Onboarding wizard (C-UO-1)
+
+**Priority:** Critical
+
+### Welcome email (H-UO-2)
+
+**Priority:** High
+`;
+
+    // Theirs: add L-NEW-1 to User Onboarding
+    const theirs = `# TODOS
+
+## Cloud Infrastructure
+
+### Upgrade CI runners (M-CI-1)
+
+**Priority:** Medium
+
+### Flaky connection pool (H-CI-2)
+
+**Priority:** High
+
+## User Onboarding
+
+### Onboarding wizard (C-UO-1)
+
+**Priority:** Critical
+
+### Welcome email (H-UO-2)
+
+**Priority:** High
+
+### New monitoring dashboard (L-NEW-1)
+
+**Priority:** Low
+`;
+
+    const merged = mergeTodosThreeWay(base, ours, theirs);
+    const ids = extractItemIds(merged);
+
+    // M-CI-1 removed by ours, L-NEW-1 added by theirs
+    expect(ids).toContain("H-CI-2");
+    expect(ids).toContain("C-UO-1");
+    expect(ids).toContain("H-UO-2");
+    expect(ids).toContain("L-NEW-1");
+    expect(ids).not.toContain("M-CI-1");
+  });
+
+  it("preserves removals from theirs (local) and additions from ours (upstream)", () => {
+    // Base: A, B, C, D
+    // Ours (upstream): A, B, C, D, E (E added upstream)
+    // Theirs (local): A, C, D (B removed locally)
+    // Expected: A, C, D, E (B removed by local, E added by upstream)
+    const base = SAMPLE_TODOS;
+
+    // Ours: add E-NEW-1 to Cloud Infrastructure
+    const ours = `# TODOS
+
+## Cloud Infrastructure
+
+### Upgrade CI runners (M-CI-1)
+
+**Priority:** Medium
+
+### Flaky connection pool (H-CI-2)
+
+**Priority:** High
+
+### New infra item (E-NEW-1)
+
+**Priority:** Medium
+
+## User Onboarding
+
+### Onboarding wizard (C-UO-1)
+
+**Priority:** Critical
+
+### Welcome email (H-UO-2)
+
+**Priority:** High
+`;
+
+    // Theirs: remove M-CI-1 (marked done locally)
+    const theirs = `# TODOS
+
+## Cloud Infrastructure
+
+### Flaky connection pool (H-CI-2)
+
+**Priority:** High
+
+## User Onboarding
+
+### Onboarding wizard (C-UO-1)
+
+**Priority:** Critical
+
+### Welcome email (H-UO-2)
+
+**Priority:** High
+`;
+
+    const merged = mergeTodosThreeWay(base, ours, theirs);
+    const ids = extractItemIds(merged);
+
+    // M-CI-1 removed by theirs, E-NEW-1 added by ours (kept)
+    expect(ids).toContain("H-CI-2");
+    expect(ids).toContain("E-NEW-1");
+    expect(ids).toContain("C-UO-1");
+    expect(ids).toContain("H-UO-2");
+    expect(ids).not.toContain("M-CI-1");
+  });
+
+  it("preserves removals from both sides", () => {
+    // Base: A, B, C, D
+    // Ours: A, C, D (B removed)
+    // Theirs: A, B, D (C removed)
+    // Expected: A, D (both B and C removed)
+    const base = SAMPLE_TODOS;
+
+    const ours = `# TODOS
+
+## Cloud Infrastructure
+
+### Flaky connection pool (H-CI-2)
+
+**Priority:** High
+
+## User Onboarding
+
+### Onboarding wizard (C-UO-1)
+
+**Priority:** Critical
+
+### Welcome email (H-UO-2)
+
+**Priority:** High
+`;
+
+    const theirs = `# TODOS
+
+## Cloud Infrastructure
+
+### Upgrade CI runners (M-CI-1)
+
+**Priority:** Medium
+
+### Flaky connection pool (H-CI-2)
+
+**Priority:** High
+
+## User Onboarding
+
+### Welcome email (H-UO-2)
+
+**Priority:** High
+`;
+
+    const merged = mergeTodosThreeWay(base, ours, theirs);
+    const ids = extractItemIds(merged);
+
+    expect(ids).toContain("H-CI-2");
+    expect(ids).toContain("H-UO-2");
+    expect(ids).not.toContain("M-CI-1"); // removed by ours
+    expect(ids).not.toContain("C-UO-1"); // removed by theirs
+  });
+
+  it("preserves additions from both sides", () => {
+    // Base: A, B
+    // Ours: A, B, C (C added by upstream)
+    // Theirs: A, B, D (D added by local)
+    // Expected: A, B, C, D (both additions preserved)
+    const base = `# TODOS
+
+## Cloud Infrastructure
+
+### Upgrade CI runners (M-CI-1)
+
+**Priority:** Medium
+
+### Flaky connection pool (H-CI-2)
+
+**Priority:** High
+`;
+
+    const ours = `# TODOS
+
+## Cloud Infrastructure
+
+### Upgrade CI runners (M-CI-1)
+
+**Priority:** Medium
+
+### Flaky connection pool (H-CI-2)
+
+**Priority:** High
+
+### Ours added item (M-ADD-1)
+
+**Priority:** Medium
+`;
+
+    const theirs = `# TODOS
+
+## Cloud Infrastructure
+
+### Upgrade CI runners (M-CI-1)
+
+**Priority:** Medium
+
+### Flaky connection pool (H-CI-2)
+
+**Priority:** High
+
+### Theirs added item (L-ADD-1)
+
+**Priority:** Low
+`;
+
+    const merged = mergeTodosThreeWay(base, ours, theirs);
+    const ids = extractItemIds(merged);
+
+    expect(ids).toContain("M-CI-1");
+    expect(ids).toContain("H-CI-2");
+    expect(ids).toContain("M-ADD-1"); // added by ours
+    expect(ids).toContain("L-ADD-1"); // added by theirs
+  });
+
+  it("handles identical content (no-op)", () => {
+    const merged = mergeTodosThreeWay(SAMPLE_TODOS, SAMPLE_TODOS, SAMPLE_TODOS);
+    const ids = extractItemIds(merged);
+
+    expect(ids).toEqual(["M-CI-1", "H-CI-2", "C-UO-1", "H-UO-2"]);
+  });
+
+  it("preserves new sections from theirs", () => {
+    // Theirs adds a whole new section
+    const base = `# TODOS
+
+## Cloud Infrastructure
+
+### Upgrade CI runners (M-CI-1)
+
+**Priority:** Medium
+`;
+
+    const ours = base; // upstream unchanged
+
+    const theirs = `# TODOS
+
+## Cloud Infrastructure
+
+### Upgrade CI runners (M-CI-1)
+
+**Priority:** Medium
+
+## New Domain
+
+### Brand new item (L-NEW-1)
+
+**Priority:** Low
+`;
+
+    const merged = mergeTodosThreeWay(base, ours, theirs);
+    const ids = extractItemIds(merged);
+
+    expect(ids).toContain("M-CI-1");
+    expect(ids).toContain("L-NEW-1");
+    expect(merged).toContain("## New Domain");
+  });
+
+  it("drops sections that become empty after removals", () => {
+    // Theirs removes the only item in a section
+    const base = `# TODOS
+
+## Cloud Infrastructure
+
+### Upgrade CI runners (M-CI-1)
+
+**Priority:** Medium
+
+## User Onboarding
+
+### Welcome email (H-UO-2)
+
+**Priority:** High
+`;
+
+    const ours = base; // unchanged
+
+    const theirs = `# TODOS
+
+## User Onboarding
+
+### Welcome email (H-UO-2)
+
+**Priority:** High
+`;
+
+    const merged = mergeTodosThreeWay(base, ours, theirs);
+    const ids = extractItemIds(merged);
+
+    expect(ids).not.toContain("M-CI-1");
+    expect(ids).toContain("H-UO-2");
+    // Cloud Infrastructure section should be dropped since it's empty
+    expect(merged).not.toContain("## Cloud Infrastructure");
+  });
+
+  it("handles empty base (both sides adding new content)", () => {
+    const base = "# TODOS\n";
+
+    const ours = `# TODOS
+
+## Section A
+
+### Item A (M-A-1)
+
+**Priority:** Medium
+`;
+
+    const theirs = `# TODOS
+
+## Section B
+
+### Item B (M-B-1)
+
+**Priority:** Medium
+`;
+
+    const merged = mergeTodosThreeWay(base, ours, theirs);
+    const ids = extractItemIds(merged);
+
+    expect(ids).toContain("M-A-1");
+    expect(ids).toContain("M-B-1");
+  });
+
+  it("preserves item content faithfully", () => {
+    const base = `# TODOS
+
+## Section
+
+### Multi-line item (M-ML-1)
+
+**Priority:** High
+**Depends on:** None
+
+This item has a detailed description
+with multiple lines of text.
+
+Key files: \`core/foo.ts\`, \`core/bar.ts\`
+`;
+
+    const ours = base;
+    const theirs = base;
+
+    const merged = mergeTodosThreeWay(base, ours, theirs);
+
+    expect(merged).toContain("This item has a detailed description");
+    expect(merged).toContain("with multiple lines of text.");
+    expect(merged).toContain("Key files:");
+  });
+
+  it("simulates realistic reconcile conflict: concurrent mark-done and new items", () => {
+    // This is the core scenario from the TODO:
+    // Worker A merges a PR, reconcile on machine A marks items done and pushes
+    // Worker B adds new items locally, tries to reconcile, gets a conflict
+    // The three-way merge should preserve both changes
+
+    const base = `# TODOS
+
+## CLI Commands
+
+### Fix reconcile command (H-REC-1)
+
+**Priority:** High
+
+### Add watch mode (M-WAT-1)
+
+**Priority:** Medium
+
+## Visual Design
+
+### Dark mode support (L-VIS-1)
+
+**Priority:** Low
+
+### Icon redesign (L-VIS-2)
+
+**Priority:** Low
+`;
+
+    // Ours (remote after machine A reconciled): H-REC-1 marked done (removed)
+    const ours = `# TODOS
+
+## CLI Commands
+
+### Add watch mode (M-WAT-1)
+
+**Priority:** Medium
+
+## Visual Design
+
+### Dark mode support (L-VIS-1)
+
+**Priority:** Low
+
+### Icon redesign (L-VIS-2)
+
+**Priority:** Low
+`;
+
+    // Theirs (local with new items from decompose): Added M-FIX-1 and L-VIS-3
+    const theirs = `# TODOS
+
+## CLI Commands
+
+### Fix reconcile command (H-REC-1)
+
+**Priority:** High
+
+### Add watch mode (M-WAT-1)
+
+**Priority:** Medium
+
+### Fix memory leak (M-FIX-1)
+
+**Priority:** Medium
+
+## Visual Design
+
+### Dark mode support (L-VIS-1)
+
+**Priority:** Low
+
+### Icon redesign (L-VIS-2)
+
+**Priority:** Low
+
+### Animate transitions (L-VIS-3)
+
+**Priority:** Low
+`;
+
+    const merged = mergeTodosThreeWay(base, ours, theirs);
+    const ids = extractItemIds(merged);
+
+    // H-REC-1 was removed by ours (marked done) — should stay removed
+    expect(ids).not.toContain("H-REC-1");
+
+    // Original items still present
+    expect(ids).toContain("M-WAT-1");
+    expect(ids).toContain("L-VIS-1");
+    expect(ids).toContain("L-VIS-2");
+
+    // New items from theirs preserved
+    expect(ids).toContain("M-FIX-1");
+    expect(ids).toContain("L-VIS-3");
+
+    // Verify sections are intact
+    expect(merged).toContain("## CLI Commands");
+    expect(merged).toContain("## Visual Design");
   });
 });
