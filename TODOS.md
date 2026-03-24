@@ -120,26 +120,6 @@ Key files: `core/orchestrator.ts`, `core/commands/orchestrate.ts`, `test/orchest
 
 ---
 
-### Fix: Add delivery verification and retry to TmuxAdapter sendMessage (H-WRK-3)
-
-**Priority:** High
-**Source:** Eng review W-25 — `docs/reviews/eng-review-workers.md`
-**Depends on:** None
-
-The tmux `sendMessage` uses `send-keys -l` without delivery verification or retry, while cmux has paste-buffer + verify + exponential backoff. Extract the verification logic from `send-message.ts` into a shared utility and wire it into `TmuxAdapter.sendMessage`. Alternatively, have `TmuxAdapter` use tmux's `load-buffer` + `paste-buffer` approach (analogous to cmux's atomic paste) with verification.
-
-**Test plan:**
-- Unit test: TmuxAdapter sendMessage verifies delivery via readScreen
-- Unit test: TmuxAdapter retries on failed delivery
-- Unit test: TmuxAdapter falls back gracefully when verification fails
-- Integration: message delivery works end-to-end on tmux
-
-Acceptance: `TmuxAdapter.sendMessage` includes delivery verification and retry with exponential backoff. Tmux and cmux paths have equivalent delivery guarantees. Tests cover retry and verification scenarios. No regression.
-
-Key files: `core/mux.ts`, `core/send-message.ts`, `test/mux.test.ts`
-
----
-
 ### Fix: Scope cmdClean workspace closing to merged items only (M-WRK-7)
 
 **Priority:** Medium

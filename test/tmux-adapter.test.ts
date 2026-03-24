@@ -4,36 +4,50 @@ import { describe, it, expect } from "vitest";
 import { TmuxAdapter } from "../core/mux.ts";
 import type { RunResult } from "../core/types.ts";
 
+const ok = (stdout = ""): RunResult => ({ stdout, stderr: "", exitCode: 0 });
+const fail = (stderr = ""): RunResult => ({ stdout: "", stderr, exitCode: 1 });
+
 /** Helper: create a shell runner that records calls and returns canned results. */
 function fakeRunner(results: RunResult[] = []) {
   const calls: { cmd: string; args: string[] }[] = [];
   let callIndex = 0;
 
-  const defaultOk: RunResult = { stdout: "", stderr: "", exitCode: 0 };
-
   const runner = (cmd: string, args: string[]): RunResult => {
     calls.push({ cmd, args });
-    return results[callIndex++] ?? defaultOk;
+    return results[callIndex++] ?? ok();
   };
 
   return { runner, calls };
 }
 
+/** Create a TmuxAdapter with no retries for basic tests. */
+function adapterNoRetry(runner: (cmd: string, args: string[]) => RunResult) {
+  return new TmuxAdapter(runner, { sleep: () => {}, maxRetries: 0 });
+}
+
+/** Create a TmuxAdapter with custom retry options. */
+function adapterWithRetry(
+  runner: (cmd: string, args: string[]) => RunResult,
+  maxRetries: number,
+) {
+  return new TmuxAdapter(runner, {
+    sleep: () => {},
+    maxRetries,
+    baseDelayMs: 100,
+  });
+}
+
 describe("TmuxAdapter", () => {
   describe("isAvailable", () => {
     it("returns true when tmux -V succeeds", () => {
-      const { runner } = fakeRunner([
-        { stdout: "tmux 3.4", stderr: "", exitCode: 0 },
-      ]);
+      const { runner } = fakeRunner([ok("tmux 3.4")]);
       const adapter = new TmuxAdapter(runner);
 
       expect(adapter.isAvailable()).toBe(true);
     });
 
     it("returns false when tmux is not installed", () => {
-      const { runner } = fakeRunner([
-        { stdout: "", stderr: "command not found: tmux", exitCode: 127 },
-      ]);
+      const { runner } = fakeRunner([fail("command not found: tmux")]);
       const adapter = new TmuxAdapter(runner);
 
       expect(adapter.isAvailable()).toBe(false);
@@ -42,9 +56,7 @@ describe("TmuxAdapter", () => {
 
   describe("launchWorkspace", () => {
     it("calls tmux new-session with correct args", () => {
-      const { runner, calls } = fakeRunner([
-        { stdout: "", stderr: "", exitCode: 0 },
-      ]);
+      const { runner, calls } = fakeRunner([ok()]);
       const adapter = new TmuxAdapter(runner);
 
       const ref = adapter.launchWorkspace("/tmp/work", "claude --name test");
@@ -73,9 +85,7 @@ describe("TmuxAdapter", () => {
     });
 
     it("returns null when tmux new-session fails", () => {
-      const { runner } = fakeRunner([
-        { stdout: "", stderr: "server not running", exitCode: 1 },
-      ]);
+      const { runner } = fakeRunner([fail("server not running")]);
       const adapter = new TmuxAdapter(runner);
 
       expect(adapter.launchWorkspace("/tmp", "cmd")).toBeNull();
@@ -92,62 +102,247 @@ describe("TmuxAdapter", () => {
     });
   });
 
-  describe("sendMessage", () => {
-    it("calls tmux send-keys with -l for literal text then Enter", () => {
-      const { runner, calls } = fakeRunner();
-      const adapter = new TmuxAdapter(runner);
+  // ── sendMessage: atomic paste path ─────────────────────────────────
+
+  describe("sendMessage (atomic paste path)", () => {
+    it("uses set-buffer + paste-buffer + Enter + verify on success", () => {
+      const { runner, calls } = fakeRunner([
+        ok(),                         // set-buffer
+        ok(),                         // paste-buffer
+        ok(),                         // send-keys Enter
+        ok("Thinking...\nclaude> "),  // capture-pane (verify: no trace)
+      ]);
+      const adapter = adapterNoRetry(runner);
 
       const result = adapter.sendMessage("nw-1", "hello world");
 
       expect(result).toBe(true);
-      expect(calls).toHaveLength(2);
-      // First call: literal text
+      expect(calls).toHaveLength(4);
+
+      // 1. Set buffer
       expect(calls[0].args).toEqual([
-        "send-keys",
-        "-t",
-        "nw-1",
-        "-l",
-        "hello world",
+        "set-buffer", "-b", "nw_send", "--", "hello world",
       ]);
-      // Second call: Enter key
-      expect(calls[1].args).toEqual(["send-keys", "-t", "nw-1", "Enter"]);
+      // 2. Paste buffer
+      expect(calls[1].args).toEqual([
+        "paste-buffer", "-b", "nw_send", "-t", "nw-1",
+      ]);
+      // 3. Enter key
+      expect(calls[2].args).toEqual(["send-keys", "-t", "nw-1", "Enter"]);
+      // 4. Verification read
+      expect(calls[3].args).toEqual([
+        "capture-pane", "-t", "nw-1", "-p", "-S", "-3",
+      ]);
     });
 
-    it("escapes special characters via -l flag", () => {
-      const { runner, calls } = fakeRunner();
-      const adapter = new TmuxAdapter(runner);
-
-      const msg = 'echo "hello $USER" && exit';
-      adapter.sendMessage("nw-1", msg);
-
-      // -l ensures literal interpretation — the raw text is passed through
-      expect(calls[0].args[4]).toBe(msg);
-    });
-
-    it("returns false when send-keys fails", () => {
+    it("returns false when message is stuck on screen (verification fails)", () => {
       const { runner } = fakeRunner([
-        { stdout: "", stderr: "session not found", exitCode: 1 },
+        ok(),                      // set-buffer
+        ok(),                      // paste-buffer
+        ok(),                      // send-keys Enter
+        ok("output\nhello world"), // capture-pane: message still on last line
       ]);
-      const adapter = new TmuxAdapter(runner);
+      const adapter = adapterNoRetry(runner);
 
-      expect(adapter.sendMessage("nw-99", "text")).toBe(false);
+      expect(adapter.sendMessage("nw-1", "hello world")).toBe(false);
     });
 
     it("returns false when Enter key send fails", () => {
       const { runner } = fakeRunner([
-        { stdout: "", stderr: "", exitCode: 0 }, // text succeeds
-        { stdout: "", stderr: "session not found", exitCode: 1 }, // Enter fails
+        ok(),                    // set-buffer
+        ok(),                    // paste-buffer
+        fail("session gone"),    // send-keys Enter fails
       ]);
-      const adapter = new TmuxAdapter(runner);
+      const adapter = adapterNoRetry(runner);
+
+      // Atomic paste path fails at Enter, falls through to fallback send-keys -l
+      // Fallback also fails because next call returns ok() but we need to trace
+      // Actually: Enter fails → attemptSend returns false (no retry)
+      expect(adapter.sendMessage("nw-1", "text")).toBe(false);
+    });
+
+    it("assumes success when capture-pane fails (can't verify)", () => {
+      const { runner } = fakeRunner([
+        ok(),     // set-buffer
+        ok(),     // paste-buffer
+        ok(),     // send-keys Enter
+        fail(),   // capture-pane fails → readScreen returns ""
+      ]);
+      const adapter = adapterNoRetry(runner);
+
+      // Can't read screen → assumes success
+      expect(adapter.sendMessage("nw-1", "hello")).toBe(true);
+    });
+  });
+
+  // ── sendMessage: fallback send-keys path ───────────────────────────
+
+  describe("sendMessage (fallback send-keys path)", () => {
+    it("falls back to send-keys -l when set-buffer fails", () => {
+      const { runner, calls } = fakeRunner([
+        fail("no buffer support"), // set-buffer fails
+        ok(),                      // send-keys -l (fallback)
+        ok(),                      // send-keys Enter
+        ok("claude> "),            // capture-pane (verify)
+      ]);
+      const adapter = adapterNoRetry(runner);
+
+      const result = adapter.sendMessage("nw-1", "hello world");
+
+      expect(result).toBe(true);
+      expect(calls).toHaveLength(4);
+
+      // Fell back to send-keys -l
+      expect(calls[1].args).toEqual([
+        "send-keys", "-t", "nw-1", "-l", "hello world",
+      ]);
+      expect(calls[2].args).toEqual(["send-keys", "-t", "nw-1", "Enter"]);
+    });
+
+    it("falls back to send-keys -l when paste-buffer fails", () => {
+      const { runner, calls } = fakeRunner([
+        ok(),                       // set-buffer OK
+        fail("paste not supported"),// paste-buffer fails
+        ok(),                       // send-keys -l (fallback)
+        ok(),                       // send-keys Enter
+        ok("claude> "),             // capture-pane (verify)
+      ]);
+      const adapter = adapterNoRetry(runner);
+
+      const result = adapter.sendMessage("nw-1", "hello");
+
+      expect(result).toBe(true);
+
+      // Fell back to send-keys -l
+      expect(calls[2].args).toEqual([
+        "send-keys", "-t", "nw-1", "-l", "hello",
+      ]);
+    });
+
+    it("returns false when fallback send-keys also fails", () => {
+      const { runner } = fakeRunner([
+        fail(),                  // set-buffer fails
+        fail("session not found"), // send-keys -l fails
+      ]);
+      const adapter = adapterNoRetry(runner);
+
+      expect(adapter.sendMessage("nw-99", "text")).toBe(false);
+    });
+
+    it("returns false when fallback Enter key fails", () => {
+      const { runner } = fakeRunner([
+        fail(),     // set-buffer fails
+        ok(),       // send-keys -l OK
+        fail(),     // send-keys Enter fails
+      ]);
+      const adapter = adapterNoRetry(runner);
 
       expect(adapter.sendMessage("nw-1", "text")).toBe(false);
     });
+
+    it("preserves special characters via -l flag in fallback", () => {
+      const { runner, calls } = fakeRunner([
+        fail(),            // set-buffer fails
+        ok(),              // send-keys -l
+        ok(),              // send-keys Enter
+        ok("claude> "),    // capture-pane
+      ]);
+      const adapter = adapterNoRetry(runner);
+      const msg = 'echo "hello $USER" && exit';
+
+      adapter.sendMessage("nw-1", msg);
+
+      // -l ensures literal interpretation
+      expect(calls[1].args[4]).toBe(msg);
+    });
   });
+
+  // ── sendMessage: retry behaviour ───────────────────────────────────
+
+  describe("sendMessage (retry)", () => {
+    it("retries on failed delivery verification", () => {
+      const { runner, calls } = fakeRunner([
+        // Attempt 1: atomic paste succeeds but verification fails (stuck)
+        ok(),                       // set-buffer
+        ok(),                       // paste-buffer
+        ok(),                       // send-keys Enter
+        ok("output\nhello world"),  // capture-pane: stuck
+
+        // Attempt 2: atomic paste succeeds and verification passes
+        ok(),                       // set-buffer
+        ok(),                       // paste-buffer
+        ok(),                       // send-keys Enter
+        ok("Thinking...\nclaude> "), // capture-pane: delivered
+      ]);
+      const adapter = adapterWithRetry(runner, 1);
+
+      const result = adapter.sendMessage("nw-1", "hello world");
+
+      expect(result).toBe(true);
+      expect(calls).toHaveLength(8); // 4 calls per attempt × 2 attempts
+    });
+
+    it("returns false after exhausting all retries", () => {
+      // Every attempt: paste works but message stays stuck on screen
+      const stuck = (msg: string): RunResult[] => [
+        ok(),              // set-buffer
+        ok(),              // paste-buffer
+        ok(),              // send-keys Enter
+        ok(`out\n${msg}`), // capture-pane: still stuck
+      ];
+
+      const { runner } = fakeRunner([
+        ...stuck("fail msg"),
+        ...stuck("fail msg"),
+        ...stuck("fail msg"),
+      ]);
+      const adapter = adapterWithRetry(runner, 2);
+
+      expect(adapter.sendMessage("nw-1", "fail msg")).toBe(false);
+    });
+
+    it("uses exponential backoff between retries", () => {
+      const sleepCalls: number[] = [];
+      const { runner } = fakeRunner([
+        // All attempts fail via set-buffer
+        fail(), fail(), // attempt 0: set-buffer fails → fallback send-keys fails
+        fail(), fail(), // attempt 1
+        fail(), fail(), // attempt 2
+      ]);
+      const adapter = new TmuxAdapter(runner, {
+        sleep: (ms) => sleepCalls.push(ms),
+        maxRetries: 2,
+        baseDelayMs: 50,
+      });
+
+      adapter.sendMessage("nw-1", "text");
+
+      // Only backoff sleeps (not the internal 50ms/100ms sleeps since
+      // we're on the early-fail path where set-buffer and send-keys both fail)
+      expect(sleepCalls).toEqual([50, 100]); // 50*2^0, 50*2^1
+    });
+
+    it("falls back gracefully when verification consistently fails", () => {
+      // Every attempt: paste works, Enter works, but can't read screen
+      const { runner } = fakeRunner([
+        ok(),    // set-buffer
+        ok(),    // paste-buffer
+        ok(),    // send-keys Enter
+        fail(),  // capture-pane fails → assumes success
+      ]);
+      const adapter = adapterWithRetry(runner, 2);
+
+      // First attempt assumes success because readScreen returns ""
+      expect(adapter.sendMessage("nw-1", "hello")).toBe(true);
+    });
+  });
+
+  // ── readScreen tests ───────────────────────────────────────────────
 
   describe("readScreen", () => {
     it("calls tmux capture-pane with correct args", () => {
       const { runner, calls } = fakeRunner([
-        { stdout: "line1\nline2\nline3", stderr: "", exitCode: 0 },
+        ok("line1\nline2\nline3"),
       ]);
       const adapter = new TmuxAdapter(runner);
 
@@ -165,9 +360,7 @@ describe("TmuxAdapter", () => {
     });
 
     it("omits -S flag when lines is not specified", () => {
-      const { runner, calls } = fakeRunner([
-        { stdout: "content", stderr: "", exitCode: 0 },
-      ]);
+      const { runner, calls } = fakeRunner([ok("content")]);
       const adapter = new TmuxAdapter(runner);
 
       adapter.readScreen("nw-1");
@@ -176,23 +369,19 @@ describe("TmuxAdapter", () => {
     });
 
     it("returns empty string when capture-pane fails", () => {
-      const { runner } = fakeRunner([
-        { stdout: "", stderr: "no session", exitCode: 1 },
-      ]);
+      const { runner } = fakeRunner([fail("no session")]);
       const adapter = new TmuxAdapter(runner);
 
       expect(adapter.readScreen("nw-1")).toBe("");
     });
   });
 
+  // ── listWorkspaces tests ───────────────────────────────────────────
+
   describe("listWorkspaces", () => {
     it("parses tmux session list and filters to nw- sessions", () => {
       const { runner } = fakeRunner([
-        {
-          stdout: "nw-1\nuser-session\nnw-2\nwork",
-          stderr: "",
-          exitCode: 0,
-        },
+        ok("nw-1\nuser-session\nnw-2\nwork"),
       ]);
       const adapter = new TmuxAdapter(runner);
 
@@ -200,9 +389,7 @@ describe("TmuxAdapter", () => {
     });
 
     it("calls tmux list-sessions with format flag", () => {
-      const { runner, calls } = fakeRunner([
-        { stdout: "nw-1", stderr: "", exitCode: 0 },
-      ]);
+      const { runner, calls } = fakeRunner([ok("nw-1")]);
       const adapter = new TmuxAdapter(runner);
 
       adapter.listWorkspaces();
@@ -215,23 +402,21 @@ describe("TmuxAdapter", () => {
     });
 
     it("returns empty string when tmux is not running", () => {
-      const { runner } = fakeRunner([
-        { stdout: "", stderr: "no server running", exitCode: 1 },
-      ]);
+      const { runner } = fakeRunner([fail("no server running")]);
       const adapter = new TmuxAdapter(runner);
 
       expect(adapter.listWorkspaces()).toBe("");
     });
 
     it("returns empty string when no nw- sessions exist", () => {
-      const { runner } = fakeRunner([
-        { stdout: "my-session\nwork", stderr: "", exitCode: 0 },
-      ]);
+      const { runner } = fakeRunner([ok("my-session\nwork")]);
       const adapter = new TmuxAdapter(runner);
 
       expect(adapter.listWorkspaces()).toBe("");
     });
   });
+
+  // ── splitPane tests ────────────────────────────────────────────────
 
   describe("splitPane", () => {
     it("uses split-window -P -F to get the new pane ID directly", () => {
@@ -256,9 +441,7 @@ describe("TmuxAdapter", () => {
     });
 
     it("returns null when split-window fails", () => {
-      const { runner } = fakeRunner([
-        { stdout: "", stderr: "no session", exitCode: 1 },
-      ]);
+      const { runner } = fakeRunner([fail("no session")]);
       const adapter = new TmuxAdapter(runner);
 
       expect(adapter.splitPane("cmd")).toBeNull();
@@ -285,11 +468,11 @@ describe("TmuxAdapter", () => {
     });
   });
 
+  // ── closeWorkspace tests ───────────────────────────────────────────
+
   describe("closeWorkspace", () => {
     it("calls tmux kill-session with correct session name", () => {
-      const { runner, calls } = fakeRunner([
-        { stdout: "", stderr: "", exitCode: 0 },
-      ]);
+      const { runner, calls } = fakeRunner([ok()]);
       const adapter = new TmuxAdapter(runner);
 
       const result = adapter.closeWorkspace("nw-1");
@@ -299,14 +482,14 @@ describe("TmuxAdapter", () => {
     });
 
     it("returns false when session does not exist", () => {
-      const { runner } = fakeRunner([
-        { stdout: "", stderr: "session not found: nw-99", exitCode: 1 },
-      ]);
+      const { runner } = fakeRunner([fail("session not found: nw-99")]);
       const adapter = new TmuxAdapter(runner);
 
       expect(adapter.closeWorkspace("nw-99")).toBe(false);
     });
   });
+
+  // ── Interface compliance ───────────────────────────────────────────
 
   describe("Multiplexer interface compliance", () => {
     it("implements all Multiplexer methods", () => {

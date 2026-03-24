@@ -2,6 +2,8 @@
 // Decouples command modules from the concrete cmux/tmux implementation.
 
 import * as cmux from "./cmux.ts";
+import { checkDelivery, sendWithRetry } from "./delivery.ts";
+import type { Sleeper } from "./delivery.ts";
 import { run as defaultRun } from "./shell.ts";
 import type { RunResult } from "./types.ts";
 
@@ -54,19 +56,41 @@ export class CmuxAdapter implements Multiplexer {
   }
 }
 
+/** Default sleep — uses Bun.sleepSync in production, no-op in test. */
+const defaultSleep: Sleeper =
+  process.env.NODE_ENV === "test" ? () => {} : (ms) => Bun.sleepSync(ms);
+
+/** Configuration options for TmuxAdapter delivery behaviour. */
+export interface TmuxAdapterOptions {
+  sleep?: Sleeper;
+  maxRetries?: number;
+  baseDelayMs?: number;
+}
+
 /**
  * Adapter that delegates to the tmux CLI.
  *
  * Session names use the `nw-` prefix to avoid collisions with user sessions.
  * All operations gracefully return null/false/"" when tmux is not running or
  * the target session does not exist.
+ *
+ * `sendMessage` uses tmux's `set-buffer` + `paste-buffer` for atomic paste
+ * (analogous to cmux's approach), with delivery verification via `readScreen`
+ * and exponential-backoff retry. Falls back to `send-keys -l` when the buffer
+ * approach fails.
  */
 export class TmuxAdapter implements Multiplexer {
   private run: ShellRunner;
+  private sleep: Sleeper;
+  private maxRetries: number;
+  private baseDelayMs: number;
   private counter = 0;
 
-  constructor(run?: ShellRunner) {
+  constructor(run?: ShellRunner, options?: TmuxAdapterOptions) {
     this.run = run ?? defaultRun;
+    this.sleep = options?.sleep ?? defaultSleep;
+    this.maxRetries = options?.maxRetries ?? 3;
+    this.baseDelayMs = options?.baseDelayMs ?? 100;
   }
 
   isAvailable(): boolean {
@@ -103,20 +127,22 @@ export class TmuxAdapter implements Multiplexer {
     return result.stdout?.trim() || `nw-pane-${this.counter}`;
   }
 
+  /**
+   * Send a message to a tmux session with delivery verification and retry.
+   *
+   * Attempts atomic paste via `set-buffer` + `paste-buffer`, falling back to
+   * `send-keys -l` when the buffer approach fails. Verifies delivery by reading
+   * the screen and retries with exponential backoff on failure.
+   */
   sendMessage(ref: string, message: string): boolean {
-    // Use send-keys -l for literal text (disables key name lookup),
-    // then send Enter separately to submit.
-    const textResult = this.run("tmux", [
-      "send-keys",
-      "-t",
-      ref,
-      "-l",
-      message,
-    ]);
-    if (textResult.exitCode !== 0) return false;
-
-    const enterResult = this.run("tmux", ["send-keys", "-t", ref, "Enter"]);
-    return enterResult.exitCode === 0;
+    return sendWithRetry(
+      () => this.attemptSend(ref, message),
+      {
+        sleep: this.sleep,
+        maxRetries: this.maxRetries,
+        baseDelayMs: this.baseDelayMs,
+      },
+    );
   }
 
   readScreen(ref: string, lines?: number): string {
@@ -146,6 +172,66 @@ export class TmuxAdapter implements Multiplexer {
   closeWorkspace(ref: string): boolean {
     const result = this.run("tmux", ["kill-session", "-t", ref]);
     return result.exitCode === 0;
+  }
+
+  // ── Private delivery helpers ─────────────────────────────────────────
+
+  /** Single delivery attempt: try atomic paste, fall back to send-keys. */
+  private attemptSend(ref: string, message: string): boolean {
+    // Try atomic paste via tmux buffers (avoids keystroke race)
+    const setBuf = this.run("tmux", [
+      "set-buffer",
+      "-b",
+      "nw_send",
+      "--",
+      message,
+    ]);
+    if (setBuf.exitCode === 0) {
+      const paste = this.run("tmux", [
+        "paste-buffer",
+        "-b",
+        "nw_send",
+        "-t",
+        ref,
+      ]);
+      if (paste.exitCode === 0) {
+        this.sleep(50);
+        const enter = this.run("tmux", ["send-keys", "-t", ref, "Enter"]);
+        if (enter.exitCode !== 0) return false;
+        this.sleep(100);
+        return this.verifyDelivery(ref, message);
+      }
+    }
+
+    // Fallback: send-keys -l for literal text, then Enter
+    const textResult = this.run("tmux", [
+      "send-keys",
+      "-t",
+      ref,
+      "-l",
+      message,
+    ]);
+    if (textResult.exitCode !== 0) return false;
+
+    const enterResult = this.run("tmux", ["send-keys", "-t", ref, "Enter"]);
+    if (enterResult.exitCode !== 0) return false;
+
+    this.sleep(100);
+    return this.verifyDelivery(ref, message);
+  }
+
+  /**
+   * Verify that the message was submitted (not stuck in the input field).
+   * Reads the last 3 screen lines and delegates to shared checkDelivery logic.
+   * When the screen can't be read, assumes success.
+   */
+  private verifyDelivery(ref: string, message: string): boolean {
+    const screen = this.readScreen(ref, 3);
+    if (screen === "") {
+      // Can't read screen — assume success (paste-submit is inherently reliable)
+      return true;
+    }
+    return checkDelivery(screen, message);
   }
 }
 

@@ -2,6 +2,7 @@
 // without vi.mock leaks from other test files (bun test doesn't isolate mocks).
 
 import type { RunResult } from "./types.ts";
+import { checkDelivery, sendWithRetry } from "./delivery.ts";
 
 export type Runner = (cmd: string, args: string[]) => RunResult;
 export type Sleeper = (ms: number) => void;
@@ -28,17 +29,10 @@ export function sendMessageImpl(
 ): boolean {
   const { runner, sleep, maxRetries = 3, baseDelayMs = 100 } = deps;
 
-  for (let attempt = 0; attempt <= maxRetries; attempt++) {
-    if (attempt > 0) {
-      sleep(baseDelayMs * Math.pow(2, attempt - 1));
-    }
-
-    if (attemptSend(workspaceRef, message, runner, sleep)) {
-      return true;
-    }
-  }
-
-  return false;
+  return sendWithRetry(
+    () => attemptSend(workspaceRef, message, runner, sleep),
+    { sleep, maxRetries, baseDelayMs },
+  );
 }
 
 /** Single delivery attempt: paste text, send Return, verify. */
@@ -109,10 +103,9 @@ function attemptDirectSend(
 /**
  * Check that the message was submitted (not stuck in the input field).
  *
- * Reads the last few screen lines and checks whether the message text
- * still appears on the final line — if it does, the Return key likely
- * fired before the paste completed and the message is still in the
- * input field.
+ * Reads the last few screen lines via cmux and delegates to the shared
+ * checkDelivery logic. When the screen can't be read, assumes success
+ * (paste-submit is inherently reliable).
  */
 export function verifyDelivery(
   workspaceRef: string,
@@ -132,17 +125,5 @@ export function verifyDelivery(
     return true;
   }
 
-  const lines = screen.stdout
-    .split("\n")
-    .filter((l) => l.trim() !== "");
-
-  if (lines.length === 0) return true;
-
-  // If the last line contains a significant prefix of our message,
-  // it's likely still sitting in the input field (not yet submitted).
-  const lastLine = lines[lines.length - 1]!;
-  const probe =
-    message.length > 60 ? message.slice(0, 60) : message;
-
-  return !lastLine.includes(probe);
+  return checkDelivery(screen.stdout, message);
 }
