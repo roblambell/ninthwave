@@ -14,6 +14,14 @@ export interface DecompositionTemplate {
   name: string;
   /** Keywords for matching against feature descriptions */
   keywords: string[];
+  /**
+   * Pre-compiled word-boundary regexes for single-word keywords.
+   * Parallel array to `keywords`: RegExp for single-word entries, null for
+   * multi-word entries (which use substring matching instead).
+   * Populated by `parseTemplate`; optional so hand-built template literals
+   * in tests still work via the dynamic fallback in `matchTemplates`.
+   */
+  keywordPatterns?: (RegExp | null)[];
   /** Full markdown body of the template */
   body: string;
 }
@@ -85,7 +93,13 @@ export function parseTemplate(
     .trim()
     + "\n";
 
-  return { slug, name, keywords, body };
+  // Pre-compile word-boundary regexes for single-word keywords so
+  // matchTemplates doesn't rebuild them on every call.
+  const keywordPatterns = keywords.map((k) =>
+    k.includes(" ") ? null : new RegExp(`\\b${escapeRegex(k)}\\b`, "i"),
+  );
+
+  return { slug, name, keywords, keywordPatterns, body };
 }
 
 /**
@@ -138,13 +152,18 @@ export function matchTemplates(
 
   for (const template of templates) {
     let score = 0;
-    for (const keyword of template.keywords) {
+    const patterns = template.keywordPatterns;
+    for (let i = 0; i < template.keywords.length; i++) {
+      const keyword = template.keywords[i];
       // Use word boundary matching for single words,
       // substring match for multi-word keywords
       if (keyword.includes(" ")) {
         if (descLower.includes(keyword)) score++;
       } else {
-        const pattern = new RegExp(`\\b${escapeRegex(keyword)}\\b`, "i");
+        // Use pre-compiled regex when available, fall back to dynamic
+        const pattern =
+          patterns?.[i] ??
+          new RegExp(`\\b${escapeRegex(keyword)}\\b`, "i");
         if (pattern.test(descLower)) score++;
       }
     }

@@ -60,24 +60,6 @@ Key files: `core/analytics.ts`, `test/analytics.test.ts`
 
 ---
 
-### Refactor: Pre-compile template keyword regexes at load time (L-DP-12)
-
-**Priority:** Low
-**Source:** Eng review M-ENG-3 finding 5.1
-**Depends on:** None
-
-In `matchTemplates`, a new `RegExp` is constructed for each single-word keyword on each call. Pre-compile keyword regexes in `parseTemplate` and store them on the `DecompositionTemplate` object for better performance.
-
-**Test plan:**
-- Unit test: matching behavior is unchanged
-- Unit test: pre-compiled regexes produce same results as dynamic construction
-
-Acceptance: Keyword regexes are compiled once at template load time. All existing template matching tests pass without modification.
-
-Key files: `core/templates.ts`, `test/templates.test.ts`
-
----
-
 ### Feat: Config key validation with unknown key warnings (L-DP-16)
 
 **Priority:** Low

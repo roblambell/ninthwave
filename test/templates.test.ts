@@ -284,6 +284,70 @@ describe("matchTemplates", () => {
   });
 });
 
+// --- Pre-compiled keyword regexes ---
+
+describe("parseTemplate — keywordPatterns", () => {
+  it("populates keywordPatterns parallel to keywords", () => {
+    const content = "# Test\n\n## Keywords\n\napi, endpoint, create table\n";
+    const result = parseTemplate("test.md", content);
+    expect(result.keywordPatterns).toBeDefined();
+    expect(result.keywordPatterns!.length).toBe(result.keywords.length);
+  });
+
+  it("compiles RegExp for single-word keywords", () => {
+    const content = "# Test\n\n## Keywords\n\napi, endpoint\n";
+    const result = parseTemplate("test.md", content);
+    expect(result.keywordPatterns![0]).toBeInstanceOf(RegExp);
+    expect(result.keywordPatterns![1]).toBeInstanceOf(RegExp);
+  });
+
+  it("stores null for multi-word keywords", () => {
+    const content = "# Test\n\n## Keywords\n\ncreate table, foreign key\n";
+    const result = parseTemplate("test.md", content);
+    expect(result.keywordPatterns![0]).toBeNull();
+    expect(result.keywordPatterns![1]).toBeNull();
+  });
+
+  it("pre-compiled regexes produce same results as dynamic construction", () => {
+    const content = "# Test\n\n## Keywords\n\napi, endpoint, route, sql\n";
+    const template = parseTemplate("test.md", content);
+    const description = "Add a new API endpoint with a route";
+
+    // Match using pre-compiled patterns (normal path)
+    const matchesPrecompiled = matchTemplates(description, [template]);
+
+    // Match using templates without pre-compiled patterns (fallback path)
+    const templateNoPat: DecompositionTemplate = {
+      slug: template.slug,
+      name: template.name,
+      keywords: template.keywords,
+      body: template.body,
+      // keywordPatterns intentionally omitted
+    };
+    const matchesDynamic = matchTemplates(description, [templateNoPat]);
+
+    expect(matchesPrecompiled.length).toBe(matchesDynamic.length);
+    if (matchesPrecompiled.length > 0) {
+      expect(matchesPrecompiled[0].score).toBe(matchesDynamic[0].score);
+    }
+  });
+
+  it("pre-compiled regex respects word boundaries", () => {
+    const content = "# Test\n\n## Keywords\n\napi\n";
+    const template = parseTemplate("test.md", content);
+    // "api" should match as a whole word
+    expect(matchTemplates("use the api here", [template])).toHaveLength(1);
+    // "api" should not match inside "capital"
+    expect(matchTemplates("capital investment", [template])).toHaveLength(0);
+  });
+
+  it("returns empty keywordPatterns when no keywords", () => {
+    const content = "# Test\n\nNo keywords section.\n";
+    const result = parseTemplate("test.md", content);
+    expect(result.keywordPatterns).toEqual([]);
+  });
+});
+
 // --- Integration: loadTemplates from real templates/ dir ---
 
 describe("loadTemplates — real templates directory", () => {
