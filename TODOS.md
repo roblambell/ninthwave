@@ -26,26 +26,6 @@ Key files: `core/commands/watch.ts:47-100`, `core/orchestrator.ts:343-376`, `cor
 
 ## Status command (dogfood friction, 2026-03-24)
 
-### Fix: Status watch shows blank output when run standalone (H-STU-3)
-
-**Priority:** High
-**Source:** Dogfood friction #11
-**Depends on:** None
-
-`ninthwave status --watch` shows nothing when run manually outside the orchestrator context. `cmdStatus` (status.ts:405-470) scans `worktreeDir` for `todo-*` directories and reads TODOS.md for titles. When no worktrees exist it prints an empty table — but the user sees a completely blank screen (just ANSI clear codes). The command should show a meaningful "no active items" message, and should also verify the worktreeDir path is correct when invoked from the CLI dispatcher.
-
-**Test plan:**
-- Unit test: `cmdStatus` with empty worktreeDir shows "No active items" message
-- Unit test: `cmdStatus` with non-existent worktreeDir shows informative message
-- Test that terminal width detection handles undefined `process.stdout.columns`
-- Edge case: worktreeDir exists but has no `todo-*` entries
-
-Acceptance: `ninthwave status --watch` displays a meaningful message when no worktrees are active (not blank). Terminal width detection gracefully handles non-TTY contexts. The worktreeDir path is correctly resolved when invoked standalone via the CLI.
-
-Key files: `core/commands/status.ts:377-470`, `core/cli.ts:214-215`
-
----
-
 ### Feat: Open status pane in current workspace instead of new workspace (M-MUX-1)
 
 **Priority:** Medium
