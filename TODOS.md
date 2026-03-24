@@ -116,25 +116,6 @@ Key files: `core/cross-repo.ts`, `test/cross-repo.test.ts`
 
 ---
 
-### Feat: Config key validation with unknown key warnings (L-DP-16)
-
-**Priority:** Low
-**Source:** Eng review M-ENG-3 finding 7.2
-**Depends on:** None
-
-Unknown config keys (e.g., typos) are silently accepted. Add a known-keys list and warn when unrecognized keys are found in `.ninthwave/config`.
-
-**Test plan:**
-- Unit test: known keys are accepted without warning
-- Unit test: unknown keys trigger a warning
-- Unit test: existing config loading behavior is preserved
-
-Acceptance: Unrecognized config keys produce a diagnostic warning. Known keys work as before. Tests cover both cases.
-
-Key files: `core/config.ts`, `test/config.test.ts`
-
----
-
 ### Refactor: Consolidate domain file parsing — normalizeDomain should accept a Map (L-DP-17)
 
 **Priority:** Low
