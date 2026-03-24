@@ -2965,4 +2965,171 @@ describe("Orchestrator", () => {
       expect(orch.getItem("R-1-1")!.state).toBe("launching");
     });
   });
+
+  // ── 12. Time-based heartbeat for stuck worker detection ────────────
+
+  describe("heartbeat stuck detection", () => {
+    it("transitions implementing → stuck when no commits after launch timeout", () => {
+      orch = new Orchestrator({ launchTimeoutMs: 30 * 60 * 1000, maxRetries: 0, wipLimit: 5 });
+      orch.addItem(makeTodo("H-1-1"));
+      orch.setState("H-1-1", "implementing");
+
+      // Backdate lastTransition to 31 minutes ago
+      const item = orch.getItem("H-1-1")!;
+      item.lastTransition = new Date(Date.now() - 31 * 60 * 1000).toISOString();
+
+      const now = new Date();
+      const actions = orch.processTransitions(
+        snapshotWith([{ id: "H-1-1", workerAlive: true, lastCommitTime: null }]),
+        now,
+      );
+
+      expect(orch.getItem("H-1-1")!.state).toBe("stuck");
+      expect(actions).toEqual([]); // stuckOrRetry with 0 retries → stuck, no actions
+    });
+
+    it("transitions implementing → stuck when stale commit beyond activity timeout", () => {
+      orch = new Orchestrator({ activityTimeoutMs: 60 * 60 * 1000, maxRetries: 0, wipLimit: 5 });
+      orch.addItem(makeTodo("H-1-1"));
+      orch.setState("H-1-1", "implementing");
+
+      const now = new Date();
+      // Last commit was 61 minutes ago
+      const staleCommitTime = new Date(now.getTime() - 61 * 60 * 1000).toISOString();
+
+      const actions = orch.processTransitions(
+        snapshotWith([{ id: "H-1-1", workerAlive: true, lastCommitTime: staleCommitTime }]),
+        now,
+      );
+
+      expect(orch.getItem("H-1-1")!.state).toBe("stuck");
+      expect(actions).toEqual([]);
+    });
+
+    it("keeps implementing when worker has recent commits", () => {
+      orch = new Orchestrator({ activityTimeoutMs: 60 * 60 * 1000, wipLimit: 5 });
+      orch.addItem(makeTodo("H-1-1"));
+      orch.setState("H-1-1", "implementing");
+
+      const now = new Date();
+      // Last commit was 10 minutes ago — well within timeout
+      const recentCommitTime = new Date(now.getTime() - 10 * 60 * 1000).toISOString();
+
+      orch.processTransitions(
+        snapshotWith([{ id: "H-1-1", workerAlive: true, lastCommitTime: recentCommitTime }]),
+        now,
+      );
+
+      expect(orch.getItem("H-1-1")!.state).toBe("implementing");
+    });
+
+    it("timeout values are configurable via OrchestratorConfig", () => {
+      // Use very short timeouts to prove configurability
+      orch = new Orchestrator({
+        launchTimeoutMs: 5000,       // 5 seconds
+        activityTimeoutMs: 10000,    // 10 seconds
+        maxRetries: 0,
+        wipLimit: 5,
+      });
+      orch.addItem(makeTodo("H-1-1"));
+      orch.setState("H-1-1", "implementing");
+
+      // Backdate lastTransition to 6 seconds ago (exceeds 5s launch timeout)
+      const item = orch.getItem("H-1-1")!;
+      const now = new Date();
+      item.lastTransition = new Date(now.getTime() - 6000).toISOString();
+
+      orch.processTransitions(
+        snapshotWith([{ id: "H-1-1", workerAlive: true, lastCommitTime: null }]),
+        now,
+      );
+
+      expect(orch.getItem("H-1-1")!.state).toBe("stuck");
+    });
+
+    it("worker within grace period after launch is not marked stuck", () => {
+      orch = new Orchestrator({ launchTimeoutMs: 30 * 60 * 1000, wipLimit: 5 });
+      orch.addItem(makeTodo("H-1-1"));
+      orch.setState("H-1-1", "implementing");
+
+      // lastTransition is very recent (just now) — within grace period
+      const now = new Date();
+
+      orch.processTransitions(
+        snapshotWith([{ id: "H-1-1", workerAlive: true, lastCommitTime: null }]),
+        now,
+      );
+
+      expect(orch.getItem("H-1-1")!.state).toBe("implementing");
+    });
+
+    it("heartbeat uses item.lastCommitTime when snapshot has no lastCommitTime", () => {
+      orch = new Orchestrator({ activityTimeoutMs: 60 * 60 * 1000, wipLimit: 5 });
+      orch.addItem(makeTodo("H-1-1"));
+      orch.setState("H-1-1", "implementing");
+
+      const now = new Date();
+      // Store a recent commit time on the item directly (as buildSnapshot does)
+      const item = orch.getItem("H-1-1")!;
+      item.lastCommitTime = new Date(now.getTime() - 10 * 60 * 1000).toISOString();
+
+      // Snapshot does not include lastCommitTime — item's value is used as fallback
+      orch.processTransitions(
+        snapshotWith([{ id: "H-1-1", workerAlive: true }]),
+        now,
+      );
+
+      expect(orch.getItem("H-1-1")!.state).toBe("implementing");
+    });
+
+    it("heartbeat retries instead of stuck when retries remain", () => {
+      orch = new Orchestrator({
+        launchTimeoutMs: 30 * 60 * 1000,
+        maxRetries: 1,
+        wipLimit: 5,
+      });
+      orch.addItem(makeTodo("H-1-1"));
+      orch.setState("H-1-1", "implementing");
+
+      // Backdate lastTransition past launch timeout
+      const item = orch.getItem("H-1-1")!;
+      const now = new Date();
+      item.lastTransition = new Date(now.getTime() - 31 * 60 * 1000).toISOString();
+
+      const actions = orch.processTransitions(
+        snapshotWith([{ id: "H-1-1", workerAlive: true, lastCommitTime: null }]),
+        now,
+      );
+
+      // Should retry (transition to ready, then re-launch in same cycle)
+      expect(actions.some((a) => a.type === "retry" && a.itemId === "H-1-1")).toBe(true);
+      expect(actions.some((a) => a.type === "launch" && a.itemId === "H-1-1")).toBe(true);
+      expect(orch.getItem("H-1-1")!.retryCount).toBe(1);
+    });
+
+    it("heartbeat skips when PR already appeared (takes priority)", () => {
+      orch = new Orchestrator({ launchTimeoutMs: 1000, wipLimit: 5 });
+      orch.addItem(makeTodo("H-1-1"));
+      orch.setState("H-1-1", "implementing");
+
+      // Even though launch timeout is exceeded, PR appearing takes priority
+      const item = orch.getItem("H-1-1")!;
+      const now = new Date();
+      item.lastTransition = new Date(now.getTime() - 5000).toISOString();
+
+      orch.processTransitions(
+        snapshotWith([{ id: "H-1-1", prNumber: 42, prState: "open", ciStatus: "pending" }]),
+        now,
+      );
+
+      // PR appeared → should transition to pr-open lifecycle, not stuck
+      expect(orch.getItem("H-1-1")!.state).not.toBe("stuck");
+      expect(orch.getItem("H-1-1")!.prNumber).toBe(42);
+    });
+
+    it("default config has launchTimeoutMs and activityTimeoutMs", () => {
+      expect(DEFAULT_CONFIG.launchTimeoutMs).toBe(30 * 60 * 1000);
+      expect(DEFAULT_CONFIG.activityTimeoutMs).toBe(60 * 60 * 1000);
+    });
+  });
 });

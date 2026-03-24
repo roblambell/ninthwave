@@ -53,6 +53,10 @@ export interface OrchestratorConfig {
   maxCiRetries: number;
   /** Max worker crash retries before marking permanently stuck. */
   maxRetries: number;
+  /** Timeout (ms) for workers with no commits since entering implementing state. Default: 30 minutes. */
+  launchTimeoutMs: number;
+  /** Timeout (ms) for workers with stale commits (no new commits). Default: 60 minutes. */
+  activityTimeoutMs: number;
 }
 
 // ── Poll snapshot ────────────────────────────────────────────────────
@@ -158,6 +162,8 @@ export const DEFAULT_CONFIG: OrchestratorConfig = {
   mergeStrategy: "asap",
   maxCiRetries: 2,
   maxRetries: 1,
+  launchTimeoutMs: 30 * 60 * 1000,   // 30 minutes
+  activityTimeoutMs: 60 * 60 * 1000, // 60 minutes
 };
 
 // ── Memory-aware WIP limit ──────────────────────────────────────────
@@ -273,8 +279,9 @@ export class Orchestrator {
    * Pure state machine transition function.
    * Takes a poll snapshot (external state) and returns actions to execute.
    * Does NOT execute the actions — the caller is responsible for that.
+   * @param now - Current time for heartbeat calculations (injectable for testing).
    */
-  processTransitions(snapshot: PollSnapshot): Action[] {
+  processTransitions(snapshot: PollSnapshot, now: Date = new Date()): Action[] {
     const actions: Action[] = [];
 
     // Build lookup for snapshot items
@@ -286,7 +293,7 @@ export class Orchestrator {
     // Process each tracked item against the snapshot
     for (const item of this.getAllItems()) {
       const snap = snapshotMap.get(item.id);
-      const newActions = this.transitionItem(item, snap);
+      const newActions = this.transitionItem(item, snap, now);
       actions.push(...newActions);
     }
 
@@ -316,6 +323,7 @@ export class Orchestrator {
   private transitionItem(
     item: OrchestratorItem,
     snap: ItemSnapshot | undefined,
+    now: Date,
   ): Action[] {
     switch (item.state) {
       case "queued":
@@ -332,7 +340,7 @@ export class Orchestrator {
         return [];
 
       case "implementing":
-        return this.handleImplementing(item, snap);
+        return this.handleImplementing(item, snap, now);
 
       case "pr-open":
       case "ci-pending":
@@ -360,6 +368,7 @@ export class Orchestrator {
   private handleImplementing(
     item: OrchestratorItem,
     snap: ItemSnapshot | undefined,
+    now: Date,
   ): Action[] {
     // If PR was auto-merged between polls, skip straight to merged
     if (snap?.prState === "merged") {
@@ -378,6 +387,24 @@ export class Orchestrator {
     if (snap && snap.workerAlive === false && !snap.prNumber) {
       return this.stuckOrRetry(item);
     }
+
+    // Time-based heartbeat: detect workers that are alive but not making progress
+    const nowMs = now.getTime();
+    const commitTime = snap?.lastCommitTime ?? item.lastCommitTime;
+    if (!commitTime) {
+      // No commits yet — check against launch timeout
+      const sinceTransition = nowMs - new Date(item.lastTransition).getTime();
+      if (sinceTransition > this.config.launchTimeoutMs) {
+        return this.stuckOrRetry(item);
+      }
+    } else {
+      // Has commits — check against activity timeout
+      const sinceCommit = nowMs - new Date(commitTime).getTime();
+      if (sinceCommit > this.config.activityTimeoutMs) {
+        return this.stuckOrRetry(item);
+      }
+    }
+
     return [];
   }
 
