@@ -60,25 +60,6 @@ Key files: `core/analytics.ts`, `test/analytics.test.ts`
 
 ---
 
-### Feat: Webhook rate limiting / debounce for rapid events (L-DP-10)
-
-**Priority:** Low
-**Source:** Eng review M-ENG-3 finding 4.2
-**Depends on:** None
-
-Rapid orchestration events can fire multiple webhooks per second, exceeding Slack/Discord rate limits. Add a simple debounce window (e.g., 2 seconds) to `createWebhookNotifier` that coalesces rapid events into batched payloads.
-
-**Test plan:**
-- Unit test: rapid events within window are coalesced into one webhook
-- Unit test: events outside window are sent individually
-- Unit test: all event data is preserved in coalesced payload
-
-Acceptance: Rapid webhook events are debounced. Coalesced payloads contain all event data. Single events are sent immediately after the debounce window. Tests cover both scenarios.
-
-Key files: `core/webhooks.ts`, `test/webhooks.test.ts`
-
----
-
 ### Fix: Validate webhook URL format on resolve (L-DP-11)
 
 **Priority:** Low
