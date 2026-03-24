@@ -47,8 +47,10 @@ import {
   collectRunMetrics,
   writeRunMetrics,
   commitAnalyticsFiles,
+  parseCostSummary,
   type AnalyticsIO,
   type AnalyticsCommitDeps,
+  type CostSummary,
 } from "../analytics.ts";
 
 // ── Structured logging ─────────────────────────────────────────────
@@ -348,6 +350,8 @@ export interface OrchestrateLoopDeps {
   analyticsIO?: AnalyticsIO;
   /** Git operations for auto-committing analytics files. When absent, commit is skipped. */
   analyticsCommit?: AnalyticsCommitDeps;
+  /** Read screen content from a worker workspace for cost/token parsing. */
+  readScreen?: (ref: string, lines?: number) => string;
 }
 
 export interface OrchestrateLoopConfig {
@@ -400,6 +404,7 @@ export async function orchestrateLoop(
   };
 
   const runStartTime = new Date().toISOString();
+  const costData = new Map<string, CostSummary>();
 
   wrappedLog({
     ts: runStartTime,
@@ -483,6 +488,7 @@ export async function orchestrateLoop(
             runStartTime,
             endTime,
             config.aiTool ?? "unknown",
+            costData.size > 0 ? costData : undefined,
           );
           const metricsPath = writeRunMetrics(metrics, config.analyticsDir, deps.analyticsIO);
           wrappedLog({
@@ -573,6 +579,30 @@ export async function orchestrateLoop(
 
     // Execute actions
     for (const action of actions) {
+      // Before clean action: capture worker screen for cost/token parsing
+      if (action.type === "clean" && deps.readScreen) {
+        const orchItem = orch.getItem(action.itemId);
+        if (orchItem?.workspaceRef) {
+          try {
+            const screenText = deps.readScreen(orchItem.workspaceRef, 50);
+            const cost = parseCostSummary(screenText);
+            if (cost.tokensUsed != null || cost.costUsd != null) {
+              costData.set(action.itemId, cost);
+              wrappedLog({
+                ts: new Date().toISOString(),
+                level: "info",
+                event: "cost_captured",
+                itemId: action.itemId,
+                tokensUsed: cost.tokensUsed,
+                costUsd: cost.costUsd,
+              });
+            }
+          } catch {
+            // Non-fatal — cost capture failure doesn't block cleanup
+          }
+        }
+      }
+
       wrappedLog({
         ts: new Date().toISOString(),
         level: "info",
@@ -972,6 +1002,7 @@ export async function cmdOrchestrate(
     notify,
     analyticsIO: { mkdirSync, writeFileSync },
     analyticsCommit: { hasChanges, gitAdd, getStagedFiles, gitCommit },
+    readScreen: (ref, lines) => mux.readScreen(ref, lines),
   };
 
   // Resolve repo URL for PR URL construction in completion event

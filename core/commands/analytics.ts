@@ -27,6 +27,10 @@ export interface AnalyticsSummary {
   latestWallClockMs: number;
   latestItemsPerBatch: number;
   latestCiRetryRate: number;
+  /** Total tokens used across all runs. Null when no cost data is available. */
+  totalTokensUsed: number | null;
+  /** Total cost in USD across all runs. Null when no cost data is available. */
+  totalCostUsd: number | null;
   runs: RunMetrics[];
 }
 
@@ -75,6 +79,8 @@ export function computeSummary(runs: RunMetrics[]): AnalyticsSummary {
       latestWallClockMs: 0,
       latestItemsPerBatch: 0,
       latestCiRetryRate: 0,
+      totalTokensUsed: null,
+      totalCostUsd: null,
       runs: [],
     };
   }
@@ -102,6 +108,17 @@ export function computeSummary(runs: RunMetrics[]): AnalyticsSummary {
     ? latestCiRetries / latest.itemsAttempted
     : 0;
 
+  // Aggregate cost data across all runs — null when no run has cost data
+  const runsWithTokens = runs.filter((r) => r.totalTokensUsed != null);
+  const runsWithCost = runs.filter((r) => r.totalCostUsd != null);
+
+  const totalTokensUsed = runsWithTokens.length > 0
+    ? runsWithTokens.reduce((sum, r) => sum + r.totalTokensUsed!, 0)
+    : null;
+  const totalCostUsd = runsWithCost.length > 0
+    ? runsWithCost.reduce((sum, r) => sum + r.totalCostUsd!, 0)
+    : null;
+
   return {
     totalRuns: runs.length,
     totalItemsShipped,
@@ -112,6 +129,8 @@ export function computeSummary(runs: RunMetrics[]): AnalyticsSummary {
     latestWallClockMs: latest.wallClockMs,
     latestItemsPerBatch: latest.itemsAttempted,
     latestCiRetryRate,
+    totalTokensUsed,
+    totalCostUsd,
     runs,
   };
 }
@@ -169,6 +188,16 @@ function formatDate(iso: string): string {
   return iso.replace("T", " ").replace(/\.\d+Z$/, "Z").slice(0, 19);
 }
 
+function formatCost(usd: number): string {
+  return `$${usd.toFixed(2)}`;
+}
+
+function formatTokens(tokens: number): string {
+  if (tokens >= 1_000_000) return `${(tokens / 1_000_000).toFixed(1)}M`;
+  if (tokens >= 1_000) return `${(tokens / 1_000).toFixed(1)}k`;
+  return String(tokens);
+}
+
 // ── Display ───────────────────────────────────────────────────────────
 
 /**
@@ -221,22 +250,39 @@ export function formatAnalytics(summary: AnalyticsSummary, showAll: boolean): st
 
   lines.push(`  ${CYAN}Total items shipped:${RESET}  ${summary.totalItemsShipped}`);
   lines.push(`  ${CYAN}Items per day:${RESET}        ${summary.itemsPerDay.toFixed(1)}`);
+
+  // Cost summary — only shown when cost data exists
+  if (summary.totalCostUsd != null) {
+    lines.push(`  ${CYAN}Total cost:${RESET}           ${formatCost(summary.totalCostUsd)}`);
+  }
+  if (summary.totalTokensUsed != null) {
+    lines.push(`  ${CYAN}Total tokens:${RESET}         ${formatTokens(summary.totalTokensUsed)}`);
+  }
+
   lines.push("");
+
+  // Determine whether any displayed run has cost data — controls column visibility
+  const hasCostData = displayRuns.some((r) => r.totalCostUsd != null);
 
   // Run history table
   lines.push(`${BOLD}Run History${RESET}`);
+  const headerCost = hasCostData ? ` ${"Cost".padEnd(10)}` : "";
   lines.push(
-    `  ${DIM}${"Timestamp".padEnd(21)} ${"Duration".padEnd(10)} ${"Items".padEnd(7)} ${"Done".padEnd(6)} ${"Fail".padEnd(6)} ${"CI Retries".padEnd(10)}${RESET}`,
+    `  ${DIM}${"Timestamp".padEnd(21)} ${"Duration".padEnd(10)} ${"Items".padEnd(7)} ${"Done".padEnd(6)} ${"Fail".padEnd(6)} ${"CI Retries".padEnd(10)}${headerCost}${RESET}`,
   );
-  lines.push(`  ${DIM}${"─".repeat(21)} ${"─".repeat(10)} ${"─".repeat(7)} ${"─".repeat(6)} ${"─".repeat(6)} ${"─".repeat(10)}${RESET}`);
+  const separatorCost = hasCostData ? ` ${"─".repeat(10)}` : "";
+  lines.push(`  ${DIM}${"─".repeat(21)} ${"─".repeat(10)} ${"─".repeat(7)} ${"─".repeat(6)} ${"─".repeat(6)} ${"─".repeat(10)}${separatorCost}${RESET}`);
 
   for (const run of displayRuns) {
     const ciRetries = run.items.reduce((s, i) => s + i.ciRetryCount, 0);
     const failColor = run.itemsFailed > 0 ? RED : "";
     const failReset = run.itemsFailed > 0 ? RESET : "";
+    const costCol = hasCostData
+      ? ` ${(run.totalCostUsd != null ? formatCost(run.totalCostUsd) : "—").padEnd(10)}`
+      : "";
 
     lines.push(
-      `  ${formatDate(run.runTimestamp).padEnd(21)} ${formatDuration(run.wallClockMs).padEnd(10)} ${String(run.itemsAttempted).padEnd(7)} ${String(run.itemsCompleted).padEnd(6)} ${failColor}${String(run.itemsFailed).padEnd(6)}${failReset} ${String(ciRetries).padEnd(10)}`,
+      `  ${formatDate(run.runTimestamp).padEnd(21)} ${formatDuration(run.wallClockMs).padEnd(10)} ${String(run.itemsAttempted).padEnd(7)} ${String(run.itemsCompleted).padEnd(6)} ${failColor}${String(run.itemsFailed).padEnd(6)}${failReset} ${String(ciRetries).padEnd(10)}${costCol}`,
     );
   }
 
