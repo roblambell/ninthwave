@@ -38,6 +38,11 @@ import {
   type SupervisorDeps,
   type SupervisorState,
 } from "../supervisor.ts";
+import {
+  resolveWebhookUrl,
+  createWebhookNotifier,
+  type WebhookNotifyFn,
+} from "../webhooks.ts";
 
 // ── Structured logging ─────────────────────────────────────────────
 
@@ -320,6 +325,8 @@ export interface OrchestrateLoopDeps {
   reconcile?: (todosFile: string, worktreeDir: string, projectRoot: string) => void;
   /** Supervisor dependencies (injected when supervisor is active). */
   supervisorDeps?: SupervisorDeps;
+  /** Webhook notifier for lifecycle events (fire-and-forget). No-op when absent. */
+  notify?: WebhookNotifyFn;
 }
 
 export interface OrchestrateLoopConfig {
@@ -432,11 +439,21 @@ export async function orchestrateLoop(
         total: allItems.length,
         items: itemSummaries,
       });
+
+      // Webhook: orchestrate_complete
+      deps.notify?.("orchestrate_complete", {
+        items: allItems.map((i) => ({ id: i.id, state: i.state, prNumber: i.prNumber })),
+        summary: { done: doneCount, stuck: stuckCount, total: allItems.length },
+      });
+
       break;
     }
 
-    // Capture pre-transition states for logging
+    // Capture pre-transition states for logging and batch_complete detection
     const prevStates = new Map<string, OrchestratorItemState>();
+    const prevDoneCount = allItems.filter(
+      (i) => i.state === "done" || i.state === "stuck",
+    ).length;
     for (const item of allItems) {
       prevStates.set(item.id, item.state);
     }
@@ -485,6 +502,23 @@ export async function orchestrateLoop(
         error: result.error,
       });
 
+      // Webhook: pr_merged on successful merge
+      if (action.type === "merge" && result.success) {
+        deps.notify?.("pr_merged", {
+          itemId: action.itemId,
+          prNumber: action.prNumber,
+        });
+      }
+
+      // Webhook: ci_failed on CI failure notification
+      if (action.type === "notify-ci-failure") {
+        deps.notify?.("ci_failed", {
+          itemId: action.itemId,
+          prNumber: action.prNumber,
+          error: action.message,
+        });
+      }
+
       // After a successful merge, reconcile TODOS.md with GitHub state
       // so list --ready reflects reality for the rest of the run.
       if (action.type === "merge" && result.success && deps.reconcile) {
@@ -517,6 +551,24 @@ export async function orchestrateLoop(
       states[item.state]!.push(item.id);
     }
     wrappedLog({ ts: new Date().toISOString(), level: "debug", event: "state_summary", states });
+
+    // Webhook: batch_complete when items finish and non-terminal items remain
+    if (deps.notify) {
+      const currentItems = orch.getAllItems();
+      const currentTerminalCount = currentItems.filter(
+        (i) => i.state === "done" || i.state === "stuck",
+      ).length;
+      const newlyTerminal = currentTerminalCount - prevDoneCount;
+      const hasRemaining = currentTerminalCount < currentItems.length;
+      if (newlyTerminal > 0 && hasRemaining) {
+        const doneNow = currentItems.filter((i) => i.state === "done").length;
+        const stuckNow = currentItems.filter((i) => i.state === "stuck").length;
+        deps.notify("batch_complete", {
+          items: currentItems.map((i) => ({ id: i.id, state: i.state, prNumber: i.prNumber })),
+          summary: { done: doneNow, stuck: stuckNow, total: currentItems.length },
+        });
+      }
+    }
 
     // ── Supervisor tick ──────────────────────────────────────────
     if (supervisorState && config.supervisor && deps.supervisorDeps) {
@@ -774,6 +826,20 @@ export async function cmdOrchestrate(
     });
   }
 
+  // Resolve webhook URL and create notifier (fire-and-forget)
+  const webhookUrl = resolveWebhookUrl(projectRoot);
+  const notify = createWebhookNotifier(webhookUrl, undefined, (msg) =>
+    structuredLog({ ts: new Date().toISOString(), level: "warn", event: "webhook_error", error: msg }),
+  );
+  if (webhookUrl) {
+    structuredLog({
+      ts: new Date().toISOString(),
+      level: "info",
+      event: "webhook_configured",
+      url: webhookUrl,
+    });
+  }
+
   const loopDeps: OrchestrateLoopDeps = {
     buildSnapshot: (o, pr, wd) => buildSnapshot(o, pr, wd, mux),
     sleep: (ms) => interruptibleSleep(ms, abortController.signal),
@@ -781,6 +847,7 @@ export async function cmdOrchestrate(
     actionDeps,
     reconcile,
     supervisorDeps: supervisorActive ? createSupervisorDeps(structuredLog) : undefined,
+    notify,
   };
 
   // Resolve repo URL for PR URL construction in completion event
