@@ -11,11 +11,11 @@ import {
   writeFileSync,
   readFileSync,
   readdirSync,
-  copyFileSync,
   chmodSync,
   unlinkSync,
+  symlinkSync,
 } from "fs";
-import { join } from "path";
+import { join, relative } from "path";
 import { getBundleDir } from "../paths.ts";
 import { info, GREEN, BOLD, DIM, RESET, YELLOW, RED } from "../output.ts";
 import { run } from "../shell.ts";
@@ -399,13 +399,15 @@ function scaffold(projectDir: string, bundleDir: string): void {
   const skillsDir = join(projectDir, ".claude/skills");
   createSkillSymlinks(skillsDir, bundleDir);
 
-  // --- Agent files ---
+  // --- Agent files (symlinked to stay in sync with source) ---
   const agentSource = join(bundleDir, "agents", "todo-worker.md");
   if (existsSync(agentSource)) {
     for (const target of AGENT_TARGETS) {
       const targetDir = join(projectDir, target.dir);
       mkdirSync(targetDir, { recursive: true });
-      copyFileSync(agentSource, join(targetDir, target.filename));
+      const linkPath = join(targetDir, target.filename);
+      if (existsSync(linkPath)) unlinkSync(linkPath);
+      symlinkSync(relative(targetDir, agentSource), linkPath);
     }
   }
 

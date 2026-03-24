@@ -10,7 +10,6 @@ import {
   readFileSync,
   symlinkSync,
   unlinkSync,
-  copyFileSync,
   chmodSync,
 } from "fs";
 import { join, relative, dirname } from "path";
@@ -339,15 +338,18 @@ export function setupProject(
 
   console.log();
 
-  // --- Agent files (copied, not symlinked — must be in tool-specific dirs) ---
+  // --- Agent files (symlinked to stay in sync with source) ---
   console.log("Agents...");
   const agentSource = join(bundleDir, "agents", "todo-worker.md");
 
   for (const target of AGENT_TARGETS) {
     const targetDir = join(projectDir, target.dir);
     mkdirSync(targetDir, { recursive: true });
-    copyFileSync(agentSource, join(targetDir, target.filename));
-    console.log(`  ${target.dir}/${target.filename}`);
+    const linkPath = join(targetDir, target.filename);
+    if (existsSync(linkPath)) unlinkSync(linkPath);
+    const relTarget = relative(targetDir, agentSource);
+    symlinkSync(relTarget, linkPath);
+    console.log(`  ${target.dir}/${target.filename} -> ${relTarget}`);
   }
 
   console.log();
