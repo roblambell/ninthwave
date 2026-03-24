@@ -2203,6 +2203,70 @@ describe("Orchestrator", () => {
         );
         expect(orch.getItem("X-1-1")!.state).toBe("review-pending");
       });
+
+      it("stays review-pending with CHANGES_REQUESTED and CI pass, emits no actions (approved strategy)", () => {
+        orch = new Orchestrator({ mergeStrategy: "approved" });
+        orch.addItem(makeTodo("X-1-1"));
+        orch.setState("X-1-1", "review-pending");
+        orch.getItem("X-1-1")!.prNumber = 10;
+        const actions = orch.processTransitions(
+          snapshotWith([{ id: "X-1-1", ciStatus: "pass", prState: "open", reviewDecision: "CHANGES_REQUESTED" }]),
+        );
+        expect(orch.getItem("X-1-1")!.state).toBe("review-pending");
+        expect(actions).toHaveLength(0);
+      });
+
+      it("stays review-pending with CHANGES_REQUESTED and CI pass, emits no actions (asap strategy)", () => {
+        orch = new Orchestrator({ mergeStrategy: "asap" });
+        orch.addItem(makeTodo("X-1-1"));
+        orch.setState("X-1-1", "review-pending");
+        orch.getItem("X-1-1")!.prNumber = 10;
+        const actions = orch.processTransitions(
+          snapshotWith([{ id: "X-1-1", ciStatus: "pass", prState: "open", reviewDecision: "CHANGES_REQUESTED" }]),
+        );
+        expect(orch.getItem("X-1-1")!.state).toBe("review-pending");
+        expect(actions).toHaveLength(0);
+      });
+
+      it("stays review-pending with CHANGES_REQUESTED and CI fail (no CI regression handling)", () => {
+        orch = new Orchestrator({ mergeStrategy: "approved" });
+        orch.addItem(makeTodo("X-1-1"));
+        orch.setState("X-1-1", "review-pending");
+        orch.getItem("X-1-1")!.prNumber = 10;
+        const actions = orch.processTransitions(
+          snapshotWith([{ id: "X-1-1", ciStatus: "fail", prState: "open", reviewDecision: "CHANGES_REQUESTED" }]),
+        );
+        // review-pending does not detect CI regression — stays in review-pending
+        // and emits no actions. CI failure is only handled in pr-open/ci-pending/ci-passed/ci-failed states.
+        expect(orch.getItem("X-1-1")!.state).toBe("review-pending");
+        expect(actions).toHaveLength(0);
+      });
+
+      it("stays review-pending with CHANGES_REQUESTED and CI fail (asap strategy)", () => {
+        orch = new Orchestrator({ mergeStrategy: "asap" });
+        orch.addItem(makeTodo("X-1-1"));
+        orch.setState("X-1-1", "review-pending");
+        orch.getItem("X-1-1")!.prNumber = 10;
+        const actions = orch.processTransitions(
+          snapshotWith([{ id: "X-1-1", ciStatus: "fail", prState: "open", reviewDecision: "CHANGES_REQUESTED" }]),
+        );
+        // Same behavior regardless of merge strategy — review-pending ignores CI regression
+        expect(orch.getItem("X-1-1")!.state).toBe("review-pending");
+        expect(actions).toHaveLength(0);
+      });
+
+      it("→ merged when PR externally merged during CHANGES_REQUESTED review", () => {
+        orch = new Orchestrator({ mergeStrategy: "approved" });
+        orch.addItem(makeTodo("X-1-1"));
+        orch.setState("X-1-1", "review-pending");
+        orch.getItem("X-1-1")!.prNumber = 10;
+        const actions = orch.processTransitions(
+          snapshotWith([{ id: "X-1-1", prState: "merged", reviewDecision: "CHANGES_REQUESTED" }]),
+        );
+        // External merge takes priority over review decision
+        expect(orch.getItem("X-1-1")!.state).toBe("merged");
+        expect(actions.some((a) => a.type === "clean")).toBe(true);
+      });
     });
 
     // ── merging ────────────────────────────────────────────────────
