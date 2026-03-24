@@ -138,23 +138,24 @@ Key files: `core/lock.ts`, `test/lock.test.ts`
 
 ---
 
-### Test: Add basic tests for shell.ts (L-TST-5)
+### Test: Add unit tests for git.ts error handling (L-TST-6)
 
 **Priority:** Low
-**Source:** Eng review H-ENG-1 — finding F16
+**Source:** Eng review H-ENG-1 — finding F17
 **Depends on:** None
 
-The `run()` function has zero test coverage. Add basic tests for: successful command execution, non-zero exit code handling, stderr capture, stdout trimming.
+All 17 git functions in `git.ts` are tested only indirectly. Add direct tests for error handling paths: non-zero exit codes throw with descriptive messages, helper functions return correct defaults on failure.
 
 **Test plan:**
-- Unit test: run() captures stdout from a simple command
-- Unit test: run() captures stderr
-- Unit test: run() returns correct exit code for failing command
-- Unit test: run() trims whitespace from stdout and stderr
+- Unit test: git helper throws Error with command name and stderr on failure
+- Unit test: branchExists returns false on non-zero exit
+- Unit test: commitCount returns 0 on failure
+- Unit test: diffStat returns {0, 0} on failure
+- Unit test: getStagedFiles returns [] on failure
 
-Acceptance: Basic `run()` behavior is covered by tests. Tests pass.
+Acceptance: Error handling paths in git.ts are directly tested. Tests pass.
 
-Key files: `core/shell.ts`, `test/shell.test.ts`
+Key files: `core/git.ts`, `test/git.test.ts`
 
 ---
 
