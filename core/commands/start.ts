@@ -26,6 +26,7 @@ import {
   ensureWorktreeExcluded,
 } from "../cross-repo.ts";
 import { cmdConflicts } from "./conflicts.ts";
+import { readTodo } from "../todo-files.ts";
 import type { TodoItem } from "../types.ts";
 
 /**
@@ -138,31 +139,13 @@ function launchAiSession(
 }
 
 /**
- * Extract full TODO text for an item from TODOS.md.
+ * Extract full TODO text for an item from its individual todo file.
+ * Looks for a file matching `*--{targetId}.md` in todosDir.
  */
 export function extractTodoText(todosDir: string, targetId: string): string {
-  const content = readFileSync(todosDir, "utf-8");
-  const lines = content.split("\n");
-  let inItem = false;
-  let found = false;
-  const textLines: string[] = [];
-
-  for (const line of lines) {
-    if (line.startsWith("### ")) {
-      if (found) break;
-      if (line.includes(`(${targetId}`)) {
-        inItem = true;
-        found = true;
-      } else {
-        inItem = false;
-      }
-    }
-    if (inItem) {
-      textLines.push(line);
-    }
-  }
-
-  return textLines.join("\n");
+  const item = readTodo(todosDir, targetId);
+  if (!item) return "";
+  return item.rawText;
 }
 
 /**
