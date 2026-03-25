@@ -1994,3 +1994,97 @@ describe("cleanOrphanedWorktrees", () => {
     expect(logs).toHaveLength(0);
   });
 });
+
+describe("executeClean readScreen diagnostics", () => {
+  it("does not call readScreen for merged items", async () => {
+    const orch = new Orchestrator({ wipLimit: 1, mergeStrategy: "asap" });
+    orch.addItem(makeTodo("MRG-1"));
+
+    let cycle = 0;
+    const buildSnapshot = (): PollSnapshot => {
+      cycle++;
+      switch (cycle) {
+        case 1:
+          return { items: [], readyIds: ["MRG-1"] };
+        case 2:
+          return { items: [{ id: "MRG-1", workerAlive: true }], readyIds: [] };
+        case 3:
+          return {
+            items: [{ id: "MRG-1", prNumber: 1, prState: "open", ciStatus: "pass" }],
+            readyIds: [],
+          };
+        case 4:
+          return { items: [], readyIds: [] };
+        default:
+          return { items: [], readyIds: [] };
+      }
+    };
+
+    const readScreen = vi.fn(() => "some output");
+    const warn = vi.fn();
+    const logs: LogEntry[] = [];
+    const deps: OrchestrateLoopDeps = {
+      buildSnapshot,
+      sleep: () => Promise.resolve(),
+      log: (entry) => logs.push(entry),
+      actionDeps: mockActionDeps({ readScreen, warn }),
+    };
+
+    await orchestrateLoop(orch, defaultCtx, deps);
+
+    expect(orch.getItem("MRG-1")!.state).toBe("done");
+    // readScreen should NOT be called for merged items
+    expect(readScreen).not.toHaveBeenCalled();
+    // "Permanently stuck" warning should NOT appear
+    expect(warn).not.toHaveBeenCalledWith(expect.stringContaining("Permanently stuck"));
+  });
+
+  it("calls readScreen and warns for stuck items", async () => {
+    // maxRetries: 0 so the first worker death goes straight to stuck
+    const orch = new Orchestrator({ wipLimit: 1, mergeStrategy: "asap", maxRetries: 0 });
+    orch.addItem(makeTodo("STK-1"));
+
+    let cycle = 0;
+    const buildSnapshot = (o: Orchestrator): PollSnapshot => {
+      cycle++;
+      const readyIds: string[] = [];
+      const items: ItemSnapshot[] = [];
+
+      for (const item of o.getAllItems()) {
+        if (item.state === "queued") {
+          readyIds.push(item.id);
+          continue;
+        }
+        if (item.state === "done" || item.state === "stuck") continue;
+
+        if (item.state === "launching") {
+          // Worker is alive at first
+          items.push({ id: item.id, workerAlive: true });
+        } else if (item.state === "implementing") {
+          // Worker dies without a PR
+          items.push({ id: item.id, workerAlive: false });
+        }
+      }
+
+      return { items, readyIds };
+    };
+
+    const readScreen = vi.fn(() => "error: something went wrong");
+    const warn = vi.fn();
+    const logs: LogEntry[] = [];
+    const deps: OrchestrateLoopDeps = {
+      buildSnapshot,
+      sleep: () => Promise.resolve(),
+      log: (entry) => logs.push(entry),
+      actionDeps: mockActionDeps({ readScreen, warn }),
+    };
+
+    await orchestrateLoop(orch, defaultCtx, deps);
+
+    expect(orch.getItem("STK-1")!.state).toBe("stuck");
+    // readScreen SHOULD be called for stuck items
+    expect(readScreen).toHaveBeenCalled();
+    // "Permanently stuck" warning SHOULD appear
+    expect(warn).toHaveBeenCalledWith(expect.stringContaining("Permanently stuck"));
+  });
+});

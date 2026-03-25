@@ -863,7 +863,7 @@ export class Orchestrator {
     deps: OrchestratorDeps,
   ): ActionResult {
     // Read screen before closing — capture error output for stuck diagnostics
-    if (item.workspaceRef && deps.readScreen) {
+    if (item.workspaceRef && deps.readScreen && item.state === "stuck") {
       try {
         const screen = deps.readScreen(item.workspaceRef, 50);
         if (screen) {
