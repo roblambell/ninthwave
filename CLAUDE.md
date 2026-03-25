@@ -45,21 +45,11 @@ This repo uses ninthwave to develop ninthwave. When working here, **dogfooding s
 
 ### Self-Improvement Loop (default behavior)
 
-The full dogfooding cycle runs automatically unless the user explicitly opts out:
+`/work` handles the full dogfooding cycle automatically. Its Phase 3 continuous delivery loop includes friction review, friction decomposition, and vision exploration — no separate commands needed.
 
-1. **Process all code TODOs.** Launch the orchestrator on all ready items. It handles dependency batches, CI, merging, and cleanup automatically.
+The cycle: process all ready TODOs → review friction log → decompose actionable friction into new TODOs → process friction TODOs → run vision item (L-VIS-N) → repeat with new TODOs from vision.
 
-2. **Pause before the vision TODO.** When all code items are done but before running the recurring vision item (L-VIS-N), stop and review friction.
-
-3. **Review friction.** Read the friction log and run it through `/plan-ceo-review` (scope/ambition) and `/plan-eng-review` (architecture/execution). This ensures friction fixes are well-scoped and well-designed before decomposition.
-
-4. **Decompose friction into TODOs.** Use `/decompose` to break actionable friction into TODO items in `.ninthwave/todos/` so they're processed before the vision item.
-
-5. **Process friction TODOs.** Launch the orchestrator again on the new friction-derived items.
-
-6. **Run the vision TODO.** Once no actionable friction remains, process the recurring vision item (L-VIS-N). This explores what's next, decomposes new work, and adds a new vision item (L-VIS-N+1) depending on the new terminal items.
-
-7. **Repeat.** Go back to step 1 with the new TODOs from the vision exploration. The cycle continues indefinitely: code → friction review → friction fixes → vision → new code → repeat.
+Between batches, `/work` pauses at checkpoints to report progress and confirm continuation. The friction log is reviewed before the vision item runs, ensuring friction fixes ship before new features are explored.
 
 ### Opting Out
 

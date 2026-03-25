@@ -3,7 +3,10 @@ name: work
 description: |
   Batch-process work items through parallel AI coding sessions.
   Interactively select items, then delegate execution to `ninthwave orchestrate`.
-  Use when asked to "process work items", "batch work", "run work", or "start work".
+  Includes continuous delivery loop with friction review, vision exploration, and
+  autonomous self-improvement when dogfooding.
+  Use when asked to "process work items", "batch work", "run work", "start work",
+  "grind", "work-work-work", "continuous loop", "dogfood loop", or "self-improvement cycle".
 allowed-tools:
   - Bash
   - Read
@@ -52,7 +55,20 @@ This skill interactively selects TODO items, then delegates all orchestration to
 2. Run `ninthwave list --ready` to get all available items.
 3. Parse the output and present a summary table to the user showing: ID, priority, domain, title, and estimated complexity. Items with a `Repo:` field will indicate which target repo they belong to.
 
-4. AskUserQuestion -- "How do you want to select items?"
+4. **Quick-start detection:** If there are ready items and the user invoked `/work` without specifying particular items or filters, offer a streamlined entry:
+
+   AskUserQuestion -- "N items ready. How do you want to proceed?"
+   - A) All ready items with defaults (auto-merge ASAP, WIP 4, supervisor on) — recommended for unattended runs
+   - B) Interactive selection — choose items by feature, priority, or domain
+   - C) Dry run — show the batch plan without launching
+
+   **If user picks A:** Skip to step 6 (dependency analysis) with all ready items selected, then skip the merge strategy / WIP limit / supervisor questions — use the defaults. Proceed directly to Phase 2.
+
+   **If user picks B:** Continue with the interactive selection flow below.
+
+   **If user picks C:** Show the batch plan and exit.
+
+5. AskUserQuestion -- "How do you want to select items?"
    - Detect if any feature-code IDs exist (IDs with alphabetic characters like `BF5`, `UO`, `ST`).
    - Options:
      - A) By feature code -- select all items for a specific feature (only if feature IDs detected)
@@ -73,48 +89,48 @@ This skill interactively selects TODO items, then delegates all orchestration to
    - AskUserQuestion -- "Which domain?"
    - Filter items by chosen domain.
 
-5. **Dependency analysis:** Run `ninthwave batch-order <selected-IDs>` to check for dependency chains.
+6. **Dependency analysis:** Run `ninthwave batch-order <selected-IDs>` to check for dependency chains.
 
    - **If all items are in Batch 1** (no dependencies): proceed to conflict check.
    - **If items span multiple batches**: present the batch plan. The orchestrator handles dependency ordering automatically — all selected items can be passed together.
 
-6. Run `ninthwave conflicts <batch-IDs>` to check for file overlaps.
+7. Run `ninthwave conflicts <batch-IDs>` to check for file overlaps.
 
-7. Present the conflict analysis. If conflicts, suggest splitting into sub-batches or lowering the WIP limit.
+8. Present the conflict analysis. If conflicts, suggest splitting into sub-batches or lowering the WIP limit.
 
-8. AskUserQuestion -- "Start this batch?"
+9. AskUserQuestion -- "Start this batch?"
    - Options:
      - A) Start these N items -- launch the orchestrator now
      - B) Remove conflicting items -- run only non-overlapping subset
      - C) Pick manually -- let me choose specific items by ID
      - D) Cancel -- go back to selection
 
-9. **Merge strategy:**
+10. **Merge strategy:**
 
-   AskUserQuestion -- "How should PRs be merged?"
-   - A) Auto-merge once approved -- merge after approval + CI passes
-   - B) Auto-merge ASAP -- merge as soon as CI passes, skip approval wait
-   - C) Ask me before merging -- confirm each merge individually
+    AskUserQuestion -- "How should PRs be merged?"
+    - A) Auto-merge once approved -- merge after approval + CI passes
+    - B) Auto-merge ASAP -- merge as soon as CI passes, skip approval wait
+    - C) Ask me before merging -- confirm each merge individually
 
-   Store MERGE_STRATEGY as: `approved` | `asap` | `ask`
+    Store MERGE_STRATEGY as: `approved` | `asap` | `ask`
 
-10. **WIP limit** (only when total items >= 4):
+11. **WIP limit** (only when total items >= 4):
 
-   AskUserQuestion -- "WIP limit? (how many items to process concurrently)"
-   - A) 4 (default) -- good balance of parallelism and memory usage
-   - B) 2 -- conservative, lower memory usage
-   - C) All at once -- start all simultaneously (set WIP_LIMIT to item count)
-   - D) Custom -- let me enter a number
+    AskUserQuestion -- "WIP limit? (how many items to process concurrently)"
+    - A) 4 (default) -- good balance of parallelism and memory usage
+    - B) 2 -- conservative, lower memory usage
+    - C) All at once -- start all simultaneously (set WIP_LIMIT to item count)
+    - D) Custom -- let me enter a number
 
-   Store WIP_LIMIT (default: 4).
+    Store WIP_LIMIT (default: 4).
 
-11. **Supervisor mode:**
+12. **Supervisor mode:**
 
-   AskUserQuestion -- "Enable LLM supervisor? (monitors for anomalies, logs friction)"
-   - A) Yes (recommended for unattended runs) -- an LLM periodically reviews orchestrator state, detects anomalies, and logs friction
-   - B) No (daemon only) -- deterministic daemon with no LLM oversight
+    AskUserQuestion -- "Enable LLM supervisor? (monitors for anomalies, logs friction)"
+    - A) Yes (recommended for unattended runs) -- an LLM periodically reviews orchestrator state, detects anomalies, and logs friction
+    - B) No (daemon only) -- deterministic daemon with no LLM oversight
 
-   Store SUPERVISOR_ENABLED (boolean, default: false).
+    Store SUPERVISOR_ENABLED (boolean, default: false).
 
 ---
 
@@ -178,7 +194,7 @@ This skill interactively selects TODO items, then delegates all orchestration to
 
 **Goal:** After the orchestrator finishes a batch, check for remaining work and loop back to keep delivering until everything is done or the user stops.
 
-Phase 3 runs automatically after Phase 2 completes. It checks whether more work was unblocked by the completed batch and offers to continue. In dogfooding mode (developing ninthwave itself), it also reviews the friction log for new actionable entries.
+Phase 3 runs automatically after Phase 2 completes. It checks whether more work was unblocked by the completed batch, reviews friction, offers vision exploration, and loops back. In dogfooding mode (developing ninthwave itself), it runs the full self-improvement cycle automatically.
 
 #### Step 1: Reconcile and check for remaining ready items
 
@@ -186,8 +202,8 @@ Run `ninthwave reconcile` to sync todo state with GitHub — files for merged it
 
 Then run `ninthwave list --ready` to see if any items were unblocked by the batch that just completed.
 
-- If **no ready items remain**, report "All done — no remaining work items" and exit the loop.
-- If **ready items exist**, continue to Step 2.
+- If **ready items exist** (non-vision items), continue to Step 2.
+- If **only vision items remain** (L-VIS-*) or **no items remain**, skip to Step 3 (vision).
 
 #### Step 2: Dogfooding — friction log review (ninthwave projects only)
 
@@ -208,9 +224,28 @@ If in dogfooding mode:
 
 If **not** in dogfooding mode, skip this step entirely.
 
-#### Step 3: Offer to continue
+#### Step 3: Vision exploration (when all code items are done)
 
-Present the remaining ready items and ask the user whether to continue.
+Check if an L-VIS-* item exists in `.ninthwave/todos/` and is ready (all deps met). This step runs when all non-vision items have been processed — either no ready items remain, or only vision items are left.
+
+- If **no vision item is ready**, skip to Step 4.
+- If a vision item is ready:
+
+  AskUserQuestion — "All code and friction items are done. Ready to run the vision exploration (L-VIS-N)? This reviews the product state, friction log, and competitive landscape, then decomposes new work."
+  - A) Run vision — recommended
+  - B) Skip vision — end this cycle
+  - C) Run vision with scope constraint — limit vision to a specific area
+
+  If the user chooses A or C, process the vision item via the orchestrator (single item). After vision completes, run `ninthwave reconcile` to sync state. New TODOs created by the vision item feed back into the loop naturally — return to Step 1.
+
+  If the user chooses B, skip to Step 4.
+
+#### Step 4: Offer to continue
+
+Run `ninthwave list --ready` to get the current count (may have changed due to friction decompose or vision).
+
+- If **no ready items remain**, report "All done — inbox zero" and exit.
+- If **ready items exist**, present them:
 
 AskUserQuestion — "Batch complete. N items are now ready. Continue?"
 - A) Continue with all N items — launch the next batch with the same merge strategy and WIP limit
@@ -223,12 +258,31 @@ AskUserQuestion — "Batch complete. N items are now ready. Continue?"
 
 **If the user chooses C:** Summarize total progress across all batches (items completed, items remaining, items stuck) and exit.
 
+#### Cycle summary
+
+At each checkpoint, display a summary:
+
+```
+╔══════════════════════════════════════════╗
+║          CYCLE SUMMARY                   ║
+╠══════════════════════════════════════════╣
+║  Items processed:    8                   ║
+║  Items merged:       7                   ║
+║  Items stuck:        1                   ║
+║  Friction reviewed:  3 entries           ║
+║  Friction → TODOs:   2 new items         ║
+║  Vision items:       1 (L-VIS-4)         ║
+║  New items created:  5                   ║
+║  Ready for next:     5                   ║
+╚══════════════════════════════════════════╝
+```
+
 #### Loop termination
 
 The Phase 2 → Phase 3 loop continues until one of these conditions is met:
 
-1. **No ready items remain** — `list --ready` returns zero items. Report "All done" and exit.
-2. **User chooses to stop** — user selects "Stop" at the continuation prompt.
+1. **No ready items remain** — `list --ready` returns zero items after vision check. Report "All done — inbox zero" and exit.
+2. **User chooses to stop** — user selects "Stop" at the continuation prompt or skips vision.
 3. **All items stuck** — every remaining item is in a stuck/blocked state with no path forward. Report the stuck items and exit.
 
 ---

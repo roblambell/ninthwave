@@ -147,7 +147,7 @@ All items merged. Version bump: 1.4.0 → 1.5.0 (CHANGELOG updated)
 
 ## Self-Improving
 
-ninthwave includes a built-in feedback loop. As you work, log friction — slowdowns, surprises, rough edges. The `/grind` skill reviews your friction log, decomposes actionable items into TODOs, processes them through the same pipeline, and repeats.
+ninthwave includes a built-in feedback loop. As you work, log friction — slowdowns, surprises, rough edges. `/work` reviews your friction log between batches, decomposes actionable items into TODOs, processes them through the same pipeline, and repeats. When all code items are done, it offers vision exploration to identify what's next.
 
 Your workflow improves itself. ninthwave uses this loop to develop itself.
 
@@ -250,9 +250,8 @@ All orchestration features work identically — the only difference is the UI.
 
 | Skill | Description |
 |-------|-------------|
-| `/work` | Interactively select work items, then delegate to `ninthwave orchestrate` |
+| `/work` | Select work items, orchestrate parallel sessions, review friction, run vision — the full delivery loop |
 | `/decompose` | Break a feature spec into PR-sized work items with dependency mapping |
-| `/grind` | Continuous improvement loop: process TODOs, review friction, decompose fixes, repeat |
 | `/todo-preview` | Launch port-isolated dev servers for live testing in worktrees |
 | `/ninthwave-upgrade` | Update ninthwave to the latest version |
 

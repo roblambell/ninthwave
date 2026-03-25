@@ -27,7 +27,7 @@ v0.1.0 shipped March 2026. Five grind cycles (0-4) have shipped since then.
 - **tmux adapter** — full orchestration on tmux with auto-detection (`--mux` flag).
 - **Orchestrator reliability** — CI failure detection, rebase on merge conflicts, crash recovery with state reconstruction, worker heartbeat monitoring, stale workspace cleanup.
 - **Wildcard dependencies** — pattern matching (`MUX-*`, `DF-*`) in dependency declarations.
-- **`/grind` skill** — continuous self-improvement loop (process TODOs → review friction → decompose → repeat).
+- **`/work` continuous delivery loop** — friction review, vision exploration, and self-improvement integrated into a single skill (consolidated from separate `/grind` skill).
 
 **Shipped in grind cycles 2-3 (Phase A-quater):**
 - **Analytics persistence** — auto-commit analytics JSON files at end of orchestration runs (ANL-3).
