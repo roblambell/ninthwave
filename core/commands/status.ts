@@ -587,6 +587,12 @@ export function renderStatus(worktreeDir: string, projectRoot: string): string {
       const items = daemonStateToStatusItems(daemonState);
       const termWidth = getTerminalWidth();
       lines.push(formatStatusTable(items, termWidth, daemonState.wipLimit));
+
+      // Show dashboard URL when active
+      if (daemonState.dashboardUrl) {
+        lines.push(`\n  ${CYAN}Dashboard: ${daemonState.dashboardUrl}${RESET}`);
+      }
+
       const agoStr = formatAge(stateAgeMs) + " ago";
       if (daemonPid !== null) {
         lines.push(`\n  ${DIM}Daemon running (PID ${daemonPid}), updated ${agoStr}${RESET}`);

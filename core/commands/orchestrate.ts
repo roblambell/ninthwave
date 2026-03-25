@@ -53,6 +53,11 @@ import {
   type WebhookNotifyFn,
 } from "../webhooks.ts";
 import {
+  startDashboard,
+  stopDashboard,
+  type DashboardServer,
+} from "../session-server.ts";
+import {
   collectRunMetrics,
   writeRunMetrics,
   commitAnalyticsFiles,
@@ -854,6 +859,8 @@ export interface OrchestrateLoopConfig {
   analyticsDir?: string;
   /** AI tool identifier for per-item metrics (e.g., "claude", "cursor"). */
   aiTool?: string;
+  /** Public dashboard URL (from session URL provider). When set, a PR comment is posted once per run. */
+  dashboardPublicUrl?: string;
 }
 
 /**
@@ -896,6 +903,7 @@ export async function orchestrateLoop(
 
   const runStartTime = new Date().toISOString();
   const costData = new Map<string, CostSummary>();
+  let dashboardCommentPosted = false;
 
   wrappedLog({
     ts: runStartTime,
@@ -997,6 +1005,34 @@ export async function orchestrateLoop(
       states[item.state]!.push(item.id);
     }
     wrappedLog({ ts: new Date().toISOString(), level: "debug", event: "state_summary", states });
+
+    // Dashboard PR comment: post once per run when a public URL is available
+    // and the first PR number is detected on any item.
+    if (config.dashboardPublicUrl && !dashboardCommentPosted) {
+      const itemWithPr = orch.getAllItems().find((i) => i.prNumber != null);
+      if (itemWithPr?.prNumber) {
+        try {
+          const body = `**[Orchestrator]** Live dashboard: ${config.dashboardPublicUrl}`;
+          deps.actionDeps.prComment(ctx.projectRoot, itemWithPr.prNumber, body);
+          dashboardCommentPosted = true;
+          wrappedLog({
+            ts: new Date().toISOString(),
+            level: "info",
+            event: "dashboard_comment_posted",
+            prNumber: itemWithPr.prNumber,
+            url: config.dashboardPublicUrl,
+          });
+        } catch {
+          // Non-fatal — dashboard comment failure doesn't block orchestration
+          wrappedLog({
+            ts: new Date().toISOString(),
+            level: "warn",
+            event: "dashboard_comment_failed",
+            prNumber: itemWithPr.prNumber,
+          });
+        }
+      }
+    }
 
     // Webhook: batch_complete when items finish and non-terminal items remain
     if (deps.notify) {
@@ -1223,6 +1259,7 @@ export async function cmdOrchestrate(
   let isDaemonChild = false;
   let noSandbox = false;
   let clickupListId: string | undefined;
+  let remoteFlag = false;
 
   // Parse args
   let i = 0;
@@ -1288,6 +1325,10 @@ export async function cmdOrchestrate(
       case "--clickup-list":
         clickupListId = args[i + 1];
         i += 2;
+        break;
+      case "--remote":
+        remoteFlag = true;
+        i += 1;
         break;
       default:
         die(`Unknown option: ${args[i]}`);
@@ -1455,6 +1496,46 @@ export async function cmdOrchestrate(
     });
   }
 
+  // Resolve --remote flag: CLI flag or config file
+  const projectConfig = loadConfig(projectRoot);
+  const remoteEnabled = remoteFlag || projectConfig["remote_sessions"] === "true";
+
+  // Start dashboard server when --remote is enabled
+  let dashboardServer: DashboardServer | null = null;
+  let dashboardPublicUrl: string | null = null;
+  let dashboardLocalUrl: string | null = null;
+
+  if (remoteEnabled) {
+    try {
+      dashboardServer = startDashboard(
+        () => orch.getAllItems(),
+        (ref, lines) => mux.readScreen(ref, lines),
+      );
+      dashboardLocalUrl = `http://localhost:${dashboardServer.port}`;
+      const tokenPreview = dashboardServer.token.length > 8
+        ? `${dashboardServer.token.slice(0, 4)}...${dashboardServer.token.slice(-4)}`
+        : dashboardServer.token;
+
+      structuredLog({
+        ts: new Date().toISOString(),
+        level: "info",
+        event: "dashboard_started",
+        port: dashboardServer.port,
+        localUrl: dashboardLocalUrl,
+      });
+      console.log(`Dashboard: ${dashboardLocalUrl} (token: ${tokenPreview})`);
+    } catch (e: unknown) {
+      // Graceful degradation: log warning, continue without dashboard
+      const msg = e instanceof Error ? e.message : String(e);
+      structuredLog({
+        ts: new Date().toISOString(),
+        level: "warn",
+        event: "dashboard_start_failed",
+        error: msg,
+      });
+    }
+  }
+
   // Analytics directory — always enabled, writes to .ninthwave/analytics/
   const analyticsDir = join(projectRoot, ".ninthwave", "analytics");
 
@@ -1469,6 +1550,7 @@ export async function cmdOrchestrate(
       const state = serializeOrchestratorState(items, process.pid, daemonStartedAt, {
         statusPaneRef,
         wipLimit,
+        dashboardUrl: dashboardLocalUrl,
       });
       writeStateFile(projectRoot, state);
     } catch {
@@ -1486,7 +1568,6 @@ export async function cmdOrchestrate(
   }
 
   // Resolve ClickUp status sync if configured
-  const projectConfig = loadConfig(projectRoot);
   const ckConfig = resolveClickUpConfig(clickupListId, (key) => projectConfig[key]);
   const statusSync: StatusSync | undefined = ckConfig
     ? new ClickUpBackend(ckConfig.listId, ckConfig.apiToken)
@@ -1532,6 +1613,7 @@ export async function cmdOrchestrate(
     ...(repoUrl ? { repoUrl } : {}),
     analyticsDir,
     aiTool,
+    ...(dashboardPublicUrl ? { dashboardPublicUrl } : {}),
   };
 
   // Close stale status pane from a previous daemon run before launching a new one
@@ -1595,6 +1677,20 @@ export async function cmdOrchestrate(
         event: "status_pane_closed",
         ref: statusPaneRef,
       });
+    }
+
+    // Stop dashboard server on shutdown
+    if (dashboardServer) {
+      try {
+        stopDashboard(dashboardServer);
+        structuredLog({
+          ts: new Date().toISOString(),
+          level: "info",
+          event: "dashboard_stopped",
+        });
+      } catch {
+        // Non-fatal — best-effort cleanup
+      }
     }
 
     // Always clean up state file on exit (written in both daemon and interactive mode)

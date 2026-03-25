@@ -17,6 +17,7 @@ export const KNOWN_CONFIG_KEYS = new Set([
   "sentry_project",
   "pagerduty_service_id",
   "pagerduty_from_email",
+  "remote_sessions",
 ]);
 
 /**

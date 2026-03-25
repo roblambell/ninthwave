@@ -29,6 +29,7 @@ export interface DaemonState {
   updatedAt: string;
   statusPaneRef?: string | null;
   wipLimit?: number;
+  dashboardUrl?: string | null;
   items: DaemonStateItem[];
 }
 
@@ -190,7 +191,7 @@ export function serializeOrchestratorState(
   items: OrchestratorItem[],
   pid: number,
   startedAt: string,
-  extras?: { statusPaneRef?: string | null; wipLimit?: number },
+  extras?: { statusPaneRef?: string | null; wipLimit?: number; dashboardUrl?: string | null },
 ): DaemonState {
   return {
     pid,
