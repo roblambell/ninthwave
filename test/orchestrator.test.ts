@@ -1216,7 +1216,7 @@ describe("Orchestrator", () => {
       );
     });
 
-    it("notify-ci-failure: succeeds without workspace ref (no message sent)", () => {
+    it("notify-ci-failure: fails without workspace ref", () => {
       const deps = mockDeps();
       orch.addItem(makeTodo("H-1-1"));
       orch.setState("H-1-1", "ci-failed");
@@ -1228,9 +1228,10 @@ describe("Orchestrator", () => {
         deps,
       );
 
-      expect(result.success).toBe(true);
+      expect(result.success).toBe(false);
+      expect(result.error).toContain("No workspace reference");
       expect(deps.sendMessage).not.toHaveBeenCalled();
-      expect(deps.prComment).toHaveBeenCalled();
+      expect(deps.prComment).not.toHaveBeenCalled();
     });
 
     // ── notify-review ─────────────────────────────────────────
@@ -1265,7 +1266,7 @@ describe("Orchestrator", () => {
       );
     });
 
-    it("notify-review: succeeds without workspace ref", () => {
+    it("notify-review: fails without workspace ref", () => {
       const deps = mockDeps();
       orch.addItem(makeTodo("H-1-1"));
       orch.setState("H-1-1", "review-pending");
@@ -1276,7 +1277,8 @@ describe("Orchestrator", () => {
         deps,
       );
 
-      expect(result.success).toBe(true);
+      expect(result.success).toBe(false);
+      expect(result.error).toContain("No workspace reference");
       expect(deps.sendMessage).not.toHaveBeenCalled();
     });
 
@@ -2187,15 +2189,16 @@ describe("Orchestrator", () => {
         expect(actions.some((a) => a.type === "clean")).toBe(true);
       });
 
-      it("stays ci-failed when CI still failing (within retry limit)", () => {
+      it("stays ci-failed and retries notification when CI still failing (within retry limit)", () => {
         orch = new Orchestrator({ maxCiRetries: 3 });
         orch.addItem(makeTodo("X-1-1"));
         orch.setState("X-1-1", "ci-failed");
         orch.getItem("X-1-1")!.ciFailCount = 1;
-        orch.processTransitions(
+        const actions = orch.processTransitions(
           snapshotWith([{ id: "X-1-1", ciStatus: "fail", prState: "open" }]),
         );
         expect(orch.getItem("X-1-1")!.state).toBe("ci-failed");
+        expect(actions.some((a) => a.type === "notify-ci-failure")).toBe(true);
       });
 
       it("does not increment ciFailCount when already ci-failed and still failing", () => {

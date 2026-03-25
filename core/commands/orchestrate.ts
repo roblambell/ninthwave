@@ -198,8 +198,8 @@ export function buildSnapshot(
       }
     }
 
-    // Check worker alive and commit freshness for early-stage items
-    if (orchItem.state === "launching" || orchItem.state === "implementing") {
+    // Check worker alive and commit freshness for active items
+    if (orchItem.state === "launching" || orchItem.state === "implementing" || orchItem.state === "ci-failed") {
       snap.workerAlive = isWorkerAlive(orchItem, mux);
       const commitTime = getLastCommitTime(projectRoot, `todo/${orchItem.id}`);
       snap.lastCommitTime = commitTime;

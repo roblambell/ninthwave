@@ -493,7 +493,14 @@ export class Orchestrator {
         this.transition(item, "ci-pending", snap?.eventTime);
         return [];
       } else {
-        return []; // Still failing, no action needed
+        // Still failing — retry CI notification in case it wasn't delivered
+        actions.push({
+          type: "notify-ci-failure",
+          itemId: item.id,
+          prNumber: item.prNumber,
+          message: "[ORCHESTRATOR] CI Fix Request: CI is still failing — please investigate and fix.",
+        });
+        return actions;
       }
     }
 
@@ -826,8 +833,13 @@ export class Orchestrator {
   ): ActionResult {
     const message = action.message || "CI failed — please investigate and fix.";
 
-    if (item.workspaceRef) {
-      deps.sendMessage(item.workspaceRef, message);
+    if (!item.workspaceRef) {
+      return { success: false, error: `No workspace reference for ${item.id} — cannot notify worker of CI failure` };
+    }
+
+    const sent = deps.sendMessage(item.workspaceRef, message);
+    if (!sent) {
+      return { success: false, error: `Failed to send CI failure message to ${item.id}` };
     }
 
     if (item.prNumber) {
@@ -849,8 +861,13 @@ export class Orchestrator {
   ): ActionResult {
     const message = action.message || "Review feedback received — please address.";
 
-    if (item.workspaceRef) {
-      deps.sendMessage(item.workspaceRef, message);
+    if (!item.workspaceRef) {
+      return { success: false, error: `No workspace reference for ${item.id} — cannot notify worker of review feedback` };
+    }
+
+    const sent = deps.sendMessage(item.workspaceRef, message);
+    if (!sent) {
+      return { success: false, error: `Failed to send review feedback to ${item.id}` };
     }
 
     return { success: true };
