@@ -31,22 +31,37 @@ interface GitHubPullRequest {
   labels: Array<{ name: string }>;
 }
 
+/** Injectable dependencies for scanExternalPRs, for testing. */
+export interface ScanExternalPRsDeps {
+  ghRunner: (root: string, args: string[]) => { exitCode: number; stdout: string };
+  isAvailable: () => boolean;
+  getOwnerRepo: (repoRoot: string) => string;
+}
+
+const defaultScanDeps: ScanExternalPRsDeps = {
+  ghRunner: ghInRepo,
+  isAvailable: () => gh.isAvailable(),
+  getOwnerRepo: getRepoOwner,
+};
+
 /**
  * Scan for open PRs not managed by ninthwave (non-`todo/*` branches).
  * Uses the GitHub REST API to list open PRs with author_association.
  *
  * @param repoRoot - Path to the repository root
- * @param ghRunner - Injectable for testing; defaults to real ghInRepo
+ * @param deps - Injectable dependencies for testing
  */
 export function scanExternalPRs(
   repoRoot: string,
-  ghRunner: (root: string, args: string[]) => { exitCode: number; stdout: string } = ghInRepo,
+  deps: Partial<ScanExternalPRsDeps> = {},
 ): ExternalPR[] {
-  if (!gh.isAvailable()) return [];
+  const { ghRunner, isAvailable, getOwnerRepo } = { ...defaultScanDeps, ...deps };
+
+  if (!isAvailable()) return [];
 
   let ownerRepo: string;
   try {
-    ownerRepo = getRepoOwner(repoRoot);
+    ownerRepo = getOwnerRepo(repoRoot);
   } catch {
     return [];
   }
