@@ -1,6 +1,6 @@
 // reconcile command: synchronize todo files with GitHub PR state and clean stale worktrees.
 
-import { existsSync, readdirSync } from "fs";
+import { existsSync, readdirSync, readFileSync } from "fs";
 import { join } from "path";
 import { info, warn, GREEN, RESET } from "../output.ts";
 import { run } from "../shell.ts";
@@ -17,8 +17,8 @@ export interface ReconcileDeps {
   /** Pull latest main with rebase. Returns { ok, conflict, error }. */
   pullRebase(projectRoot: string): { ok: boolean; conflict: boolean; error?: string };
 
-  /** Get IDs of merged todo/* PRs from GitHub. */
-  getMergedTodoIds(projectRoot: string): string[];
+  /** Get IDs of merged todo/* PRs from GitHub. Queries hub repo and any cross-repo targets. */
+  getMergedTodoIds(projectRoot: string, worktreeDir: string): string[];
 
   /** Get IDs of open todo items from the todos directory. */
   getOpenTodoIds(todosDir: string): string[];
@@ -65,14 +65,13 @@ function defaultPullRebase(projectRoot: string): { ok: boolean; conflict: boolea
   return { ok: false, conflict: false, error: result.stderr };
 }
 
-function defaultGetMergedTodoIds(projectRoot: string): string[] {
-  // List all merged PRs with todo/* head branches
+function getMergedTodoIdsFromRepo(repoRoot: string): string[] {
   const result = run("gh", [
     "pr", "list",
     "--state", "merged",
     "--json", "headRefName",
     "--limit", "200",
-  ], { cwd: projectRoot });
+  ], { cwd: repoRoot });
 
   if (result.exitCode !== 0 || !result.stdout) return [];
 
@@ -88,6 +87,37 @@ function defaultGetMergedTodoIds(projectRoot: string): string[] {
   } catch {
     return [];
   }
+}
+
+function defaultGetMergedTodoIds(projectRoot: string, worktreeDir: string): string[] {
+  // Query hub repo for merged todo/* PRs
+  const ids = new Set(getMergedTodoIdsFromRepo(projectRoot));
+
+  // Also query cross-repo targets discovered from the cross-repo index
+  const indexPath = join(worktreeDir, ".cross-repo-index");
+  if (existsSync(indexPath)) {
+    try {
+      const content = readFileSync(indexPath, "utf-8");
+      const targetRepos = new Set<string>();
+      for (const line of content.split("\n")) {
+        if (!line.trim()) continue;
+        const parts = line.split("\t");
+        const targetRepo = parts[1];
+        if (targetRepo && targetRepo !== projectRoot) {
+          targetRepos.add(targetRepo);
+        }
+      }
+      for (const repo of targetRepos) {
+        for (const id of getMergedTodoIdsFromRepo(repo)) {
+          ids.add(id);
+        }
+      }
+    } catch {
+      // Non-fatal — fall back to hub-only
+    }
+  }
+
+  return Array.from(ids);
 }
 
 function defaultGetOpenTodoIds(todosDir: string): string[] {
@@ -172,7 +202,7 @@ function defaultBranchHasOpenPR(id: string, projectRoot: string): boolean {
 export function defaultDeps(): ReconcileDeps {
   return {
     pullRebase: defaultPullRebase,
-    getMergedTodoIds: defaultGetMergedTodoIds,
+    getMergedTodoIds: (projectRoot, worktreeDir) => defaultGetMergedTodoIds(projectRoot, worktreeDir),
     getOpenTodoIds: defaultGetOpenTodoIds,
     markDone: defaultMarkDone,
     getWorktreeIds: defaultGetWorktreeIds,
@@ -213,9 +243,9 @@ export function reconcile(
     return;
   }
 
-  // Step 2: Get merged todo IDs from GitHub
+  // Step 2: Get merged todo IDs from GitHub (hub + cross-repo targets)
   info("Querying GitHub for merged todo/* PRs...");
-  const mergedIds = deps.getMergedTodoIds(projectRoot);
+  const mergedIds = deps.getMergedTodoIds(projectRoot, worktreeDir);
   if (mergedIds.length === 0) {
     info("No merged todo/* PRs found.");
   }

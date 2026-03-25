@@ -181,6 +181,8 @@ cmux set-status "todo-YOUR_TODO_ID" "Reviewed" --icon "eye.fill" --color "#7c3ae
 
 ## 8. Remove Your TODO File
 
+**Hub-local items only** (when `PROJECT_ROOT` equals `HUB_ROOT`):
+
 Before creating the PR, delete your todo file so that merging the PR automatically marks the item as done.
 
 1. Delete the file: `rm ${HUB_ROOT}/.ninthwave/todos/*--YOUR_TODO_ID.md`
@@ -188,6 +190,10 @@ Before creating the PR, delete your todo file so that merging the PR automatical
 3. Commit: `git add ${HUB_ROOT}/.ninthwave/todos/ && git commit -m "chore: remove YOUR_TODO_ID"`
 
 > **Why?** Each TODO is a separate file in `.ninthwave/todos/`. Deleting your file cannot conflict with other workers' changes — they each touch only their own file.
+
+**Cross-repo items** (when `PROJECT_ROOT` differs from `HUB_ROOT`):
+
+Skip this step entirely. The TODO file lives in the hub repo, not the target repo where your PR is created. The orchestrator daemon automatically removes your TODO file from the hub repo after your PR merges.
 
 ## 9. Create the PR
 
@@ -303,7 +309,7 @@ After creating the PR, your implementation work is done. The **orchestrator daem
 - **Cleans up** branches and worktrees after merge
 - **Rebases** branches when they fall behind main
 
-> **Note:** TODO removal (deleting the file from `.ninthwave/todos/`) happens via your PR branch (step 8), not by the orchestrator. Reconcile runs as a safety net for edge cases where a PR merges without removing its TODO file.
+> **Note:** For hub-local items, TODO removal happens via your PR branch (step 8). For cross-repo items, the orchestrator daemon removes the TODO file from the hub repo after your PR merges via the reconcile process.
 
 You do NOT need to poll, watch, or take any post-PR action. The daemon handles it.
 

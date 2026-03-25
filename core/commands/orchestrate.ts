@@ -23,6 +23,7 @@ import {
   type OrchestratorItemState,
 } from "../orchestrator.ts";
 import { parseTodos } from "../parser.ts";
+import { resolveRepo, getWorktreeInfo } from "../cross-repo.ts";
 import { checkPrStatus } from "./watch.ts";
 import { launchSingleItem, detectAiTool } from "./start.ts";
 import { checkWorkerHealth } from "../worker-health.ts";
@@ -151,8 +152,9 @@ export function buildSnapshot(
 
     const snap: ItemSnapshot = { id: orchItem.id };
 
-    // Check PR status via gh for items past the implementing phase
-    const statusLine = checkPr(orchItem.id, projectRoot);
+    // Check PR status via gh — use the item's resolved repo root for cross-repo items
+    const repoRoot = orchItem.resolvedRepoRoot ?? projectRoot;
+    const statusLine = checkPr(orchItem.id, repoRoot);
     if (statusLine) {
       const parts = statusLine.split("\t");
       const prNumStr = parts[1];
@@ -229,7 +231,7 @@ export function buildSnapshot(
           }
         } catch { /* best-effort — don't break polling */ }
       }
-      const commitTime = getLastCommitTime(projectRoot, `todo/${orchItem.id}`);
+      const commitTime = getLastCommitTime(repoRoot, `todo/${orchItem.id}`);
       snap.lastCommitTime = commitTime;
       // Also store on the orchestrator item so the supervisor can read it
       orchItem.lastCommitTime = commitTime;
@@ -310,6 +312,9 @@ export function reconstructState(
   // Pre-fetch workspace list once (avoid per-item shell calls)
   const workspaceList = mux ? mux.listWorkspaces() : "";
 
+  // Build cross-repo index path for worktree lookup
+  const crossRepoIndex = join(worktreeDir, ".cross-repo-index");
+
   for (const item of orch.getAllItems()) {
     // Restore persisted counters from daemon state (before any state transitions)
     const saved = savedItems.get(item.id);
@@ -318,11 +323,14 @@ export function reconstructState(
       item.retryCount = saved.retryCount;
     }
 
-    const wtPath = join(worktreeDir, `todo-${item.id}`);
+    // Check for worktree: cross-repo index first, then hub-local fallback
+    const repoRoot = item.resolvedRepoRoot ?? projectRoot;
+    const wtInfo = getWorktreeInfo(item.id, crossRepoIndex, worktreeDir);
+    const wtPath = wtInfo?.worktreePath ?? join(worktreeDir, `todo-${item.id}`);
     if (!existsSync(wtPath)) continue;
 
-    // Item has a worktree — check PR status
-    const statusLine = checkPr(item.id, projectRoot);
+    // Item has a worktree — check PR status in the correct repo
+    const statusLine = checkPr(item.id, repoRoot);
     if (!statusLine) {
       orch.setState(item.id, "implementing");
       recoverWorkspaceRef(orch, item.id, workspaceList);
@@ -1412,6 +1420,25 @@ export async function cmdOrchestrate(
   const orch = new Orchestrator({ wipLimit, mergeStrategy });
   for (const id of itemIds) {
     orch.addItem(todoMap.get(id)!);
+  }
+
+  // Populate resolvedRepoRoot for cross-repo items
+  for (const item of orch.getAllItems()) {
+    const alias = item.todo.repoAlias;
+    if (alias && alias !== "self" && alias !== "hub") {
+      try {
+        item.resolvedRepoRoot = resolveRepo(alias, projectRoot);
+      } catch {
+        // Resolution failure is logged — item stays hub-local as fallback
+        structuredLog({
+          ts: new Date().toISOString(),
+          level: "warn",
+          event: "cross_repo_resolve_failed",
+          itemId: item.id,
+          alias,
+        });
+      }
+    }
   }
 
   // Real action dependencies — create mux before state reconstruction so

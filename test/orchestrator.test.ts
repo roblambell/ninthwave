@@ -4765,4 +4765,164 @@ describe("Orchestrator", () => {
       });
     });
   });
+
+  // ── Cross-repo awareness ────────────────────────────────────────────
+
+  describe("cross-repo resolvedRepoRoot", () => {
+    it("executeMerge uses resolvedRepoRoot for PR operations", () => {
+      const deps = mockDeps();
+      orch.addItem(makeTodo("X-1-1"));
+      orch.setState("X-1-1", "merging");
+      const item = orch.getItem("X-1-1")!;
+      item.prNumber = 42;
+      item.resolvedRepoRoot = "/path/to/target-repo";
+
+      orch.executeAction(
+        { type: "merge", itemId: "X-1-1", prNumber: 42 },
+        defaultCtx,
+        deps,
+      );
+
+      // prMerge should be called with target repo, not hub
+      expect(deps.prMerge).toHaveBeenCalledWith("/path/to/target-repo", 42);
+      // prComment should also use target repo
+      expect(deps.prComment).toHaveBeenCalledWith(
+        "/path/to/target-repo",
+        42,
+        expect.stringContaining("Auto-merged"),
+      );
+      // fetchOrigin should be called for BOTH target and hub repos
+      expect(deps.fetchOrigin).toHaveBeenCalledWith("/path/to/target-repo", "main");
+      expect(deps.fetchOrigin).toHaveBeenCalledWith(defaultCtx.projectRoot, "main");
+    });
+
+    it("executeMerge uses hub root when resolvedRepoRoot is not set", () => {
+      const deps = mockDeps();
+      orch.addItem(makeTodo("X-1-2"));
+      orch.setState("X-1-2", "merging");
+      orch.getItem("X-1-2")!.prNumber = 43;
+
+      orch.executeAction(
+        { type: "merge", itemId: "X-1-2", prNumber: 43 },
+        defaultCtx,
+        deps,
+      );
+
+      expect(deps.prMerge).toHaveBeenCalledWith(defaultCtx.projectRoot, 43);
+    });
+
+    it("executeClean uses target repo worktree dir for cross-repo items", () => {
+      const deps = mockDeps();
+      orch.addItem(makeTodo("X-1-3"));
+      orch.setState("X-1-3", "merged");
+      const item = orch.getItem("X-1-3")!;
+      item.resolvedRepoRoot = "/path/to/target-repo";
+
+      orch.executeAction(
+        { type: "clean", itemId: "X-1-3" },
+        defaultCtx,
+        deps,
+      );
+
+      expect(deps.cleanSingleWorktree).toHaveBeenCalledWith(
+        "X-1-3",
+        "/path/to/target-repo/.worktrees",
+        "/path/to/target-repo",
+      );
+    });
+
+    it("executeDaemonRebase uses target repo worktree path", () => {
+      const daemonRebase = vi.fn(() => true);
+      const deps = mockDeps({ daemonRebase });
+      orch.addItem(makeTodo("X-1-4"));
+      orch.setState("X-1-4", "ci-failed");
+      const item = orch.getItem("X-1-4")!;
+      item.prNumber = 44;
+      item.resolvedRepoRoot = "/path/to/target-repo";
+
+      orch.executeAction(
+        { type: "daemon-rebase", itemId: "X-1-4" },
+        defaultCtx,
+        deps,
+      );
+
+      expect(daemonRebase).toHaveBeenCalledWith(
+        "/path/to/target-repo/.worktrees/todo-X-1-4",
+        "todo/X-1-4",
+      );
+    });
+
+    it("executeRetry cleans target repo worktree for cross-repo items", () => {
+      const deps = mockDeps();
+      orch.addItem(makeTodo("X-1-5"));
+      orch.setState("X-1-5", "implementing");
+      const item = orch.getItem("X-1-5")!;
+      item.resolvedRepoRoot = "/path/to/target-repo";
+      item.workspaceRef = "workspace:5";
+
+      orch.executeAction(
+        { type: "retry", itemId: "X-1-5" },
+        defaultCtx,
+        deps,
+      );
+
+      expect(deps.cleanSingleWorktree).toHaveBeenCalledWith(
+        "X-1-5",
+        "/path/to/target-repo/.worktrees",
+        "/path/to/target-repo",
+      );
+    });
+
+    it("post-merge sibling rebase uses cross-repo worktree path", () => {
+      const daemonRebase = vi.fn(() => true);
+      const forcePush = vi.fn(() => true);
+      const deps = mockDeps({ daemonRebase, forcePush });
+
+      orch.addItem(makeTodo("X-1-6"));
+      orch.addItem(makeTodo("X-1-7", [], "medium"));
+
+      orch.setState("X-1-6", "merging");
+      orch.getItem("X-1-6")!.prNumber = 46;
+      orch.getItem("X-1-6")!.resolvedRepoRoot = "/path/to/target-repo";
+
+      orch.setState("X-1-7", "ci-pending");
+      orch.getItem("X-1-7")!.prNumber = 47;
+      orch.getItem("X-1-7")!.resolvedRepoRoot = "/path/to/other-repo";
+      orch.getItem("X-1-7")!.workspaceRef = "workspace:7";
+
+      orch.executeAction(
+        { type: "merge", itemId: "X-1-6", prNumber: 46 },
+        defaultCtx,
+        deps,
+      );
+
+      // Sibling rebase should use other-repo's worktree path
+      expect(daemonRebase).toHaveBeenCalledWith(
+        "/path/to/other-repo/.worktrees/todo-X-1-7",
+        "todo/X-1-7",
+      );
+    });
+
+    it("CI failure comment uses resolvedRepoRoot", () => {
+      const deps = mockDeps();
+      orch.addItem(makeTodo("X-1-8"));
+      orch.setState("X-1-8", "ci-failed");
+      const item = orch.getItem("X-1-8")!;
+      item.prNumber = 48;
+      item.resolvedRepoRoot = "/path/to/target-repo";
+      item.workspaceRef = "workspace:8";
+
+      orch.executeAction(
+        { type: "notify-ci-failure", itemId: "X-1-8", message: "CI failed" },
+        defaultCtx,
+        deps,
+      );
+
+      expect(deps.prComment).toHaveBeenCalledWith(
+        "/path/to/target-repo",
+        48,
+        expect.stringContaining("CI failure"),
+      );
+    });
+  });
 });

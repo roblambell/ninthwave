@@ -6,6 +6,7 @@ import { die } from "../output.ts";
 import { prList, prView, prChecks, getRepoOwner, apiGet } from "../gh.ts";
 import * as gh from "../gh.ts";
 import type { WatchResult, Transition } from "../types.ts";
+import { getWorktreeInfo } from "../cross-repo.ts";
 
 /** jq fragment: only count comments/reviews from trusted author associations. */
 export const TRUSTED_ASSOC = '(.author_association == "OWNER" or .author_association == "MEMBER" or .author_association == "COLLABORATOR")';
@@ -24,6 +25,7 @@ export function cmdWatchReady(
   }
 
   const results: string[] = [];
+  const crossRepoIndex = join(worktreeDir, ".cross-repo-index");
 
   // Iterate hub-local worktrees
   try {
@@ -37,6 +39,23 @@ export function cmdWatchReady(
     }
   } catch {
     // ignore
+  }
+
+  // Iterate cross-repo worktrees (PRs live in target repos)
+  const hubCheckedIds = new Set(results.map((r) => r.split("\t")[0]));
+  if (existsSync(crossRepoIndex)) {
+    try {
+      const content = readFileSync(crossRepoIndex, "utf-8");
+      for (const line of content.split("\n")) {
+        if (!line.trim()) continue;
+        const [id, targetRepo] = line.split("\t");
+        if (!id || !targetRepo || hubCheckedIds.has(id)) continue;
+        const statusLine = checkPrStatus(id, targetRepo);
+        if (statusLine) results.push(statusLine);
+      }
+    } catch {
+      // ignore
+    }
   }
 
   const output = results.join("\n");
@@ -225,6 +244,8 @@ export function getWatchReadyState(
   if (!existsSync(worktreeDir)) return "";
 
   const results: string[] = [];
+  const crossRepoIndex = join(worktreeDir, ".cross-repo-index");
+
   try {
     for (const entry of readdirSync(worktreeDir)) {
       if (!entry.startsWith("todo-")) continue;
@@ -236,6 +257,23 @@ export function getWatchReadyState(
     }
   } catch {
     // ignore
+  }
+
+  // Also check cross-repo worktrees
+  const hubCheckedIds = new Set(results.map((r) => r.split("\t")[0]));
+  if (existsSync(crossRepoIndex)) {
+    try {
+      const content = readFileSync(crossRepoIndex, "utf-8");
+      for (const line of content.split("\n")) {
+        if (!line.trim()) continue;
+        const [id, targetRepo] = line.split("\t");
+        if (!id || !targetRepo || hubCheckedIds.has(id)) continue;
+        const statusLine = checkPrStatus(id, targetRepo);
+        if (statusLine) results.push(statusLine);
+      }
+    } catch {
+      // ignore
+    }
   }
 
   return results.join("\n");
