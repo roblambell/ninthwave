@@ -199,12 +199,26 @@ export function applySandboxOverrides(
 /**
  * Find the nono profile for claude workers.
  *
- * Searches for .nono/profiles/claude-worker.json in the project root.
- * Returns the absolute path if found, null otherwise.
+ * Search order:
+ * 1. Project-level: <projectRoot>/.nono/profiles/claude-worker.json
+ * 2. User-level:    ~/.nono/profiles/claude-worker.json
+ *
+ * Project-level is always preferred. Returns the absolute path if found, null otherwise.
+ *
+ * @param projectRoot - The project root to search first
+ * @param home - Home directory for user-level fallback (default: os.homedir(), injectable for testing)
  */
-export function findProfile(projectRoot: string): string | null {
-  const profilePath = join(projectRoot, ".nono", "profiles", "claude-worker.json");
-  return existsSync(profilePath) ? profilePath : null;
+export function findProfile(projectRoot: string, home?: string): string | null {
+  // 1. Project-level (preferred)
+  const projectProfile = join(projectRoot, ".nono", "profiles", "claude-worker.json");
+  if (existsSync(projectProfile)) return projectProfile;
+
+  // 2. User-level fallback
+  const userHome = home ?? homedir();
+  const userProfile = join(userHome, ".nono", "profiles", "claude-worker.json");
+  if (existsSync(userProfile)) return userProfile;
+
+  return null;
 }
 
 /**

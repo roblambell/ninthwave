@@ -234,7 +234,7 @@ describe("findProfile", () => {
     cleanupTempRepos();
   });
 
-  it("returns profile path when profile exists", () => {
+  it("returns project-level profile path when it exists", () => {
     const repo = setupTempRepo();
     const profileDir = join(repo, ".nono", "profiles");
     mkdirSync(profileDir, { recursive: true });
@@ -244,9 +244,38 @@ describe("findProfile", () => {
     expect(result).toBe(join(profileDir, "claude-worker.json"));
   });
 
-  it("returns null when no profile exists", () => {
+  it("returns user-level profile when only user-level exists", () => {
     const repo = setupTempRepo();
-    expect(findProfile(repo)).toBeNull();
+    const fakeHome = setupTempRepo();
+    const userProfileDir = join(fakeHome, ".nono", "profiles");
+    mkdirSync(userProfileDir, { recursive: true });
+    writeFileSync(join(userProfileDir, "claude-worker.json"), "{}");
+
+    const result = findProfile(repo, fakeHome);
+    expect(result).toBe(join(userProfileDir, "claude-worker.json"));
+  });
+
+  it("returns null when neither project nor user profile exists", () => {
+    const repo = setupTempRepo();
+    const fakeHome = setupTempRepo();
+    expect(findProfile(repo, fakeHome)).toBeNull();
+  });
+
+  it("prefers project-level over user-level when both exist", () => {
+    const repo = setupTempRepo();
+    const fakeHome = setupTempRepo();
+
+    // Create both profiles
+    const projectProfileDir = join(repo, ".nono", "profiles");
+    mkdirSync(projectProfileDir, { recursive: true });
+    writeFileSync(join(projectProfileDir, "claude-worker.json"), "{}");
+
+    const userProfileDir = join(fakeHome, ".nono", "profiles");
+    mkdirSync(userProfileDir, { recursive: true });
+    writeFileSync(join(userProfileDir, "claude-worker.json"), "{}");
+
+    const result = findProfile(repo, fakeHome);
+    expect(result).toBe(join(projectProfileDir, "claude-worker.json"));
   });
 });
 
