@@ -10,7 +10,11 @@ import {
   applySupervisorActions,
   writeFrictionLog,
   shouldActivateSupervisor,
+  getEffectiveInterval,
   DEFAULT_SUPERVISOR_CONFIG,
+  BACKOFF_THRESHOLD,
+  DISABLE_THRESHOLD,
+  MAX_BACKOFF_INTERVAL_MS,
   type SupervisorDeps,
   type SupervisorState,
   type SupervisorObservation,
@@ -55,6 +59,16 @@ function makeItem(id: string, state: string, overrides?: Partial<OrchestratorIte
     state: state as OrchestratorItem["state"],
     lastTransition: new Date(Date.now() - 600_000).toISOString(), // 10 min ago
     ciFailCount: 0,
+    ...overrides,
+  };
+}
+
+function makeState(overrides?: Partial<SupervisorState>): SupervisorState {
+  return {
+    lastTickTime: new Date("2026-03-24T11:55:00Z"),
+    logsSinceLastTick: [],
+    consecutiveFailures: 0,
+    disabled: false,
     ...overrides,
   };
 }
@@ -287,12 +301,11 @@ describe("supervisorTick", () => {
     }));
 
     const deps = mockSupervisorDeps({ callLLM });
-    const state: SupervisorState = {
-      lastTickTime: new Date("2026-03-24T11:55:00Z"),
+    const state = makeState({
       logsSinceLastTick: [
         { ts: "2026-03-24T11:56:00Z", level: "info", event: "transition" },
       ],
-    };
+    });
 
     const items = [makeItem("X-1-1", "implementing")];
     const result = supervisorTick(state, items, deps);
@@ -305,10 +318,7 @@ describe("supervisorTick", () => {
   it("logs supervisor_tick event on success", () => {
     const log = vi.fn();
     const deps = mockSupervisorDeps({ log });
-    const state: SupervisorState = {
-      lastTickTime: new Date("2026-03-24T11:55:00Z"),
-      logsSinceLastTick: [],
-    };
+    const state = makeState();
 
     supervisorTick(state, [], deps);
 
@@ -320,12 +330,11 @@ describe("supervisorTick", () => {
 
   it("clears logsSinceLastTick after successful tick", () => {
     const deps = mockSupervisorDeps();
-    const state: SupervisorState = {
-      lastTickTime: new Date("2026-03-24T11:55:00Z"),
+    const state = makeState({
       logsSinceLastTick: [
         { ts: "2026-03-24T11:56:00Z", level: "info", event: "test" },
       ],
-    };
+    });
 
     supervisorTick(state, [], deps);
 
@@ -335,34 +344,97 @@ describe("supervisorTick", () => {
   it("updates lastTickTime after successful tick", () => {
     const fixedNow = new Date("2026-03-24T12:00:00Z");
     const deps = mockSupervisorDeps({ now: () => fixedNow });
-    const state: SupervisorState = {
-      lastTickTime: new Date("2026-03-24T11:55:00Z"),
-      logsSinceLastTick: [],
-    };
+    const state = makeState();
 
     supervisorTick(state, [], deps);
 
     expect(state.lastTickTime).toBe(fixedNow);
   });
 
-  it("returns empty observation when LLM call fails", () => {
-    const callLLM = vi.fn(() => null);
+  it("returns empty observation and logs error when LLM call throws", () => {
+    const callLLM = vi.fn(() => { throw new Error("rate limit exceeded"); });
     const log = vi.fn();
     const deps = mockSupervisorDeps({ callLLM, log });
-    const state: SupervisorState = {
-      lastTickTime: new Date("2026-03-24T11:55:00Z"),
-      logsSinceLastTick: [],
-    };
+    const state = makeState();
 
     const result = supervisorTick(state, [], deps);
 
     expect(result.anomalies).toEqual([]);
     expect(result.interventions).toEqual([]);
-    // Should still log the failure
+    // Should log the failure with error details
     expect(log).toHaveBeenCalledWith(expect.objectContaining({
       event: "supervisor_tick",
       status: "llm_call_failed",
+      error: "rate limit exceeded",
+      consecutiveFailures: 1,
     }));
+  });
+
+  it("includes error message in log when LLM call fails", () => {
+    const callLLM = vi.fn(() => { throw new Error("API key invalid"); });
+    const log = vi.fn();
+    const deps = mockSupervisorDeps({ callLLM, log });
+    const state = makeState();
+
+    supervisorTick(state, [], deps);
+
+    const failLog = (log as ReturnType<typeof vi.fn>).mock.calls.find(
+      (c: [LogEntry]) => c[0].event === "supervisor_tick" && c[0].status === "llm_call_failed",
+    );
+    expect(failLog).toBeDefined();
+    expect(failLog![0].error).toBe("API key invalid");
+  });
+
+  it("increments consecutiveFailures on each LLM failure", () => {
+    const callLLM = vi.fn(() => { throw new Error("timeout"); });
+    const deps = mockSupervisorDeps({ callLLM });
+    const state = makeState();
+
+    supervisorTick(state, [], deps);
+    expect(state.consecutiveFailures).toBe(1);
+
+    supervisorTick(state, [], deps);
+    expect(state.consecutiveFailures).toBe(2);
+
+    supervisorTick(state, [], deps);
+    expect(state.consecutiveFailures).toBe(3);
+  });
+
+  it("resets consecutiveFailures on successful call", () => {
+    const deps = mockSupervisorDeps();
+    const state = makeState({ consecutiveFailures: 5 });
+
+    supervisorTick(state, [], deps);
+
+    expect(state.consecutiveFailures).toBe(0);
+  });
+
+  it("disables supervisor after DISABLE_THRESHOLD consecutive failures", () => {
+    const callLLM = vi.fn(() => { throw new Error("service unavailable"); });
+    const log = vi.fn();
+    const deps = mockSupervisorDeps({ callLLM, log });
+    const state = makeState({ consecutiveFailures: DISABLE_THRESHOLD - 1 });
+
+    supervisorTick(state, [], deps);
+
+    expect(state.disabled).toBe(true);
+    expect(state.consecutiveFailures).toBe(DISABLE_THRESHOLD);
+    // Should log the disabling event
+    expect(log).toHaveBeenCalledWith(expect.objectContaining({
+      event: "supervisor_disabled",
+      reason: `${DISABLE_THRESHOLD} consecutive LLM failures`,
+    }));
+  });
+
+  it("does not disable supervisor before DISABLE_THRESHOLD", () => {
+    const callLLM = vi.fn(() => { throw new Error("error"); });
+    const deps = mockSupervisorDeps({ callLLM });
+    const state = makeState({ consecutiveFailures: DISABLE_THRESHOLD - 2 });
+
+    supervisorTick(state, [], deps);
+
+    expect(state.disabled).toBe(false);
+    expect(state.consecutiveFailures).toBe(DISABLE_THRESHOLD - 1);
   });
 
   it("computes elapsed time per item from lastTransition", () => {
@@ -379,10 +451,7 @@ describe("supervisorTick", () => {
     });
 
     const deps = mockSupervisorDeps({ callLLM, now: () => fixedNow });
-    const state: SupervisorState = {
-      lastTickTime: new Date("2026-03-24T11:55:00Z"),
-      logsSinceLastTick: [],
-    };
+    const state = makeState();
 
     // Item with lastTransition 15 minutes ago
     const item = makeItem("T-1-1", "implementing", {
@@ -703,8 +772,10 @@ describe("orchestrateLoop with supervisor", () => {
     // Item should still complete
     expect(orch.getItem("T-1-1")!.state).toBe("done");
 
-    // Supervisor error was logged
-    expect(logs.some((l) => l.event === "supervisor_error")).toBe(true);
+    // Supervisor LLM failure was logged (caught inside supervisorTick, not the outer catch)
+    expect(logs.some((l) => l.event === "supervisor_tick" && l.status === "llm_call_failed")).toBe(true);
+    // Error message should be included
+    expect(logs.some((l) => l.error === "LLM service unavailable")).toBe(true);
   });
 
   it("sends worker messages when supervisor suggests intervention", async () => {
@@ -862,6 +933,133 @@ describe("orchestrateLoop with supervisor", () => {
     expect(startEvent!.supervisorActive).toBe(true);
   });
 
+  it("uses backoff interval after consecutive failures", async () => {
+    const orch = new Orchestrator({ wipLimit: 2, mergeStrategy: "asap" });
+    orch.addItem(makeTodo("T-1-1"));
+
+    let cycle = 0;
+    const logs: LogEntry[] = [];
+    let currentTime = new Date("2026-03-24T12:00:00Z");
+    let llmCallCount = 0;
+
+    // Fail first 4 calls, then succeed
+    const callLLM = vi.fn(() => {
+      llmCallCount++;
+      if (llmCallCount <= 4) {
+        throw new Error(`failure ${llmCallCount}`);
+      }
+      return JSON.stringify({
+        anomalies: [],
+        interventions: [],
+        frictionObservations: [],
+        processImprovements: [],
+      });
+    });
+
+    const supervisorDeps: SupervisorDeps = {
+      callLLM,
+      now: () => currentTime,
+      log: (entry) => logs.push(entry),
+      writeFile: vi.fn(),
+      mkdirSync: vi.fn(),
+    };
+
+    const buildSnapshot = (): PollSnapshot => {
+      cycle++;
+      // Advance by 2 minutes each cycle — enough for base interval (1 min)
+      // but after 3 failures, backoff doubles to 2 min, so some ticks get skipped
+      currentTime = new Date(currentTime.getTime() + 120_000);
+      if (cycle <= 10) {
+        return { items: [{ id: "T-1-1", workerAlive: true }], readyIds: ["T-1-1"] };
+      }
+      return { items: [{ id: "T-1-1", prNumber: 1, prState: "open", ciStatus: "pass" }], readyIds: [] };
+    };
+
+    const deps: OrchestrateLoopDeps = {
+      buildSnapshot,
+      sleep: () => Promise.resolve(),
+      log: (entry) => logs.push(entry),
+      actionDeps: mockActionDeps(),
+      supervisorDeps,
+    };
+
+    const config: OrchestrateLoopConfig = {
+      supervisor: {
+        intervalMs: 60_000, // 1 minute base
+        maxLogEntries: 50,
+      },
+    };
+
+    await orchestrateLoop(orch, defaultCtx, deps, config);
+
+    // Verify backoff was applied — after 3 failures, interval should double
+    // meaning fewer ticks than if base interval was always used
+    const failLogs = logs.filter(
+      (l) => l.event === "supervisor_tick" && l.status === "llm_call_failed",
+    );
+    expect(failLogs.length).toBeGreaterThanOrEqual(1);
+    // After failures, backoff should increase the interval
+    const firstFail = failLogs.find((l) => (l.consecutiveFailures as number) >= BACKOFF_THRESHOLD);
+    expect(firstFail).toBeDefined();
+  });
+
+  it("disables supervisor after DISABLE_THRESHOLD failures in loop", async () => {
+    const orch = new Orchestrator({ wipLimit: 2, mergeStrategy: "asap" });
+    orch.addItem(makeTodo("T-1-1"));
+
+    let cycle = 0;
+    const logs: LogEntry[] = [];
+    let currentTime = new Date("2026-03-24T12:00:00Z");
+
+    // Always fail
+    const callLLM = vi.fn(() => {
+      throw new Error("persistent failure");
+    });
+
+    const supervisorDeps: SupervisorDeps = {
+      callLLM,
+      now: () => currentTime,
+      log: (entry) => logs.push(entry),
+      writeFile: vi.fn(),
+      mkdirSync: vi.fn(),
+    };
+
+    const buildSnapshot = (): PollSnapshot => {
+      cycle++;
+      // Advance time significantly each cycle to always trigger supervisor
+      currentTime = new Date(currentTime.getTime() + MAX_BACKOFF_INTERVAL_MS + 60_000);
+      if (cycle <= 15) {
+        return { items: [{ id: "T-1-1", workerAlive: true }], readyIds: ["T-1-1"] };
+      }
+      return { items: [{ id: "T-1-1", prNumber: 1, prState: "open", ciStatus: "pass" }], readyIds: [] };
+    };
+
+    const deps: OrchestrateLoopDeps = {
+      buildSnapshot,
+      sleep: () => Promise.resolve(),
+      log: (entry) => logs.push(entry),
+      actionDeps: mockActionDeps(),
+      supervisorDeps,
+    };
+
+    const config: OrchestrateLoopConfig = {
+      supervisor: {
+        intervalMs: 60_000,
+        maxLogEntries: 50,
+      },
+    };
+
+    await orchestrateLoop(orch, defaultCtx, deps, config);
+
+    // Should have a supervisor_disabled event
+    const disabledLog = logs.find((l) => l.event === "supervisor_disabled");
+    expect(disabledLog).toBeDefined();
+
+    // After disabling, no more LLM calls should happen
+    // The total calls should be exactly DISABLE_THRESHOLD
+    expect(callLLM).toHaveBeenCalledTimes(DISABLE_THRESHOLD);
+  });
+
   it("supervisor does not tick before interval elapses", async () => {
     const orch = new Orchestrator({ wipLimit: 2, mergeStrategy: "asap" });
     orch.addItem(makeTodo("T-1-1"));
@@ -915,6 +1113,41 @@ describe("orchestrateLoop with supervisor", () => {
 
     // LLM should NOT have been called (time never reached 10 min)
     expect(callLLM).not.toHaveBeenCalled();
+  });
+});
+
+// ── getEffectiveInterval ─────────────────────────────────────────────
+
+describe("getEffectiveInterval", () => {
+  const base = 300_000; // 5 minutes
+
+  it("returns base interval when failures below threshold", () => {
+    expect(getEffectiveInterval(base, 0)).toBe(base);
+    expect(getEffectiveInterval(base, 1)).toBe(base);
+    expect(getEffectiveInterval(base, 2)).toBe(base);
+  });
+
+  it("doubles interval at BACKOFF_THRESHOLD failures", () => {
+    expect(getEffectiveInterval(base, BACKOFF_THRESHOLD)).toBe(base * 2);
+  });
+
+  it("quadruples interval at BACKOFF_THRESHOLD + 1 failures", () => {
+    expect(getEffectiveInterval(base, BACKOFF_THRESHOLD + 1)).toBe(base * 4);
+  });
+
+  it("caps at MAX_BACKOFF_INTERVAL_MS", () => {
+    // With enough failures, interval should hit the cap
+    expect(getEffectiveInterval(base, 20)).toBe(MAX_BACKOFF_INTERVAL_MS);
+  });
+
+  it("applies exponential growth between threshold and cap", () => {
+    const at3 = getEffectiveInterval(base, 3);
+    const at4 = getEffectiveInterval(base, 4);
+    // Each step doubles (before hitting cap)
+    expect(at4).toBe(at3 * 2);
+    // at5 would be 2400000 but is capped at MAX_BACKOFF_INTERVAL_MS
+    const at5 = getEffectiveInterval(base, 5);
+    expect(at5).toBe(MAX_BACKOFF_INTERVAL_MS);
   });
 });
 

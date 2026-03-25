@@ -43,8 +43,8 @@ export interface SupervisorConfig {
 
 /** Dependencies injected into the supervisor for testability. */
 export interface SupervisorDeps {
-  /** Call the LLM with a prompt and return the raw response. */
-  callLLM: (prompt: string) => string | null;
+  /** Call the LLM with a prompt and return the raw response. Throws on failure. */
+  callLLM: (prompt: string) => string;
   /** Get the current wall-clock time. */
   now: () => Date;
   /** Log a structured event. */
@@ -58,16 +58,19 @@ export interface SupervisorDeps {
 // ── Default LLM caller ──────────────────────────────────────────────
 
 /**
- * Call the claude CLI with a prompt. Returns the response or null on failure.
+ * Call the claude CLI with a prompt. Returns the response or throws on failure.
  * Uses --print mode for non-interactive single-shot prompts.
  */
-export function callClaudeCLI(prompt: string): string | null {
+export function callClaudeCLI(prompt: string): string {
   const result = run("claude", [
     "--print",
     "--model", "haiku",
     prompt,
   ]);
-  if (result.exitCode !== 0) return null;
+  if (result.exitCode !== 0) {
+    const detail = result.stderr?.trim() || `exit code ${result.exitCode}`;
+    throw new Error(`claude CLI failed: ${detail}`);
+  }
   return result.stdout;
 }
 
@@ -169,6 +172,36 @@ export function parseSupervisorResponse(raw: string): SupervisorObservation {
 export interface SupervisorState {
   lastTickTime: Date;
   logsSinceLastTick: LogEntry[];
+  /** Number of consecutive LLM call failures (for backoff). */
+  consecutiveFailures: number;
+  /** Whether the supervisor has been disabled due to too many failures. */
+  disabled: boolean;
+}
+
+// ── Backoff constants ─────────────────────────────────────────────
+
+/** Number of consecutive failures before backoff kicks in. */
+export const BACKOFF_THRESHOLD = 3;
+
+/** Number of consecutive failures before the supervisor is disabled. */
+export const DISABLE_THRESHOLD = 10;
+
+/** Maximum supervisor interval after backoff (30 minutes). */
+export const MAX_BACKOFF_INTERVAL_MS = 1_800_000;
+
+/**
+ * Compute the effective supervisor interval with exponential backoff.
+ * After BACKOFF_THRESHOLD consecutive failures, the interval doubles
+ * for each additional failure, capped at MAX_BACKOFF_INTERVAL_MS.
+ */
+export function getEffectiveInterval(
+  baseIntervalMs: number,
+  consecutiveFailures: number,
+): number {
+  if (consecutiveFailures < BACKOFF_THRESHOLD) return baseIntervalMs;
+  const doublings = consecutiveFailures - BACKOFF_THRESHOLD + 1;
+  const multiplier = Math.pow(2, doublings);
+  return Math.min(baseIntervalMs * multiplier, MAX_BACKOFF_INTERVAL_MS);
 }
 
 /**
@@ -184,6 +217,12 @@ export function supervisorTick(
   deps: SupervisorDeps,
 ): SupervisorObservation {
   const now = deps.now();
+  const empty: SupervisorObservation = {
+    anomalies: [],
+    interventions: [],
+    frictionObservations: [],
+    processImprovements: [],
+  };
 
   // Compute elapsed time per item in current state
   const elapsedByItem = new Map<string, number>();
@@ -200,23 +239,40 @@ export function supervisorTick(
     now,
   );
 
-  const response = deps.callLLM(prompt);
+  let response: string;
+  try {
+    response = deps.callLLM(prompt);
+  } catch (e: unknown) {
+    const errorMsg = e instanceof Error ? e.message : String(e);
+    state.consecutiveFailures++;
 
-  if (!response) {
     deps.log({
       ts: now.toISOString(),
       level: "warn",
       event: "supervisor_tick",
       status: "llm_call_failed",
+      error: errorMsg,
+      consecutiveFailures: state.consecutiveFailures,
     });
-    // Return empty observation — daemon continues
-    return {
-      anomalies: [],
-      interventions: [],
-      frictionObservations: [],
-      processImprovements: [],
-    };
+
+    // Check if we should disable the supervisor
+    if (state.consecutiveFailures >= DISABLE_THRESHOLD) {
+      state.disabled = true;
+      deps.log({
+        ts: now.toISOString(),
+        level: "warn",
+        event: "supervisor_disabled",
+        reason: `${state.consecutiveFailures} consecutive LLM failures`,
+      });
+    }
+
+    // Update tick time so backoff interval applies from this point
+    state.lastTickTime = now;
+    return empty;
   }
+
+  // Success — reset backoff counter
+  state.consecutiveFailures = 0;
 
   const observation = parseSupervisorResponse(response);
 

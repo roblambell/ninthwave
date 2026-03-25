@@ -40,6 +40,7 @@ import {
   writeFrictionLog,
   shouldActivateSupervisor,
   createSupervisorDeps,
+  getEffectiveInterval,
   DEFAULT_SUPERVISOR_CONFIG,
   type SupervisorConfig,
   type SupervisorDeps,
@@ -869,6 +870,8 @@ export async function orchestrateLoop(
     supervisorState = {
       lastTickTime: deps.supervisorDeps.now(),
       logsSinceLastTick: [],
+      consecutiveFailures: 0,
+      disabled: false,
     };
   }
 
@@ -1002,11 +1005,15 @@ export async function orchestrateLoop(
     }
 
     // ── Supervisor tick ──────────────────────────────────────────
-    if (supervisorState && config.supervisor && deps.supervisorDeps) {
+    if (supervisorState && !supervisorState.disabled && config.supervisor && deps.supervisorDeps) {
       const now = deps.supervisorDeps.now();
       const elapsed = now.getTime() - supervisorState.lastTickTime.getTime();
+      const effectiveInterval = getEffectiveInterval(
+        config.supervisor.intervalMs,
+        supervisorState.consecutiveFailures,
+      );
 
-      if (elapsed >= config.supervisor.intervalMs) {
+      if (elapsed >= effectiveInterval) {
         try {
           const observation = supervisorTick(
             supervisorState,
