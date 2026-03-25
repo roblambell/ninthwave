@@ -5,6 +5,19 @@ import type { TodoItem } from "./types.ts";
 import { WILDCARD_DEP_PATTERN, CODE_EXTENSIONS } from "./types.ts";
 
 /**
+ * Normalize an array of ID arguments by splitting on commas, trimming whitespace,
+ * and filtering empty strings. This allows CLI commands to accept both
+ * comma-separated (A,B,C) and space-separated (A B C) ID arguments, as well
+ * as mixed formats (A,B C).
+ */
+export function splitIds(args: string[]): string[] {
+  return args
+    .flatMap((arg) => arg.split(","))
+    .map((id) => id.trim())
+    .filter(Boolean);
+}
+
+/**
  * Normalize a section header into a domain slug.
  * Checks project-specific domain mappings first, then auto-slugifies.
  */

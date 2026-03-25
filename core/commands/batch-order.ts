@@ -11,6 +11,7 @@ import {
   DIM,
   RESET,
 } from "../output.ts";
+import { splitIds } from "../todo-utils.ts";
 import type { TodoItem } from "../types.ts";
 
 /** Result of computing batch assignments. */
@@ -127,10 +128,9 @@ export function cmdBatchOrder(
   todosDir: string,
   worktreeDir: string,
 ): void {
-  if (args.length < 1)
+  const ids = splitIds(args);
+  if (ids.length < 1)
     die("Usage: ninthwave batch-order <ID1> [ID2...]");
-
-  const ids = args;
   const items = parseTodos(todosDir, worktreeDir);
 
   // Build lookup for display metadata

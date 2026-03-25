@@ -5,6 +5,7 @@ import { join, basename } from "path";
 import { tmpdir } from "os";
 import { parseTodos } from "../parser.ts";
 import { die, warn, info, GREEN, RESET } from "../output.ts";
+import { splitIds } from "../todo-utils.ts";
 import { run } from "../shell.ts";
 import {
   fetchOrigin,
@@ -458,7 +459,7 @@ export function cmdStart(
   muxOverride?: Multiplexer,
 ): void {
   // Parse flags before treating remaining args as IDs
-  const ids: string[] = [];
+  const rawIds: string[] = [];
   let noSandbox = false;
   for (let i = 0; i < args.length; i++) {
     if (args[i] === "--mux") {
@@ -471,9 +472,10 @@ export function cmdStart(
     } else if (args[i] === "--no-sandbox") {
       noSandbox = true;
     } else {
-      ids.push(args[i]!);
+      rawIds.push(args[i]!);
     }
   }
+  const ids = splitIds(rawIds);
 
   if (ids.length < 1) die("Usage: ninthwave start <ID1> [ID2...] [--mux cmux|tmux]");
   const items = parseTodos(todosDir, worktreeDir);

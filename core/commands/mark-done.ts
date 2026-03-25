@@ -3,6 +3,7 @@
 import { existsSync, readFileSync, readdirSync } from "fs";
 import { join } from "path";
 import { die, GREEN, YELLOW, RESET } from "../output.ts";
+import { splitIds } from "../todo-utils.ts";
 import { isBranchMerged, commitCount } from "../git.ts";
 import { prList } from "../gh.ts";
 import { deleteTodoFile } from "../todo-files.ts";
@@ -15,12 +16,13 @@ export function cmdMarkDone(
   args: string[],
   todosDir: string,
 ): void {
-  if (args.length < 1) die("Usage: ninthwave mark-done <ID1> [ID2...]");
+  const ids = splitIds(args);
+  if (ids.length < 1) die("Usage: ninthwave mark-done <ID1> [ID2...]");
 
   const done: string[] = [];
   const notFound: string[] = [];
 
-  for (const id of args) {
+  for (const id of ids) {
     if (deleteTodoFile(todosDir, id)) {
       done.push(id);
     } else {

@@ -2,6 +2,7 @@
 
 import { parseTodos } from "../parser.ts";
 import { die, BOLD, DIM, RESET } from "../output.ts";
+import { splitIds } from "../todo-utils.ts";
 import { ID_PATTERN_GLOBAL } from "../types.ts";
 import type { TodoItem } from "../types.ts";
 
@@ -10,7 +11,8 @@ export function cmdDeps(
   todosDir: string,
   worktreeDir: string,
 ): void {
-  const targetId = args[0];
+  const ids = splitIds(args);
+  const targetId = ids[0];
   if (!targetId) die("Usage: ninthwave deps <ID>");
 
   const items = parseTodos(todosDir, worktreeDir);

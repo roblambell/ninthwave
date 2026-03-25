@@ -2,6 +2,7 @@
 
 import { parseTodos } from "../parser.ts";
 import { die, BOLD, RED, YELLOW, GREEN, RESET } from "../output.ts";
+import { splitIds } from "../todo-utils.ts";
 import type { TodoItem } from "../types.ts";
 
 export function cmdConflicts(
@@ -9,9 +10,8 @@ export function cmdConflicts(
   todosDir: string,
   worktreeDir: string,
 ): void {
-  if (args.length < 2) die("Usage: ninthwave conflicts <ID1> <ID2> [ID3...]");
-
-  const ids = args;
+  const ids = splitIds(args);
+  if (ids.length < 2) die("Usage: ninthwave conflicts <ID1> <ID2> [ID3...]");
   const items = parseTodos(todosDir, worktreeDir);
   const itemMap = new Map<string, TodoItem>();
   for (const item of items) {
