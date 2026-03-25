@@ -36,11 +36,13 @@ import { cmdAnalytics } from "./commands/analytics.ts";
 import { cmdStop } from "./commands/stop.ts";
 import { cmdMigrateTodos, cmdGenerateTodos } from "./commands/migrate-todos.ts";
 import { shouldOnboard, cmdOnboard } from "./commands/onboard.ts";
+import { cmdDoctor } from "./commands/doctor.ts";
 
 // ── Help definitions ─────────────────────────────────────────────────
 
 /** [usage, description] pairs for all commands. */
 export const COMMANDS: ReadonlyArray<[string, string]> = [
+  ["doctor", "Check prerequisites and configuration health"],
   ["init", "Auto-detect and initialize ninthwave (zero input)"],
   ["setup [--global]", "Set up ninthwave in a project or globally"],
   ["version", "Print ninthwave version"],
@@ -220,6 +222,7 @@ const partitionDir = join(worktreeDir, ".partitions");
 // Most commands require the todos directory — check before dispatching
 // (setup, version, init, and help are handled above before project root resolution)
 const needsTodos = ![
+  "doctor",
   "repos",
   "partitions",
   "status",
@@ -249,6 +252,9 @@ if (needsTodos && !usesExternalBackend && !existsSync(todosDir)) {
 }
 
 switch (command) {
+  case "doctor":
+    cmdDoctor(projectRoot);
+    break;
   case "list":
     cmdList(args, todosDir, worktreeDir, projectRoot);
     break;

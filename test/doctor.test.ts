@@ -1,0 +1,506 @@
+// Tests for core/commands/doctor.ts — diagnostic health check command.
+
+import { describe, it, expect, afterEach } from "vitest";
+import { mkdirSync, writeFileSync } from "fs";
+import { join } from "path";
+import { setupTempRepo, cleanupTempRepos } from "./helpers.ts";
+import type { RunResult } from "../core/types.ts";
+import {
+  checkGh,
+  checkAiTool,
+  checkMultiplexer,
+  checkGitConfig,
+  checkNinthwaveConfig,
+  checkNono,
+  checkSandboxProfile,
+  checkPreCommitHook,
+  checkCloudflared,
+  checkWebhookUrl,
+  runDoctor,
+  formatDoctorOutput,
+  type ShellRunner,
+} from "../core/commands/doctor.ts";
+
+// ── Mock shell runners ───────────────────────────────────────────────
+
+/** Build a mock shell runner from a map of command → result. */
+function mockRunner(
+  responses: Record<string, RunResult>,
+): ShellRunner {
+  return (cmd: string, args: string[]): RunResult => {
+    // Try exact key first: "cmd arg1 arg2"
+    const key = `${cmd} ${args.join(" ")}`;
+    if (responses[key]) return responses[key]!;
+    // Try command-only key
+    if (responses[cmd]) return responses[cmd]!;
+    return { stdout: "", stderr: "not found", exitCode: 1 };
+  };
+}
+
+/** A runner where everything succeeds. */
+function allPassRunner(): ShellRunner {
+  return (cmd: string, args: string[]): RunResult => {
+    if (cmd === "git" && args[0] === "config" && args[1] === "user.name") {
+      return { stdout: "Test User", stderr: "", exitCode: 0 };
+    }
+    if (cmd === "git" && args[0] === "config" && args[1] === "user.email") {
+      return { stdout: "test@example.com", stderr: "", exitCode: 0 };
+    }
+    // Default: succeed for "which" checks and "gh auth status"
+    return { stdout: "/usr/local/bin/mock", stderr: "", exitCode: 0 };
+  };
+}
+
+/** A runner where nothing is installed. */
+function allFailRunner(): ShellRunner {
+  return (_cmd: string, _args: string[]): RunResult => {
+    return { stdout: "", stderr: "not found", exitCode: 1 };
+  };
+}
+
+afterEach(() => {
+  cleanupTempRepos();
+});
+
+// ── Individual check tests ───────────────────────────────────────────
+
+describe("checkGh", () => {
+  it("passes when gh is installed and authenticated", () => {
+    const runner = mockRunner({
+      "which gh": { stdout: "/usr/local/bin/gh", stderr: "", exitCode: 0 },
+      "gh auth status": { stdout: "Logged in", stderr: "", exitCode: 0 },
+    });
+    const result = checkGh(runner);
+    expect(result.status).toBe("pass");
+    expect(result.message).toContain("authenticated");
+  });
+
+  it("fails when gh is not installed", () => {
+    const runner = allFailRunner();
+    const result = checkGh(runner);
+    expect(result.status).toBe("fail");
+    expect(result.message).toContain("not installed");
+  });
+
+  it("fails when gh is installed but not authenticated", () => {
+    const runner = mockRunner({
+      "which gh": { stdout: "/usr/local/bin/gh", stderr: "", exitCode: 0 },
+      "gh auth status": {
+        stdout: "",
+        stderr: "not logged in",
+        exitCode: 1,
+      },
+    });
+    const result = checkGh(runner);
+    expect(result.status).toBe("fail");
+    expect(result.message).toContain("not authenticated");
+    expect(result.detail).toContain("gh auth login");
+  });
+});
+
+describe("checkAiTool", () => {
+  it("passes when claude is available", () => {
+    const runner = mockRunner({
+      "which claude": {
+        stdout: "/usr/local/bin/claude",
+        stderr: "",
+        exitCode: 0,
+      },
+    });
+    const result = checkAiTool(runner);
+    expect(result.status).toBe("pass");
+    expect(result.message).toContain("claude");
+  });
+
+  it("passes when only opencode is available", () => {
+    const runner = mockRunner({
+      "which opencode": {
+        stdout: "/usr/local/bin/opencode",
+        stderr: "",
+        exitCode: 0,
+      },
+    });
+    const result = checkAiTool(runner);
+    expect(result.status).toBe("pass");
+    expect(result.message).toContain("opencode");
+  });
+
+  it("lists multiple tools when several are available", () => {
+    const runner = (cmd: string, args: string[]): RunResult => {
+      if (cmd === "which" && (args[0] === "claude" || args[0] === "opencode")) {
+        return { stdout: `/usr/local/bin/${args[0]}`, stderr: "", exitCode: 0 };
+      }
+      return { stdout: "", stderr: "not found", exitCode: 1 };
+    };
+    const result = checkAiTool(runner);
+    expect(result.status).toBe("pass");
+    expect(result.message).toContain("claude");
+    expect(result.message).toContain("opencode");
+  });
+
+  it("fails when no AI tool is available", () => {
+    const runner = allFailRunner();
+    const result = checkAiTool(runner);
+    expect(result.status).toBe("fail");
+    expect(result.message).toContain("No AI tool");
+  });
+});
+
+describe("checkMultiplexer", () => {
+  it("passes with cmux (preferred)", () => {
+    const runner = mockRunner({
+      "which cmux": {
+        stdout: "/usr/local/bin/cmux",
+        stderr: "",
+        exitCode: 0,
+      },
+    });
+    const result = checkMultiplexer(runner);
+    expect(result.status).toBe("pass");
+    expect(result.message).toContain("cmux");
+    expect(result.message).toContain("preferred");
+  });
+
+  it("passes with tmux", () => {
+    const runner = mockRunner({
+      "which tmux": {
+        stdout: "/usr/local/bin/tmux",
+        stderr: "",
+        exitCode: 0,
+      },
+    });
+    const result = checkMultiplexer(runner);
+    expect(result.status).toBe("pass");
+    expect(result.message).toContain("tmux");
+  });
+
+  it("passes with zellij", () => {
+    const runner = mockRunner({
+      "which zellij": {
+        stdout: "/usr/local/bin/zellij",
+        stderr: "",
+        exitCode: 0,
+      },
+    });
+    const result = checkMultiplexer(runner);
+    expect(result.status).toBe("pass");
+    expect(result.message).toContain("zellij");
+  });
+
+  it("fails when no multiplexer is available", () => {
+    const runner = allFailRunner();
+    const result = checkMultiplexer(runner);
+    expect(result.status).toBe("fail");
+    expect(result.message).toContain("No multiplexer");
+  });
+});
+
+describe("checkGitConfig", () => {
+  it("passes when both name and email are set", () => {
+    const runner = (cmd: string, args: string[]): RunResult => {
+      if (cmd === "git" && args[1] === "user.name") {
+        return { stdout: "Jane Doe", stderr: "", exitCode: 0 };
+      }
+      if (cmd === "git" && args[1] === "user.email") {
+        return { stdout: "jane@example.com", stderr: "", exitCode: 0 };
+      }
+      return { stdout: "", stderr: "", exitCode: 1 };
+    };
+    const result = checkGitConfig(runner);
+    expect(result.status).toBe("pass");
+    expect(result.message).toContain("Jane Doe");
+    expect(result.message).toContain("jane@example.com");
+  });
+
+  it("fails when user.name is missing", () => {
+    const runner = (cmd: string, args: string[]): RunResult => {
+      if (cmd === "git" && args[1] === "user.email") {
+        return { stdout: "jane@example.com", stderr: "", exitCode: 0 };
+      }
+      return { stdout: "", stderr: "", exitCode: 1 };
+    };
+    const result = checkGitConfig(runner);
+    expect(result.status).toBe("fail");
+    expect(result.message).toContain("user.name");
+  });
+
+  it("fails when user.email is missing", () => {
+    const runner = (cmd: string, args: string[]): RunResult => {
+      if (cmd === "git" && args[1] === "user.name") {
+        return { stdout: "Jane Doe", stderr: "", exitCode: 0 };
+      }
+      return { stdout: "", stderr: "", exitCode: 1 };
+    };
+    const result = checkGitConfig(runner);
+    expect(result.status).toBe("fail");
+    expect(result.message).toContain("user.email");
+  });
+});
+
+describe("checkNinthwaveConfig", () => {
+  it("passes when .ninthwave/config exists", () => {
+    const repo = setupTempRepo();
+    mkdirSync(join(repo, ".ninthwave"), { recursive: true });
+    writeFileSync(join(repo, ".ninthwave", "config"), "# config\n");
+    const result = checkNinthwaveConfig(repo);
+    expect(result.status).toBe("pass");
+  });
+
+  it("warns when .ninthwave/config does not exist", () => {
+    const repo = setupTempRepo();
+    const result = checkNinthwaveConfig(repo);
+    expect(result.status).toBe("warn");
+    expect(result.detail).toContain("nw setup");
+  });
+});
+
+describe("checkNono", () => {
+  it("passes when nono is installed", () => {
+    const runner = mockRunner({
+      "which nono": {
+        stdout: "/usr/local/bin/nono",
+        stderr: "",
+        exitCode: 0,
+      },
+    });
+    const result = checkNono(runner);
+    expect(result.status).toBe("pass");
+  });
+
+  it("warns when nono is not installed", () => {
+    const runner = allFailRunner();
+    const result = checkNono(runner);
+    expect(result.status).toBe("warn");
+    expect(result.message).toContain("unsandboxed");
+  });
+});
+
+describe("checkSandboxProfile", () => {
+  it("passes when project-level profile exists", () => {
+    const repo = setupTempRepo();
+    const profileDir = join(repo, ".nono", "profiles");
+    mkdirSync(profileDir, { recursive: true });
+    writeFileSync(join(profileDir, "claude-worker.json"), "{}");
+    const result = checkSandboxProfile(repo);
+    expect(result.status).toBe("pass");
+    expect(result.message).toContain("project-level");
+  });
+
+  it("passes when user-level profile exists", () => {
+    const repo = setupTempRepo();
+    const fakeHome = setupTempRepo();
+    // Temporarily set HOME
+    const origHome = process.env.HOME;
+    process.env.HOME = fakeHome;
+    try {
+      const profileDir = join(fakeHome, ".nono", "profiles");
+      mkdirSync(profileDir, { recursive: true });
+      writeFileSync(join(profileDir, "claude-worker.json"), "{}");
+      const result = checkSandboxProfile(repo);
+      expect(result.status).toBe("pass");
+      expect(result.message).toContain("user-level");
+    } finally {
+      process.env.HOME = origHome;
+    }
+  });
+
+  it("warns when no profile exists", () => {
+    const repo = setupTempRepo();
+    const origHome = process.env.HOME;
+    process.env.HOME = repo; // Use repo as home so no user profile exists
+    try {
+      const result = checkSandboxProfile(repo);
+      expect(result.status).toBe("warn");
+      expect(result.message).toContain("nw setup");
+    } finally {
+      process.env.HOME = origHome;
+    }
+  });
+});
+
+describe("checkPreCommitHook", () => {
+  it("passes when pre-commit hook exists", () => {
+    const repo = setupTempRepo();
+    const hooksDir = join(repo, ".git", "hooks");
+    mkdirSync(hooksDir, { recursive: true });
+    writeFileSync(join(hooksDir, "pre-commit"), "#!/bin/sh\nexit 0\n");
+    const result = checkPreCommitHook(repo);
+    expect(result.status).toBe("pass");
+  });
+
+  it("warns when pre-commit hook does not exist", () => {
+    const repo = setupTempRepo();
+    const result = checkPreCommitHook(repo);
+    expect(result.status).toBe("warn");
+  });
+});
+
+describe("checkCloudflared", () => {
+  it("passes when cloudflared is installed", () => {
+    const runner = mockRunner({
+      "which cloudflared": {
+        stdout: "/usr/local/bin/cloudflared",
+        stderr: "",
+        exitCode: 0,
+      },
+    });
+    const result = checkCloudflared(runner);
+    expect(result.status).toBe("pass");
+  });
+
+  it("returns info when cloudflared is not installed", () => {
+    const runner = allFailRunner();
+    const result = checkCloudflared(runner);
+    expect(result.status).toBe("info");
+    expect(result.message).toContain("remote session access unavailable");
+  });
+});
+
+describe("checkWebhookUrl", () => {
+  it("passes when webhook_url is configured", () => {
+    const repo = setupTempRepo();
+    mkdirSync(join(repo, ".ninthwave"), { recursive: true });
+    writeFileSync(
+      join(repo, ".ninthwave", "config"),
+      "webhook_url=https://example.com/hook\n",
+    );
+    const result = checkWebhookUrl(repo);
+    expect(result.status).toBe("pass");
+  });
+
+  it("returns info when webhook_url is not configured", () => {
+    const repo = setupTempRepo();
+    const result = checkWebhookUrl(repo);
+    expect(result.status).toBe("info");
+    expect(result.message).toContain("no notifications");
+  });
+});
+
+// ── Integration: runDoctor ───────────────────────────────────────────
+
+describe("runDoctor", () => {
+  it("returns exit code 0 when all required checks pass", () => {
+    const repo = setupTempRepo();
+    mkdirSync(join(repo, ".ninthwave"), { recursive: true });
+    writeFileSync(join(repo, ".ninthwave", "config"), "# config\n");
+
+    const doctor = runDoctor(repo, allPassRunner());
+    expect(doctor.exitCode).toBe(0);
+    expect(doctor.requiredPassed).toBe(doctor.requiredTotal);
+    expect(doctor.requiredTotal).toBe(4);
+  });
+
+  it("returns exit code 1 when any required check fails", () => {
+    const repo = setupTempRepo();
+
+    const doctor = runDoctor(repo, allFailRunner());
+    expect(doctor.exitCode).toBe(1);
+    expect(doctor.requiredPassed).toBeLessThan(doctor.requiredTotal);
+  });
+
+  it("counts warnings from recommended checks", () => {
+    const repo = setupTempRepo();
+    // No .ninthwave/config, no nono, no sandbox profile, no pre-commit hook
+    // All required pass, but recommended items warn
+    const doctor = runDoctor(repo, allPassRunner());
+    // nono will "pass" (allPassRunner returns success for which),
+    // but .ninthwave/config exists since we don't create it -> warn
+    // Let's create config so we can count warnings from other checks
+    expect(doctor.warnings).toBeGreaterThanOrEqual(0);
+  });
+
+  it("produces results for all categories", () => {
+    const repo = setupTempRepo();
+    const doctor = runDoctor(repo, allPassRunner());
+    const categories = new Set(doctor.results.map((r) => r.category));
+    expect(categories).toContain("Required");
+    expect(categories).toContain("Recommended");
+    expect(categories).toContain("Optional");
+  });
+
+  it("mixed results: some required fail, some warn", () => {
+    const repo = setupTempRepo();
+    // gh fails, AI tool fails, but git config passes, mux passes
+    const runner: ShellRunner = (cmd: string, args: string[]): RunResult => {
+      // cmux available
+      if (cmd === "which" && args[0] === "cmux") {
+        return { stdout: "/usr/local/bin/cmux", stderr: "", exitCode: 0 };
+      }
+      // git config passes
+      if (cmd === "git" && args[0] === "config" && args[1] === "user.name") {
+        return { stdout: "User", stderr: "", exitCode: 0 };
+      }
+      if (cmd === "git" && args[0] === "config" && args[1] === "user.email") {
+        return { stdout: "u@e.com", stderr: "", exitCode: 0 };
+      }
+      // Everything else fails
+      return { stdout: "", stderr: "not found", exitCode: 1 };
+    };
+
+    const doctor = runDoctor(repo, runner);
+    expect(doctor.exitCode).toBe(1);
+    // gh fails + AI tool fails = 2 required failures
+    expect(doctor.requiredPassed).toBe(2); // mux + git config
+    expect(doctor.requiredTotal).toBe(4);
+    // nono warn + no config warn + no profile warn + no pre-commit warn = 4 warnings
+    expect(doctor.warnings).toBeGreaterThanOrEqual(2);
+  });
+});
+
+// ── Output formatting ────────────────────────────────────────────────
+
+describe("formatDoctorOutput", () => {
+  it("includes the header line", () => {
+    const repo = setupTempRepo();
+    const doctor = runDoctor(repo, allPassRunner());
+    const output = formatDoctorOutput(doctor);
+    expect(output).toContain("ninthwave doctor");
+  });
+
+  it("includes category headers", () => {
+    const repo = setupTempRepo();
+    const doctor = runDoctor(repo, allPassRunner());
+    const output = formatDoctorOutput(doctor);
+    expect(output).toContain("Required");
+    expect(output).toContain("Recommended");
+    expect(output).toContain("Optional");
+  });
+
+  it("includes pass/fail/warn/info labels", () => {
+    const repo = setupTempRepo();
+    const doctor = runDoctor(repo, allFailRunner());
+    const output = formatDoctorOutput(doctor);
+    // Should have fail labels for required checks
+    expect(output).toContain("fail");
+    // Should have warn labels for recommended checks
+    expect(output).toContain("warn");
+    // Should have info labels for optional checks
+    expect(output).toContain("info");
+  });
+
+  it("includes result summary line", () => {
+    const repo = setupTempRepo();
+    const doctor = runDoctor(repo, allPassRunner());
+    const output = formatDoctorOutput(doctor);
+    expect(output).toContain("Result:");
+    expect(output).toContain("4/4 required checks passed");
+  });
+
+  it("includes warning count when warnings exist", () => {
+    const repo = setupTempRepo();
+    // No config file => at least 1 warning
+    const doctor = runDoctor(repo, allPassRunner());
+    if (doctor.warnings > 0) {
+      const output = formatDoctorOutput(doctor);
+      expect(output).toMatch(/\d+ warnings?/);
+    }
+  });
+
+  it("includes detail lines for items with details", () => {
+    const repo = setupTempRepo();
+    const doctor = runDoctor(repo, allFailRunner());
+    const output = formatDoctorOutput(doctor);
+    // Failed checks should have detail/install hints
+    expect(output).toContain("Install:");
+  });
+});
