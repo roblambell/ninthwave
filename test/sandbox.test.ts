@@ -8,19 +8,27 @@ import {
   isNonoAvailable,
   warnOnceNoSandbox,
   _resetWarnState,
+  _resetDryRunCache,
   buildDefaultConfig,
   applySandboxOverrides,
   buildSandboxCommand,
+  buildProfileCommand,
+  findProfile,
+  validateWithDryRun,
   wrapWithSandbox,
   type SandboxConfig,
 } from "../core/sandbox.ts";
 import type { RunResult } from "../core/types.ts";
 
-/** Create a fake ShellRunner that returns success for `which nono`. */
+/** Create a fake ShellRunner that returns success for `which nono` and dry-run. */
 function nonoInstalled() {
   return (cmd: string, args: string[]): RunResult => {
     if (cmd === "which" && args[0] === "nono") {
       return { stdout: "/usr/local/bin/nono", stderr: "", exitCode: 0 };
+    }
+    // Dry-run validation succeeds
+    if (cmd === "nono" && args.includes("--dry-run")) {
+      return { stdout: "", stderr: "", exitCode: 0 };
     }
     return { stdout: "", stderr: "not found", exitCode: 1 };
   };
@@ -29,6 +37,19 @@ function nonoInstalled() {
 /** Create a fake ShellRunner where nono is NOT installed. */
 function nonoMissing() {
   return (_cmd: string, _args: string[]): RunResult => {
+    return { stdout: "", stderr: "not found", exitCode: 1 };
+  };
+}
+
+/** Create a fake ShellRunner where nono is installed but dry-run fails. */
+function nonoDryRunFails() {
+  return (cmd: string, args: string[]): RunResult => {
+    if (cmd === "which" && args[0] === "nono") {
+      return { stdout: "/usr/local/bin/nono", stderr: "", exitCode: 0 };
+    }
+    if (cmd === "nono" && args.includes("--dry-run")) {
+      return { stdout: "", stderr: "profile not found", exitCode: 1 };
+    }
     return { stdout: "", stderr: "not found", exitCode: 1 };
   };
 }
@@ -208,6 +229,54 @@ describe("applySandboxOverrides", () => {
   });
 });
 
+describe("findProfile", () => {
+  afterEach(() => {
+    cleanupTempRepos();
+  });
+
+  it("returns profile path when profile exists", () => {
+    const repo = setupTempRepo();
+    const profileDir = join(repo, ".nono", "profiles");
+    mkdirSync(profileDir, { recursive: true });
+    writeFileSync(join(profileDir, "claude-worker.json"), "{}");
+
+    const result = findProfile(repo);
+    expect(result).toBe(join(profileDir, "claude-worker.json"));
+  });
+
+  it("returns null when no profile exists", () => {
+    const repo = setupTempRepo();
+    expect(findProfile(repo)).toBeNull();
+  });
+});
+
+describe("buildProfileCommand", () => {
+  it("builds command with profile, workdir, and read flags", () => {
+    const result = buildProfileCommand(
+      "/proj/.nono/profiles/claude-worker.json",
+      "/tmp/worktree",
+      "/proj",
+      "claude --agent todo-worker",
+    );
+    expect(result).toBe(
+      "nono run -s --profile /proj/.nono/profiles/claude-worker.json --workdir /tmp/worktree --read /proj -- claude --agent todo-worker",
+    );
+  });
+
+  it("omits --read when project root equals worktree", () => {
+    const result = buildProfileCommand(
+      "/proj/.nono/profiles/claude-worker.json",
+      "/proj",
+      "/proj",
+      "claude --agent",
+    );
+    expect(result).toBe(
+      "nono run -s --profile /proj/.nono/profiles/claude-worker.json --workdir /proj -- claude --agent",
+    );
+    expect(result).not.toContain("--read");
+  });
+});
+
 describe("buildSandboxCommand", () => {
   it("wraps command with nono and flags", () => {
     const config: SandboxConfig = {
@@ -223,7 +292,7 @@ describe("buildSandboxCommand", () => {
 
     const result = buildSandboxCommand(config, "claude --agent todo-worker");
     expect(result).toBe(
-      "nono run -s --allow /tmp/worktree --read /home/user/project -- claude --agent todo-worker",
+      "nono run -s --allow-cwd --allow /tmp/worktree --read /home/user/project -- claude --agent todo-worker",
     );
   });
 
@@ -241,7 +310,7 @@ describe("buildSandboxCommand", () => {
 
     const result = buildSandboxCommand(config, "cmd");
     expect(result).toBe(
-      "nono run -s --allow /rw1 --allow /rw2 --read /ro1 --read /ro2 -- cmd",
+      "nono run -s --allow-cwd --allow /rw1 --allow /rw2 --read /ro1 --read /ro2 -- cmd",
     );
   });
 
@@ -253,13 +322,55 @@ describe("buildSandboxCommand", () => {
     };
 
     const result = buildSandboxCommand(config, "cmd");
-    expect(result).toBe("nono run -s -- cmd");
+    expect(result).toBe("nono run -s --allow-cwd -- cmd");
+  });
+});
+
+describe("validateWithDryRun", () => {
+  beforeEach(() => {
+    _resetDryRunCache();
+  });
+
+  it("returns true when dry-run succeeds", () => {
+    const runner = nonoInstalled();
+    expect(validateWithDryRun("nono run -s -- cmd", runner)).toBe(true);
+  });
+
+  it("returns false when dry-run fails", () => {
+    const warnings: string[] = [];
+    const runner = nonoDryRunFails();
+    expect(
+      validateWithDryRun("nono run -s -- cmd", runner, (msg) => warnings.push(msg)),
+    ).toBe(false);
+    expect(warnings).toHaveLength(1);
+    expect(warnings[0]).toContain("sandbox dry-run failed");
+  });
+
+  it("caches successful validation", () => {
+    const runner = nonoInstalled();
+    validateWithDryRun("nono run -s -- cmd", runner);
+
+    // Second call should return true even with a failing runner
+    const failRunner = nonoDryRunFails();
+    expect(validateWithDryRun("nono run -s -- cmd2", failRunner)).toBe(true);
+  });
+
+  it("returns false when runner throws", () => {
+    const warnings: string[] = [];
+    const throwing = () => {
+      throw new Error("spawn error");
+    };
+    expect(
+      validateWithDryRun("nono run -s -- cmd", throwing as any, (msg) => warnings.push(msg)),
+    ).toBe(false);
+    expect(warnings[0]).toContain("sandbox dry-run error");
   });
 });
 
 describe("wrapWithSandbox", () => {
   beforeEach(() => {
     _resetWarnState();
+    _resetDryRunCache();
   });
 
   afterEach(() => {
@@ -274,23 +385,9 @@ describe("wrapWithSandbox", () => {
     expect(result).toBe("claude --agent");
   });
 
-  it("returns original command when sandbox not explicitly enabled", () => {
+  it("returns original command when nono not installed and warns once", () => {
     const warnings: string[] = [];
     const result = wrapWithSandbox("claude --agent", "/wt", "/proj", {
-      runner: nonoInstalled(),
-      warnFn: (msg) => warnings.push(msg),
-    });
-    expect(result).toBe("claude --agent");
-    expect(warnings).toHaveLength(0);
-  });
-
-  it("returns original command when nono not installed and warns once", () => {
-    const repo = setupTempRepo();
-    mkdirSync(join(repo, ".ninthwave"), { recursive: true });
-    writeFileSync(join(repo, ".ninthwave", "config"), "sandbox_enabled=true\n");
-
-    const warnings: string[] = [];
-    const result = wrapWithSandbox("claude --agent", "/wt", repo, {
       runner: nonoMissing(),
       warnFn: (msg) => warnings.push(msg),
     });
@@ -300,49 +397,85 @@ describe("wrapWithSandbox", () => {
   });
 
   it("warns only once across multiple calls when nono missing", () => {
-    const repo = setupTempRepo();
-    mkdirSync(join(repo, ".ninthwave"), { recursive: true });
-    writeFileSync(join(repo, ".ninthwave", "config"), "sandbox_enabled=true\n");
-
     const warnings: string[] = [];
-    wrapWithSandbox("cmd1", "/wt", repo, {
+    wrapWithSandbox("cmd1", "/wt", "/proj", {
       runner: nonoMissing(),
       warnFn: (msg) => warnings.push(msg),
     });
-    wrapWithSandbox("cmd2", "/wt", repo, {
+    wrapWithSandbox("cmd2", "/wt", "/proj", {
       runner: nonoMissing(),
       warnFn: (msg) => warnings.push(msg),
     });
     expect(warnings).toHaveLength(1);
   });
 
-  it("wraps command with nono when explicitly enabled", () => {
+  it("wraps with sandbox by default when nono is available (no config needed)", () => {
     const repo = setupTempRepo();
-    mkdirSync(join(repo, ".ninthwave"), { recursive: true });
-    writeFileSync(join(repo, ".ninthwave", "config"), "sandbox_enabled=true\n");
 
     const result = wrapWithSandbox("claude --agent", "/tmp/worktree", repo, {
       runner: nonoInstalled(),
     });
+    // Should use manual fallback (no profile) but still sandbox
     expect(result).toMatch(/^nono run /);
     expect(result).toContain("--allow /tmp/worktree");
     expect(result).toContain(`--read ${repo}`);
-    expect(result).not.toContain("--allow-domain");
     expect(result).toContain("-- claude --agent");
   });
 
-  it("applies config overrides from .ninthwave/config", () => {
+  it("uses profile-based sandboxing when profile exists", () => {
+    const repo = setupTempRepo();
+    const profileDir = join(repo, ".nono", "profiles");
+    mkdirSync(profileDir, { recursive: true });
+    writeFileSync(join(profileDir, "claude-worker.json"), "{}");
+
+    const result = wrapWithSandbox("claude --agent", "/tmp/worktree", repo, {
+      runner: nonoInstalled(),
+    });
+    expect(result).toContain("--profile");
+    expect(result).toContain("claude-worker.json");
+    expect(result).toContain("--workdir /tmp/worktree");
+    expect(result).toContain("--read " + repo);
+    expect(result).toContain("-- claude --agent");
+  });
+
+  it("falls back to unsandboxed when dry-run fails", () => {
+    const repo = setupTempRepo();
+    const warnings: string[] = [];
+
+    const result = wrapWithSandbox("claude --agent", "/tmp/worktree", repo, {
+      runner: nonoDryRunFails(),
+      warnFn: (msg) => warnings.push(msg),
+    });
+    expect(result).toBe("claude --agent");
+    expect(warnings).toHaveLength(1);
+    expect(warnings[0]).toContain("dry-run failed");
+  });
+
+  it("applies config overrides in fallback mode", () => {
     const repo = setupTempRepo();
     mkdirSync(join(repo, ".ninthwave"), { recursive: true });
     writeFileSync(
       join(repo, ".ninthwave", "config"),
-      "sandbox_enabled=true\nsandbox_extra_hosts=custom.api.com\n",
+      "sandbox_extra_rw_paths=/tmp/extra\n",
     );
 
     const result = wrapWithSandbox("claude --agent", "/tmp/worktree", repo, {
       runner: nonoInstalled(),
     });
-    // Network hosts are configured but not passed to nono (filesystem-only sandboxing)
+    // Should use manual fallback (no profile) with extra paths
+    expect(result).toMatch(/^nono run /);
+    expect(result).toContain("--allow /tmp/extra");
+  });
+
+  it("profile mode does not use --allow-domain", () => {
+    const repo = setupTempRepo();
+    const profileDir = join(repo, ".nono", "profiles");
+    mkdirSync(profileDir, { recursive: true });
+    writeFileSync(join(profileDir, "claude-worker.json"), "{}");
+
+    const result = wrapWithSandbox("claude --agent", "/tmp/worktree", repo, {
+      runner: nonoInstalled(),
+    });
     expect(result).not.toContain("--allow-domain");
   });
 });

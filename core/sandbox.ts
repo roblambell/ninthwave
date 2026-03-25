@@ -1,6 +1,11 @@
 // Sandbox integration: wraps worker AI tool commands with nono for kernel-level sandboxing.
 // nono provides Seatbelt (macOS) and Landlock (Linux) sandboxing with zero startup latency.
 // The sandbox wraps the AI tool process, not the orchestrator.
+//
+// Strategy: use a nono profile (.nono/profiles/claude-worker.json) that extends the built-in
+// claude-code profile. The profile handles deny groups, system paths, and temp dirs. At
+// runtime we only need to add the dynamic worktree and project-root paths via CLI flags.
+// Falls back to manual flag-building when no profile is found.
 
 import { homedir, platform } from "os";
 import { join } from "path";
@@ -103,6 +108,11 @@ export function _resetWarnState(): void {
   _warnedNoSandbox = false;
 }
 
+/** Reset the dry-run validation cache (for testing). */
+export function _resetDryRunCache(): void {
+  _dryRunValidated = false;
+}
+
 /**
  * Build default sandbox configuration for a worker.
  *
@@ -187,6 +197,44 @@ export function applySandboxOverrides(
 }
 
 /**
+ * Find the nono profile for claude workers.
+ *
+ * Searches for .nono/profiles/claude-worker.json in the project root.
+ * Returns the absolute path if found, null otherwise.
+ */
+export function findProfile(projectRoot: string): string | null {
+  const profilePath = join(projectRoot, ".nono", "profiles", "claude-worker.json");
+  return existsSync(profilePath) ? profilePath : null;
+}
+
+/**
+ * Build a sandbox command using the nono profile.
+ *
+ * Uses --profile for the policy, --workdir for the worktree (gets RW access
+ * via the profile's workdir.access=readwrite), and --read for the project root.
+ */
+export function buildProfileCommand(
+  profilePath: string,
+  worktreePath: string,
+  projectRoot: string,
+  command: string,
+): string {
+  const parts: string[] = [
+    "nono", "run", "-s",
+    "--profile", profilePath,
+    "--workdir", worktreePath,
+  ];
+
+  // Grant read-only access to the main project root (different from worktree)
+  if (projectRoot !== worktreePath) {
+    parts.push("--read", projectRoot);
+  }
+
+  parts.push("--", command);
+  return parts.join(" ");
+}
+
+/**
  * Build the nono command prefix for sandboxing a worker command.
  *
  * Filesystem-only sandboxing — network is unrestricted by default because
@@ -202,7 +250,7 @@ export function buildSandboxCommand(
   config: SandboxConfig,
   command: string,
 ): string {
-  const parts: string[] = ["nono", "run", "-s"];
+  const parts: string[] = ["nono", "run", "-s", "--allow-cwd"];
 
   for (const rw of config.paths.readWrite) {
     parts.push("--allow", rw);
@@ -216,14 +264,66 @@ export function buildSandboxCommand(
   return parts.join(" ");
 }
 
+/** Track whether dry-run validation has passed. */
+let _dryRunValidated = false;
+
 /**
- * Wrap a worker command with nono sandboxing if available and enabled.
+ * Validate the sandbox command with a dry-run before first use.
+ *
+ * Runs `nono run --dry-run ...` to verify the profile and flags are valid
+ * without actually executing the command. Caches the result so validation
+ * only happens once per process.
+ *
+ * @returns true if the dry-run succeeded, false if it failed
+ */
+export function validateWithDryRun(
+  sandboxedCommand: string,
+  runner: ShellRunner = defaultRun,
+  warnFn: (msg: string) => void = console.warn,
+): boolean {
+  if (_dryRunValidated) return true;
+
+  // Insert --dry-run after "nono run"
+  const dryRunCmd = sandboxedCommand.replace(
+    "nono run ",
+    "nono run --dry-run ",
+  );
+
+  // Split the dry-run command to call the runner
+  const parts = dryRunCmd.split(" ");
+  const cmd = parts[0]!;
+  const args = parts.slice(1);
+
+  try {
+    const result = runner(cmd, args);
+    if (result.exitCode === 0) {
+      _dryRunValidated = true;
+      return true;
+    }
+    warnFn(
+      `[ninthwave] sandbox dry-run failed (exit ${result.exitCode}): ${result.stderr.trim()}. Falling back to unsandboxed execution.`,
+    );
+    return false;
+  } catch (err: unknown) {
+    const msg = err instanceof Error ? err.message : String(err);
+    warnFn(
+      `[ninthwave] sandbox dry-run error: ${msg}. Falling back to unsandboxed execution.`,
+    );
+    return false;
+  }
+}
+
+/**
+ * Wrap a worker command with nono sandboxing if available.
+ *
+ * Sandbox is ON by default when nono is installed. Use --no-sandbox to opt out.
  *
  * This is the main entry point for sandbox integration. It:
  * 1. Checks if sandboxing is disabled (--no-sandbox)
  * 2. Checks if nono is installed
- * 3. Builds the sandbox config with defaults + overrides
- * 4. Wraps the command
+ * 3. Looks for a nono profile, falling back to manual flags
+ * 4. Validates with dry-run before first use
+ * 5. Wraps the command
  *
  * @param command - The original worker command
  * @param worktreePath - The worker's isolated worktree
@@ -243,41 +343,38 @@ export function wrapWithSandbox(
 ): string {
   const { disabled = false, runner, warnFn } = options;
 
-  // Sandbox is opt-IN for now — the default nono policy is too restrictive
-  // (claude needs write access to ~/.claude, temp dirs, etc.).
-  // Enable via .ninthwave/config: sandbox_enabled=true
-  // TODO: Create a proper nono profile for claude workers.
+  // --no-sandbox opt-out
   if (disabled) return command;
 
-  // Check if explicitly opted in via config
-  const configPath = join(projectRoot, ".ninthwave", "config");
-  let explicitlyEnabled = false;
-  if (existsSync(configPath)) {
-    const content = readFileSync(configPath, "utf-8");
-    for (const line of content.split("\n")) {
-      const eqIdx = line.indexOf("=");
-      if (eqIdx === -1) continue;
-      const key = line.slice(0, eqIdx).trim();
-      const val = line.slice(eqIdx + 1).trim().replace(/^["']/, "").replace(/["']$/, "");
-      if (key === "sandbox_enabled" && val === "true") {
-        explicitlyEnabled = true;
-      }
-    }
-  }
-  if (!explicitlyEnabled) return command;
-
-  // Check nono availability
+  // Check nono availability — sandbox is on by default when nono is installed
   if (!isNonoAvailable(runner)) {
     warnOnceNoSandbox(warnFn);
     return command;
   }
 
-  // Build config
+  // Try profile-based sandboxing first
+  const profilePath = findProfile(projectRoot);
+  if (profilePath) {
+    const sandboxed = buildProfileCommand(profilePath, worktreePath, projectRoot, command);
+
+    // Validate with dry-run before first use
+    if (validateWithDryRun(sandboxed, runner, warnFn)) {
+      return sandboxed;
+    }
+    // Dry-run failed — fall through to unsandboxed
+    return command;
+  }
+
+  // Fallback: manual flag-building (no profile found)
   const config = buildDefaultConfig(worktreePath, projectRoot);
   const finalConfig = applySandboxOverrides(projectRoot, config);
+  const sandboxed = buildSandboxCommand(finalConfig, command);
 
-  // Wrap
-  return buildSandboxCommand(finalConfig, command);
+  // Validate fallback command too
+  if (validateWithDryRun(sandboxed, runner, warnFn)) {
+    return sandboxed;
+  }
+  return command;
 }
 
 /** Sandbox config keys for use in config.ts KNOWN_CONFIG_KEYS. */
