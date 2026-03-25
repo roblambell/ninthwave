@@ -1010,11 +1010,11 @@ describe("Orchestrator", () => {
       expect(orch.getItem("H-1-1")!.state).toBe("merged");
     });
 
-    // ── post-merge conflict detection ────────────────────────
+    // ── post-merge daemon-rebase-all ─────────────────────────
 
-    it("merge: checks all in-flight sibling PRs for mergeable status", () => {
-      const checkPrMergeable = vi.fn(() => true);
-      const deps = mockDeps({ checkPrMergeable });
+    it("merge: daemon-rebases all in-flight sibling PRs after merge", () => {
+      const daemonRebase = vi.fn(() => true);
+      const deps = mockDeps({ daemonRebase });
       orch.addItem(makeTodo("H-1-1"));
       orch.addItem(makeTodo("H-1-2"));
       orch.addItem(makeTodo("H-1-3"));
@@ -1033,15 +1033,22 @@ describe("Orchestrator", () => {
         deps,
       );
 
-      // Should check mergeable status for both in-flight sibling PRs
-      expect(checkPrMergeable).toHaveBeenCalledWith(defaultCtx.projectRoot, 43);
-      expect(checkPrMergeable).toHaveBeenCalledWith(defaultCtx.projectRoot, 44);
-      expect(checkPrMergeable).toHaveBeenCalledTimes(2);
+      // Should daemon-rebase both in-flight sibling PRs
+      expect(daemonRebase).toHaveBeenCalledWith(
+        `${defaultCtx.worktreeDir}/todo-H-1-2`,
+        "todo/H-1-2",
+      );
+      expect(daemonRebase).toHaveBeenCalledWith(
+        `${defaultCtx.worktreeDir}/todo-H-1-3`,
+        "todo/H-1-3",
+      );
+      expect(daemonRebase).toHaveBeenCalledTimes(2);
     });
 
-    it("merge: sends rebase message to worker when sibling PR has conflicts", () => {
-      const checkPrMergeable = vi.fn((_, prNum: number) => prNum !== 43);
-      const deps = mockDeps({ checkPrMergeable });
+    it("merge: no worker rebase message when daemon-rebase succeeds", () => {
+      const daemonRebase = vi.fn(() => true);
+      const checkPrMergeable = vi.fn(() => false);
+      const deps = mockDeps({ daemonRebase, checkPrMergeable });
       orch.addItem(makeTodo("H-1-1"));
       orch.addItem(makeTodo("H-1-2"));
       orch.setState("H-1-1", "merging");
@@ -1056,23 +1063,75 @@ describe("Orchestrator", () => {
         deps,
       );
 
-      expect(deps.sendMessage).toHaveBeenCalledWith(
-        "workspace:2",
-        expect.stringContaining("merge conflicts"),
-      );
+      // Daemon rebase succeeded — no need to check mergeable or send worker message
+      expect(daemonRebase).toHaveBeenCalledTimes(1);
+      expect(checkPrMergeable).not.toHaveBeenCalled();
+      expect(deps.sendMessage).not.toHaveBeenCalled();
     });
 
-    it("merge: logs warning when conflicting PR has dead worker and no daemonRebase dep", () => {
+    it("merge: falls back to worker rebase when daemon-rebase fails and PR has conflicts", () => {
+      const daemonRebase = vi.fn(() => false);
       const checkPrMergeable = vi.fn(() => false);
-      const warn = vi.fn();
-      const deps = mockDeps({ checkPrMergeable, warn });
+      const deps = mockDeps({ daemonRebase, checkPrMergeable });
       orch.addItem(makeTodo("H-1-1"));
       orch.addItem(makeTodo("H-1-2"));
       orch.setState("H-1-1", "merging");
       orch.getItem("H-1-1")!.prNumber = 42;
       orch.setState("H-1-2", "ci-pending");
       orch.getItem("H-1-2")!.prNumber = 43;
-      // No workspaceRef — worker is dead, no daemonRebase dep
+      orch.getItem("H-1-2")!.workspaceRef = "workspace:2";
+
+      orch.executeAction(
+        { type: "merge", itemId: "H-1-1", prNumber: 42 },
+        defaultCtx,
+        deps,
+      );
+
+      // Daemon rebase failed, PR is conflicting — fall back to worker message
+      expect(daemonRebase).toHaveBeenCalledTimes(1);
+      expect(checkPrMergeable).toHaveBeenCalledWith(defaultCtx.projectRoot, 43);
+      expect(deps.sendMessage).toHaveBeenCalledWith(
+        "workspace:2",
+        expect.stringContaining("merge conflicts"),
+      );
+    });
+
+    it("merge: skips non-conflicting PR after daemon-rebase failure", () => {
+      const daemonRebase = vi.fn(() => false);
+      const checkPrMergeable = vi.fn(() => true);
+      const deps = mockDeps({ daemonRebase, checkPrMergeable });
+      orch.addItem(makeTodo("H-1-1"));
+      orch.addItem(makeTodo("H-1-2"));
+      orch.setState("H-1-1", "merging");
+      orch.getItem("H-1-1")!.prNumber = 42;
+      orch.setState("H-1-2", "ci-pending");
+      orch.getItem("H-1-2")!.prNumber = 43;
+      orch.getItem("H-1-2")!.workspaceRef = "workspace:2";
+
+      orch.executeAction(
+        { type: "merge", itemId: "H-1-1", prNumber: 42 },
+        defaultCtx,
+        deps,
+      );
+
+      // Daemon rebase failed but PR is not conflicting — no message needed
+      expect(daemonRebase).toHaveBeenCalledTimes(1);
+      expect(checkPrMergeable).toHaveBeenCalledWith(defaultCtx.projectRoot, 43);
+      expect(deps.sendMessage).not.toHaveBeenCalled();
+    });
+
+    it("merge: warns when daemon-rebase fails, PR conflicting, and worker dead", () => {
+      const daemonRebase = vi.fn(() => false);
+      const checkPrMergeable = vi.fn(() => false);
+      const warn = vi.fn();
+      const deps = mockDeps({ daemonRebase, checkPrMergeable, warn });
+      orch.addItem(makeTodo("H-1-1"));
+      orch.addItem(makeTodo("H-1-2"));
+      orch.setState("H-1-1", "merging");
+      orch.getItem("H-1-1")!.prNumber = 42;
+      orch.setState("H-1-2", "ci-pending");
+      orch.getItem("H-1-2")!.prNumber = 43;
+      // No workspaceRef — worker is dead
 
       orch.executeAction(
         { type: "merge", itemId: "H-1-1", prNumber: 42 },
@@ -1086,20 +1145,21 @@ describe("Orchestrator", () => {
       expect(warn).toHaveBeenCalledWith(
         expect.stringContaining("Manual rebase needed"),
       );
-      // Should NOT try to send a message to a non-existent workspace
       expect(deps.sendMessage).not.toHaveBeenCalled();
     });
 
-    it("merge: does not send rebase for non-conflicting sibling PRs", () => {
-      const checkPrMergeable = vi.fn(() => true);
-      const deps = mockDeps({ checkPrMergeable });
+    it("merge: falls back to checkPrMergeable only when no daemonRebase dep", () => {
+      const checkPrMergeable = vi.fn(() => false);
+      const warn = vi.fn();
+      const deps = mockDeps({ checkPrMergeable, warn });
+      // No daemonRebase dep
       orch.addItem(makeTodo("H-1-1"));
       orch.addItem(makeTodo("H-1-2"));
       orch.setState("H-1-1", "merging");
       orch.getItem("H-1-1")!.prNumber = 42;
       orch.setState("H-1-2", "ci-pending");
       orch.getItem("H-1-2")!.prNumber = 43;
-      orch.getItem("H-1-2")!.workspaceRef = "workspace:2";
+      // No workspaceRef — worker is dead
 
       orch.executeAction(
         { type: "merge", itemId: "H-1-1", prNumber: 42 },
@@ -1107,10 +1167,11 @@ describe("Orchestrator", () => {
         deps,
       );
 
-      // checkPrMergeable was called, but sendMessage should NOT be called
-      // (the existing dep rebase logic only fires for dependents, and H-1-2 is not a dependent)
+      // No daemonRebase available, but checkPrMergeable detects conflict
       expect(checkPrMergeable).toHaveBeenCalledWith(defaultCtx.projectRoot, 43);
-      expect(deps.sendMessage).not.toHaveBeenCalled();
+      expect(warn).toHaveBeenCalledWith(
+        expect.stringContaining("Manual rebase needed"),
+      );
     });
 
     // ── notify-ci-failure ─────────────────────────────────────
@@ -1535,41 +1596,13 @@ describe("Orchestrator", () => {
       );
     });
 
-    // ── daemon-rebase in post-merge conflict detection ────────
+    // ── daemon-rebase exception handling in post-merge ────────
 
-    it("merge: tries daemon rebase for conflicting sibling PR with dead worker", () => {
+    it("merge: handles daemon-rebase exception gracefully, falls back to conflict check", () => {
+      const daemonRebase = vi.fn(() => { throw new Error("git lock failed"); });
       const checkPrMergeable = vi.fn(() => false);
-      const daemonRebase = vi.fn(() => true);
       const warn = vi.fn();
-      const deps = mockDeps({ checkPrMergeable, daemonRebase, warn });
-      orch.addItem(makeTodo("H-1-1"));
-      orch.addItem(makeTodo("H-1-2"));
-      orch.setState("H-1-1", "merging");
-      orch.getItem("H-1-1")!.prNumber = 42;
-      orch.setState("H-1-2", "ci-pending");
-      orch.getItem("H-1-2")!.prNumber = 43;
-      // No workspaceRef on H-1-2 — worker is dead
-
-      orch.executeAction(
-        { type: "merge", itemId: "H-1-1", prNumber: 42 },
-        defaultCtx,
-        deps,
-      );
-
-      // Should try daemon rebase for the dead worker's worktree
-      expect(daemonRebase).toHaveBeenCalledWith(
-        `${defaultCtx.worktreeDir}/todo-H-1-2`,
-        "todo/H-1-2",
-      );
-      // Should NOT warn because daemon rebase succeeded
-      expect(warn).not.toHaveBeenCalled();
-    });
-
-    it("merge: warns when daemon rebase fails for dead worker sibling", () => {
-      const checkPrMergeable = vi.fn(() => false);
-      const daemonRebase = vi.fn(() => false);
-      const warn = vi.fn();
-      const deps = mockDeps({ checkPrMergeable, daemonRebase, warn });
+      const deps = mockDeps({ daemonRebase, checkPrMergeable, warn });
       orch.addItem(makeTodo("H-1-1"));
       orch.addItem(makeTodo("H-1-2"));
       orch.setState("H-1-1", "merging");
@@ -1584,11 +1617,14 @@ describe("Orchestrator", () => {
         deps,
       );
 
+      // Should try daemon rebase (which threw)
       expect(daemonRebase).toHaveBeenCalledWith(
         `${defaultCtx.worktreeDir}/todo-H-1-2`,
         "todo/H-1-2",
       );
-      expect(warn).toHaveBeenCalledWith(expect.stringContaining("daemon rebase failed"));
+      // Should fall back to conflict check and warn since worker is dead
+      expect(checkPrMergeable).toHaveBeenCalledWith(defaultCtx.projectRoot, 43);
+      expect(warn).toHaveBeenCalledWith(expect.stringContaining("Manual rebase needed"));
     });
 
     // ── common error handling ─────────────────────────────────
@@ -3568,17 +3604,16 @@ describe("Orchestrator", () => {
       expect(mergeActions1).toHaveLength(1);
       expect(mergeActions1[0]!.itemId).toBe("C-1-1");
 
-      // Execute merge for C-1-1 (simulated)
-      const deps = mockDeps({
-        checkPrMergeable: vi.fn(() => true),
-      });
+      // Execute merge for C-1-1 (simulated) — daemon-rebase succeeds for siblings
+      const daemonRebase = vi.fn(() => true);
+      const deps = mockDeps({ daemonRebase });
       orch.executeAction(mergeActions1[0]!, defaultCtx, deps);
 
       // C-1-1 is now merged
       expect(orch.getItem("C-1-1")!.state).toBe("merged");
 
-      // Verify checkPrMergeable was called for the sibling PRs
-      expect(deps.checkPrMergeable).toHaveBeenCalled();
+      // Verify daemon-rebase was called for the sibling PRs
+      expect(daemonRebase).toHaveBeenCalled();
 
       // Cycle 2: medium item gets the merge action next
       const actions2 = orch.processTransitions(
