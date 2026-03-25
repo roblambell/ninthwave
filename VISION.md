@@ -10,7 +10,7 @@ ninthwave is that orchestration layer. It doesn't write code. It manages the pip
 
 ## What Exists Today
 
-v0.1.0 shipped March 2026. Six grind cycles (0-5) have shipped since then.
+v0.1.0 shipped March 2026. Seven grind cycles (0-6) have shipped since then.
 
 **Core pipeline (v0.1.0):**
 - **Decompose + orchestrate pipeline.** `/decompose` breaks a spec into batched work items (~200-400 LOC each). `ninthwave orchestrate` runs an event-driven daemon that launches workers, monitors CI and PR state, merges, cleans up, and recovers from crashes. The full cycle: spec in, merged PRs out.
@@ -58,6 +58,13 @@ v0.1.0 shipped March 2026. Six grind cycles (0-5) have shipped since then.
 - **CLI observability integration** — `ninthwave list` and `ninthwave init` wired to Sentry and PagerDuty backends (OBS-1).
 - **Friction log auto-commit** — `/work` delivery loop auto-commits friction entries (FRC-1).
 
+**Shipped in grind cycle 6 (Phase C-alpha: Remote Session Access Foundation):**
+- **Orchestrator dashboard server** — single Bun.serve HTTP server per orchestration run, bound to localhost with OS-assigned port. Real-time HTML dashboard showing all items with color-coded states, PR links, and session drill-down. Token-authenticated (auto-generated 32-byte bearer token) — no unauthenticated endpoints except `/health` (H-REM-1).
+- **Dashboard lifecycle wiring** — `--remote` flag (off by default) starts the dashboard before orchestration begins. Dashboard URL persisted in daemon state for status pane display. Graceful degradation: if dashboard fails to start, orchestration continues without it (H-REM-2).
+- **`SessionUrlProvider` pattern** — dependency-injection interface (`getPublicUrl`, `cleanup`) for cloud integration. OSS provides the dashboard server; cloud product implements the provider to inject managed tunnels and persistent domains. Clean extension point without modifying core code.
+- **BYOT tunnel model** — Bring Your Own Tunnel. Users expose the localhost dashboard with their tunneling tool of choice (cloudflared, ngrok, zrok, SSH, Tailscale). ninthwave does not manage tunnels in the OSS CLI. `nw doctor` checks for cloudflared as an optional info-level dependency.
+- **`nw doctor` command** — health check for the ninthwave environment. Required checks: gh CLI, AI tool, multiplexer, git config. Recommended checks: project config, nono sandbox, pre-commit hook. Optional checks: cloudflared (for remote access), webhook URL (M-DX-1).
+
 **Self-developing.** ninthwave dogfoods itself. The friction log has surfaced 24 issues across 4 grind cycles, driving improvements from poll interval tuning to the file-per-todo migration. The L-VIS recurring item in `.ninthwave/todos/` keeps the self-improvement loop running.
 
 **Competitive positioning (Q1 2026).** Parallel AI coding exploded: Claude Code Agent Teams (16+ agents), Cursor (8 agents), Superset IDE (10+ agents), dmux, Conductor. All launch parallel sessions. None decompose work, order dependencies, manage CI lifecycle, or orchestrate merges. ninthwave's moat is the integrated pipeline, not session launching. Agent Teams is complementary (intra-task collaboration on one item) while ninthwave is inter-task orchestration (N workers on N items).
@@ -82,7 +89,7 @@ v0.1.0 shipped March 2026. Six grind cycles (0-5) have shipped since then.
 
 ## What's Next
 
-Priority areas ordered by dependency and impact. Phases A through A-sexies are complete.
+Priority areas ordered by dependency and impact. Phases A through A-sexies and C-alpha are complete.
 
 ### A. Solidify the Foundation *(complete)*
 
@@ -108,6 +115,10 @@ Priority areas ordered by dependency and impact. Phases A through A-sexies are c
 
 ~~Wire production observability tools into the work queue so production incidents become work items automatically.~~ Done. Sentry task backend adapter (SNT-1), PagerDuty task backend adapter (PGD-1), and CLI integration for both backends in `list` and `init` commands (OBS-1) all shipped. Friction log auto-commit (FRC-1) also shipped.
 
+### ~~C-alpha. Remote Session Access Foundation~~ *(complete)*
+
+~~Ship the OSS foundation for remote session access: dashboard server, auth, provider pattern, health checks.~~ Done. Orchestrator dashboard server with token auth (H-REM-1), dashboard lifecycle wiring with `--remote` flag (H-REM-2), `SessionUrlProvider` pattern for cloud extensibility, BYOT tunnel model, and `nw doctor` health check command (M-DX-1) all shipped. Architecture: one dashboard per orchestration run (not per-worker servers). OSS provides the server, user brings their own tunnel. Cloud adds managed tunneling + persistent domains via the provider pattern.
+
 ### B. Sandboxed Workers
 
 Workers run in isolated environments. Prevent accidental destructive operations and contain blast radius.
@@ -120,21 +131,15 @@ Tiered approach based on trust level and environment:
 
 Worker snapshots enable pre-commit review of filesystem changes before they're applied to the repo.
 
-### C. Remote Session Access
+### C-beta. Remote Session Access — Cloud Track
 
-Worker sessions accessible via auth-protected web links, posted directly on PRs.
+Cloud-track items building on the C-alpha foundation. These extend the BYOT model with managed infrastructure for teams that want zero-config remote access.
 
-Two access modes depending on what cmux sockets support:
+- **Cloud tunnel provider.** `ninthwave-cloud` implements `SessionUrlProvider` with managed Cloudflare tunnels. Auto-provisions tunnels on `--remote`, tears them down on shutdown.
+- **Persistent domains.** `*.yourproject.ninthwave.sh` subdomains via Cloudflare Access. Authentication via team SSO — the one thin managed layer ninthwave offers.
+- **Interactive mode.** Full TUI or chat-optimized view for remote session interaction, depending on what cmux sockets support. Reviewer jumps into a session from the PR link, remote pair debugging with a stuck worker.
 
-- **Full TUI:** As close to the exact terminal session as possible — observe or interact with the worker in real time.
-- **Chat interface:** Stripped-down, chat-optimized view when full TUI isn't feasible.
-
-Infrastructure:
-
-- **Tunnels:** cloudflared exposes local cmux sessions through Cloudflare tunnels. No port forwarding, no VPN.
-- **Managed domain + auth:** Free `*.yourproject.ninthwave.sh` subdomains with Cloudflare Access for authentication. This is the one thin managed layer ninthwave offers — domain routing and auth only. Compute stays on your machine or your infra.
-
-Use cases: team visibility into worker progress, reviewer jumps into a session from the PR link, remote pair debugging with a stuck worker.
+Use cases: team visibility into worker progress without self-managed tunnels, reviewer jumps into a session from the PR link, remote pair debugging with a stuck worker.
 
 ### D. LLM Supervisor
 
@@ -184,7 +189,7 @@ ninthwave is feature-complete when:
 - GitHub Action bridges CI/CD failures into todo files. *(Achieved: GHA-1.)*
 - Every decomposed work item has a test plan with tracked outcomes. *(Achieved — test plan field required since v0.1.0. Analytics tracks outcomes per run: ANL-1, ANL-2. Cost/token tracking: ANL-4.)*
 - Workers run sandboxed by default. *(Achieved — nono kernel-level sandboxing via Seatbelt/Landlock: SBX-1.)*
-- Remote session links posted on PRs with auth. *(Not yet.)*
+- Remote session links posted on PRs with auth. *(Partially achieved — auth-secured local dashboard with session drill-down shipped: H-REM-1, H-REM-2. Managed domains and automatic PR link posting deferred to cloud product: C-beta.)*
 - Resource management is automatic — memory-aware WIP, no manual tuning. *(Achieved: WIP-1.)*
 - Install to working parallel session in under 10 minutes. *(Achieved — `ninthwave init` with auto-detection ships zero-config onboarding.)*
 
