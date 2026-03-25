@@ -33,6 +33,7 @@ import { fetchOrigin, ffMerge, hasChanges, getStagedFiles, gitAdd, gitCommit, gi
 import { type Multiplexer, getMux } from "../mux.ts";
 import { reconcile } from "./reconcile.ts";
 import { die } from "../output.ts";
+import { shouldEnterInteractive, runInteractiveFlow } from "../interactive.ts";
 import type { TodoItem, StatusSync } from "../types.ts";
 import { ClickUpBackend, resolveClickUpConfig } from "../backends/clickup.ts";
 import { loadConfig } from "../config.ts";
@@ -1763,7 +1764,22 @@ export async function cmdOrchestrate(
 
   // Compute memory-aware WIP default, allow --wip-limit to override
   const computedWipLimit = computeDefaultWipLimit();
-  const wipLimit = wipLimitOverride ?? computedWipLimit;
+  let wipLimit = wipLimitOverride ?? computedWipLimit;
+
+  // Parse TODO items (needed for both interactive and flag-based modes)
+  const allTodos = parseTodos(todosDir, worktreeDir);
+
+  // Interactive mode: no --items and stdin is a TTY
+  if (shouldEnterInteractive(itemIds.length > 0)) {
+    const result = await runInteractiveFlow(allTodos, wipLimit);
+    if (!result) {
+      process.exit(0);
+    }
+    itemIds = result.itemIds;
+    mergeStrategy = result.mergeStrategy;
+    wipLimit = result.wipLimit;
+    supervisorFlag = result.supervisor;
+  }
 
   structuredLog({
     ts: new Date().toISOString(),
@@ -1780,9 +1796,6 @@ export async function cmdOrchestrate(
       "Usage: ninthwave orchestrate --items ID1 ID2 ... [--merge-strategy asap|approved|ask] [--wip-limit N] [--poll-interval SECS] [--daemon] [--watch] [--watch-interval SECS]",
     );
   }
-
-  // Parse TODO items
-  const allTodos = parseTodos(todosDir, worktreeDir);
   const todoMap = new Map<string, TodoItem>();
   for (const todo of allTodos) {
     todoMap.set(todo.id, todo);
