@@ -35,6 +35,7 @@ import { cmdReconcile } from "./commands/reconcile.ts";
 import { cmdAnalytics } from "./commands/analytics.ts";
 import { cmdStop } from "./commands/stop.ts";
 import { cmdMigrateTodos, cmdGenerateTodos } from "./commands/migrate-todos.ts";
+import { shouldOnboard, cmdOnboard } from "./commands/onboard.ts";
 
 // ── Help definitions ─────────────────────────────────────────────────
 
@@ -175,7 +176,30 @@ if (command === "version") {
 }
 
 // Handle --help / -h / no args (before project root — works outside git repos)
-if (!command || command === "--help" || command === "-h") {
+if (command === "--help" || command === "-h") {
+  printHelp();
+  process.exit(0);
+}
+
+// No args: check if this is an uninitialized project → launch onboarding
+if (!command) {
+  // Try to detect project root without dying on failure
+  const gitResult = run("git", [
+    "rev-parse",
+    "--path-format=absolute",
+    "--git-common-dir",
+  ]);
+  const projectRoot =
+    gitResult.exitCode === 0
+      ? gitResult.stdout.replace(/\/.git$/, "")
+      : null;
+
+  if (shouldOnboard(projectRoot)) {
+    await cmdOnboard(projectRoot!);
+    process.exit(0);
+  }
+
+  // Already set up or not in a git repo — show help
   printHelp();
   process.exit(0);
 }
