@@ -78,6 +78,8 @@ export interface OrchestratorItem {
   lastScreenHash?: string;
   /** Number of consecutive polls where screen content was unchanged. */
   unchangedCount?: number;
+  /** Descriptive reason for why this item failed (e.g., "launch-failed: repo not found", "ci-failed: test timeout"). Set on ci-failed/stuck states, cleared on recovery. */
+  failureReason?: string;
 }
 
 export interface OrchestratorConfig {
@@ -457,6 +459,10 @@ export class Orchestrator {
     if (state === "ci-pending" || state === "ci-failed") {
       item.reviewCompleted = false;
     }
+    // Clear failureReason when recovering from a failure state
+    if (state !== "ci-failed" && state !== "stuck") {
+      item.failureReason = undefined;
+    }
   }
 
   /** Transition a single item based on its snapshot. Returns actions. */
@@ -480,7 +486,7 @@ export class Orchestrator {
           this.transition(item, "implementing", snap?.eventTime);
           actions = [];
         } else if (snap?.workerAlive === false) {
-          actions = this.stuckOrRetry(item);
+          actions = this.stuckOrRetry(item, "worker-crashed: session died during launch");
         } else {
           actions = [];
         }
@@ -576,7 +582,7 @@ export class Orchestrator {
     }
     // If worker died without a PR, retry or mark stuck
     if (snap && snap.workerAlive === false && !snap.prNumber) {
-      return this.stuckOrRetry(item);
+      return this.stuckOrRetry(item, "worker-crashed: session died without creating PR");
     }
 
     // Time-based heartbeat: detect workers that are alive but not making progress
@@ -586,13 +592,13 @@ export class Orchestrator {
       // No commits yet — check against launch timeout
       const sinceTransition = nowMs - new Date(item.lastTransition).getTime();
       if (sinceTransition > this.config.launchTimeoutMs) {
-        return this.stuckOrRetry(item);
+        return this.stuckOrRetry(item, "worker-stalled: no commits after launch timeout");
       }
     } else {
       // Has commits — check against activity timeout
       const sinceCommit = nowMs - new Date(commitTime).getTime();
       if (sinceCommit > this.config.activityTimeoutMs) {
-        return this.stuckOrRetry(item);
+        return this.stuckOrRetry(item, "worker-stalled: no new commits after activity timeout");
       }
     }
 
@@ -656,14 +662,16 @@ export class Orchestrator {
    * Check if an item should be retried or permanently stuck.
    * When retries remain, cleans the old worktree and transitions to ready for relaunch.
    * Returns retry action when retrying, empty array when permanently stuck.
+   * @param reason - descriptive failure reason (e.g., "worker-crashed: session died during launch")
    */
-  private stuckOrRetry(item: OrchestratorItem): Action[] {
+  private stuckOrRetry(item: OrchestratorItem, reason?: string): Action[] {
     if (item.retryCount < this.config.maxRetries) {
       item.retryCount++;
       this.transition(item, "ready");
       return [{ type: "retry", itemId: item.id }];
     }
     this.transition(item, "stuck");
+    item.failureReason = reason;
     return [{ type: "clean", itemId: item.id }];
   }
 
@@ -691,6 +699,7 @@ export class Orchestrator {
     if (item.state === "ci-failed") {
       if (item.ciFailCount > this.config.maxCiRetries) {
         this.transition(item, "stuck");
+        item.failureReason = `ci-failed: exceeded max CI retries (${this.config.maxCiRetries})`;
         return [{ type: "clean", itemId: item.id }];
       }
       // If CI recovered, transition and continue processing
@@ -715,6 +724,9 @@ export class Orchestrator {
     if (ciStatus === "fail") {
       this.transition(item, "ci-failed", snap?.eventTime);
       item.ciFailCount++;
+      item.failureReason = snap?.isMergeable === false
+        ? "ci-failed: merge conflicts with main"
+        : "ci-failed: CI checks failed";
 
       // When CI fails due to merge conflicts with main, send a rebase
       // message instead of a generic CI failure. The worker should rebase
@@ -820,6 +832,7 @@ export class Orchestrator {
     if (snap?.ciStatus === "fail") {
       this.transition(item, "ci-failed", snap?.eventTime);
       item.ciFailCount++;
+      item.failureReason = "ci-failed: CI regression during review";
       actions.push({ type: "clean-review", itemId: item.id });
       actions.push({
         type: "notify-ci-failure",
@@ -1022,6 +1035,7 @@ export class Orchestrator {
           return { success: false, error: `Launch failed for ${item.id}, scheduled retry ${item.retryCount}/${this.config.maxRetries}` };
         }
         this.transition(item, "stuck");
+        item.failureReason = `launch-failed: worker launch returned no result for ${item.id}`;
         return { success: false, error: `Launch failed for ${item.id}` };
       }
       item.workspaceRef = result.workspaceRef;
@@ -1034,6 +1048,7 @@ export class Orchestrator {
         return { success: false, error: `${msg}, scheduled retry ${item.retryCount}/${this.config.maxRetries}` };
       }
       this.transition(item, "stuck");
+      item.failureReason = `launch-failed: ${msg}`;
       return { success: false, error: msg };
     }
   }

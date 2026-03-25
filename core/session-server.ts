@@ -81,9 +81,12 @@ function renderDashboard(items: OrchestratorItem[], token: string): string {
         ? `<a href="#" class="pr-link">#${item.prNumber}</a>`
         : "—";
       const sessionLink = `<a href="/session/${encodeURIComponent(item.id)}?token=${encodeURIComponent(token)}" class="session-link">view</a>`;
+      const failureInfo = item.failureReason
+        ? `<br><span class="failure-reason">${escapeHtml(item.failureReason)}</span>`
+        : "";
       return `<tr>
         <td class="id-cell">${escapeHtml(item.id)}</td>
-        <td><span class="state-badge" style="background:${color}">${escapeHtml(item.state)}</span></td>
+        <td><span class="state-badge" style="background:${color}">${escapeHtml(item.state)}</span>${failureInfo}</td>
         <td>${prLink}</td>
         <td>${sessionLink}</td>
         <td class="age-cell">${escapeHtml(age)}</td>
@@ -115,6 +118,7 @@ a{color:#58a6ff;text-decoration:none}
 a:hover{text-decoration:underline}
 .pr-link{color:#8b949e}
 .session-link{color:#58a6ff}
+.failure-reason{color:#f87171;font-size:11px;font-style:italic}
 .empty{text-align:center;padding:32px;color:#8b949e}
 @media(max-width:600px){
   .container{padding:8px}

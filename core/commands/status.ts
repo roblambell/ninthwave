@@ -39,6 +39,8 @@ export interface StatusItem {
   prNumber: number | null;
   ageMs: number; // milliseconds since worktree created
   repoLabel: string;
+  /** Descriptive reason for failure, displayed alongside ci-failed/stuck states. */
+  failureReason?: string;
 }
 
 // ─── Pure formatting functions (testable) ────────────────────────────────────
@@ -160,8 +162,9 @@ export function formatItemRow(item: StatusItem, titleWidth: number): string {
   const age = pad(formatAge(item.ageMs), 8);
   const title = truncateTitle(item.title || item.id, titleWidth);
   const repo = item.repoLabel ? ` ${DIM}[${item.repoLabel}]${RESET}` : "";
+  const reason = item.failureReason ? ` ${DIM}(${item.failureReason})${RESET}` : "";
 
-  return `  ${color}${icon}${RESET} ${id}${color}${label}${RESET} ${pr} ${age} ${title}${repo}`;
+  return `  ${color}${icon}${RESET} ${id}${color}${label}${RESET} ${pr} ${age} ${title}${repo}${reason}`;
 }
 
 /**
@@ -357,6 +360,7 @@ export function daemonStateToStatusItems(state: DaemonState): StatusItem[] {
     prNumber: item.prNumber,
     ageMs: Date.now() - new Date(item.lastTransition).getTime(),
     repoLabel: "",
+    failureReason: item.failureReason,
   }));
 }
 

@@ -25,6 +25,8 @@ export interface DaemonStateItem {
   reviewWorkspaceRef?: string;
   /** Whether this item's review has been completed (approved). */
   reviewCompleted?: boolean;
+  /** Descriptive reason for failure (e.g., "launch-failed: repo not found", "ci-failed: test timeout"). */
+  failureReason?: string;
 }
 
 export interface DaemonState {
@@ -257,6 +259,7 @@ export function serializeOrchestratorState(
       retryCount: item.retryCount,
       ...(item.reviewWorkspaceRef ? { reviewWorkspaceRef: item.reviewWorkspaceRef } : {}),
       ...(item.reviewCompleted ? { reviewCompleted: item.reviewCompleted } : {}),
+      ...(item.failureReason ? { failureReason: item.failureReason } : {}),
     })),
   };
 }
