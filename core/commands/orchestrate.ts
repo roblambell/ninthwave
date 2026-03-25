@@ -1172,6 +1172,7 @@ export async function cmdOrchestrate(
   let frictionDir: string | undefined;
   let daemonMode = false;
   let isDaemonChild = false;
+  let noSandbox = false;
 
   // Parse args
   let i = 0;
@@ -1222,6 +1223,10 @@ export async function cmdOrchestrate(
         i += 2;
         break;
       }
+      case "--no-sandbox":
+        noSandbox = true;
+        i += 1;
+        break;
       case "--daemon":
         daemonMode = true;
         i += 1;
@@ -1320,7 +1325,7 @@ export async function cmdOrchestrate(
   const ctx: ExecutionContext = { projectRoot, worktreeDir, todosDir, aiTool };
   const actionDeps: OrchestratorDeps = {
     launchSingleItem: (item, todosDir, worktreeDir, projectRoot, aiTool) =>
-      launchSingleItem(item, todosDir, worktreeDir, projectRoot, aiTool, mux),
+      launchSingleItem(item, todosDir, worktreeDir, projectRoot, aiTool, mux, { noSandbox }),
     cleanSingleWorktree,
     prMerge: (repoRoot, prNumber) => prMerge(repoRoot, prNumber),
     prComment: (repoRoot, prNumber, body) => prComment(repoRoot, prNumber, body),

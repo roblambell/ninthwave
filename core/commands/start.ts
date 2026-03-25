@@ -27,6 +27,7 @@ import {
 } from "../cross-repo.ts";
 import { cmdConflicts } from "./conflicts.ts";
 import { readTodo } from "../todo-files.ts";
+import { wrapWithSandbox } from "../sandbox.ts";
 import type { TodoItem } from "../types.ts";
 
 /**
@@ -98,6 +99,7 @@ function launchAiSession(
   safeTitle: string,
   promptFile: string,
   mux: Multiplexer,
+  options: { noSandbox?: boolean; projectRoot?: string } = {},
 ): string | null {
   let cmd = "";
   let initialPrompt = "Start";
@@ -118,6 +120,13 @@ function launchAiSession(
       die(
         `Unknown AI tool: ${tool}. Ensure claude, opencode, or copilot is in your PATH.`,
       );
+  }
+
+  // Wrap with nono sandbox if available and not disabled
+  if (options.projectRoot) {
+    cmd = wrapWithSandbox(cmd, worktreePath, options.projectRoot, {
+      disabled: options.noSandbox,
+    });
   }
 
   const wsRef = mux.launchWorkspace(worktreePath, cmd, id);
@@ -159,6 +168,7 @@ export function launchSingleItem(
   projectRoot: string,
   aiTool: string,
   mux: Multiplexer = getMux(),
+  options: { noSandbox?: boolean } = {},
 ): LaunchResult | null {
   let targetRepo: string;
   try {
@@ -266,6 +276,7 @@ ${todoText}`;
       safeTitle,
       promptFile,
       mux,
+      { noSandbox: options.noSandbox, projectRoot },
     );
     if (!workspaceRef) return null;
     return { worktreePath, workspaceRef };
@@ -286,8 +297,9 @@ export function cmdStart(
   projectRoot: string,
   muxOverride?: Multiplexer,
 ): void {
-  // Parse --mux flag before treating remaining args as IDs
+  // Parse flags before treating remaining args as IDs
   const ids: string[] = [];
+  let noSandbox = false;
   for (let i = 0; i < args.length; i++) {
     if (args[i] === "--mux") {
       const value = args[i + 1];
@@ -296,6 +308,8 @@ export function cmdStart(
       }
       process.env.NINTHWAVE_MUX = value;
       i++; // skip value
+    } else if (args[i] === "--no-sandbox") {
+      noSandbox = true;
     } else {
       ids.push(args[i]!);
     }
@@ -386,7 +400,7 @@ export function cmdStart(
 
   for (const id of ids) {
     const item = itemMap.get(id)!;
-    launchSingleItem(item, todosDir, worktreeDir, projectRoot, aiTool, mux);
+    launchSingleItem(item, todosDir, worktreeDir, projectRoot, aiTool, mux, { noSandbox });
     launched.push(id);
   }
 
