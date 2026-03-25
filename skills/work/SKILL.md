@@ -211,7 +211,7 @@ Then run `ninthwave list --ready` to see if any items were unblocked by the batc
 
 If in dogfooding mode:
 
-1. Read friction files from `.ninthwave/friction/` directory. Each file is an individual friction observation.
+1. Read friction files from `.ninthwave/friction/` directory (excluding the `processed/` subdirectory). Each file is an individual friction observation.
 2. Identify any **new actionable entries** — friction items that don't already have corresponding TODOs in `.ninthwave/todos/`.
 3. If actionable entries exist, present them to the user:
 
@@ -221,6 +221,28 @@ If in dogfooding mode:
    - C) Show entries — display the friction entries before deciding
 
    If the user chooses A, use the `/decompose` skill (or `ninthwave decompose`) to break friction entries into TODOs. The newly created items will appear in the next `list --ready` call.
+
+4. **Mark processed friction entries:** After reviewing and decomposing friction entries (whether the user chose A or B), move all reviewed friction files to `.ninthwave/friction/processed/`. This prevents re-reviewing the same entries in the next loop iteration. The original files are preserved in `processed/` for audit trail purposes.
+
+   ```bash
+   mkdir -p .ninthwave/friction/processed
+   # Move all top-level friction files (not directories) to processed/
+   for f in .ninthwave/friction/*.md; do
+     [ -f "$f" ] && mv "$f" .ninthwave/friction/processed/
+   done
+   ```
+
+5. **Commit friction artifacts:** Commit any new or moved friction files and decomposed TODOs so they are not lost between loop iterations. Only commit if there are staged changes — skip if nothing new.
+
+   ```bash
+   git add .ninthwave/friction/ .ninthwave/todos/
+   # Only commit if there are staged changes
+   if ! git diff --cached --quiet; then
+     git commit -m "chore: commit friction entries and decomposed TODOs"
+   fi
+   ```
+
+   > **Why commit here?** Without this step, friction files and newly decomposed TODOs accumulate uncommitted. If the session is interrupted or the orchestrator restarts, uncommitted friction work is lost. Committing ensures the friction-to-TODO pipeline is durable.
 
 If **not** in dogfooding mode, skip this step entirely.
 
