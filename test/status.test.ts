@@ -4,6 +4,7 @@
 import { describe, it, expect, vi } from "vitest";
 import {
   stateColor,
+  stateIcon,
   stateLabel,
   truncateTitle,
   formatAge,
@@ -27,9 +28,9 @@ import { mkdtempSync, mkdirSync, writeFileSync, rmSync } from "fs";
 import { join } from "path";
 import { tmpdir } from "os";
 
-// Strip ANSI escape codes for content assertions
+// Strip ANSI escape codes and CSI sequences for content assertions
 function stripAnsi(s: string): string {
-  return s.replace(/\x1b\[[0-9;]*m/g, "");
+  return s.replace(/\x1b\[[0-9;]*[A-Za-z]/g, "");
 }
 
 describe("stateColor", () => {
@@ -66,6 +67,58 @@ describe("stateLabel", () => {
     expect(stateLabel("pr-open")).toBe("PR Open");
     expect(stateLabel("in-progress")).toBe("In Progress");
     expect(stateLabel("queued")).toBe("Queued");
+  });
+});
+
+describe("stateIcon", () => {
+  it("returns a single-character icon for each state", () => {
+    const states: ItemState[] = [
+      "merged",
+      "implementing",
+      "ci-failed",
+      "ci-pending",
+      "review",
+      "pr-open",
+      "in-progress",
+      "queued",
+    ];
+    for (const state of states) {
+      const icon = stateIcon(state);
+      expect(typeof icon).toBe("string");
+      expect(icon.length).toBe(1);
+    }
+  });
+
+  it("returns checkmark for merged", () => {
+    expect(stateIcon("merged")).toBe("✓");
+  });
+
+  it("returns play triangle for implementing", () => {
+    expect(stateIcon("implementing")).toBe("▸");
+  });
+
+  it("returns X for ci-failed", () => {
+    expect(stateIcon("ci-failed")).toBe("✗");
+  });
+
+  it("returns dotted circle for ci-pending", () => {
+    expect(stateIcon("ci-pending")).toBe("◌");
+  });
+
+  it("returns filled circle for review", () => {
+    expect(stateIcon("review")).toBe("●");
+  });
+
+  it("returns empty circle for pr-open", () => {
+    expect(stateIcon("pr-open")).toBe("○");
+  });
+
+  it("returns play triangle for in-progress", () => {
+    expect(stateIcon("in-progress")).toBe("▸");
+  });
+
+  it("returns middle dot for queued", () => {
+    expect(stateIcon("queued")).toBe("·");
   });
 });
 
@@ -154,6 +207,20 @@ describe("formatItemRow", () => {
     ageMs: 2 * 3600000 + 15 * 60000,
     repoLabel: "",
   };
+
+  it("includes the state icon", () => {
+    const row = stripAnsi(formatItemRow(baseItem, 30));
+    expect(row).toContain("▸"); // implementing icon
+  });
+
+  it("includes the correct icon per state", () => {
+    const mergedItem = { ...baseItem, state: "merged" as ItemState };
+    expect(stripAnsi(formatItemRow(mergedItem, 30))).toContain("✓");
+    const failedItem = { ...baseItem, state: "ci-failed" as ItemState };
+    expect(stripAnsi(formatItemRow(failedItem, 30))).toContain("✗");
+    const queuedItem = { ...baseItem, state: "queued" as ItemState };
+    expect(stripAnsi(formatItemRow(queuedItem, 30))).toContain("·");
+  });
 
   it("includes the item ID", () => {
     const row = formatItemRow(baseItem, 30);
@@ -348,7 +415,7 @@ describe("formatStatusTable", () => {
     // Force narrow 60-column terminal
     const output = stripAnsi(formatStatusTable(items, 60));
     // Title should be truncated - original is 71 chars, with 60 col width
-    // titleWidth = max(10, 60 - 46) = 14
+    // titleWidth = max(10, 60 - 48) = 12 (48 = fixed width including icon column)
     const lines = output.split("\n");
     const itemLine = lines.find((l) => l.includes("A-1"));
     expect(itemLine).toBeDefined();
@@ -361,7 +428,7 @@ describe("formatStatusTable", () => {
 
   it("is readable on standard 80-column terminal", () => {
     const items = [
-      makeItem("H-STU-1", "implementing", "Rewrite status command", 42),
+      makeItem("H-STU-1", "implementing", "Rewrite status", 42),
       makeItem("H-MUX-2", "merged", "Add tmux adapter", 41),
       makeItem("M-CI-3", "ci-failed", "Fix CI timeout", 40),
     ];
@@ -895,6 +962,165 @@ describe("formatBatchProgress with queued", () => {
     const failIdx = line.indexOf("ci failed");
     const queueIdx = line.indexOf("queued");
     expect(failIdx).toBeLessThan(queueIdx);
+  });
+});
+
+// ─── Queue size rendering ─────────────────────────────────────────────────────
+
+describe("formatStatusTable with various queue sizes", () => {
+  it("renders correctly with 1 item", () => {
+    const items = [makeItem("A-1", "implementing", "Solo item")];
+    const output = stripAnsi(formatStatusTable(items, 80));
+    expect(output).toContain("A-1");
+    expect(output).toContain("Implementing");
+    expect(output).toContain("▸");
+    expect(output).not.toContain("Queue");
+  });
+
+  it("renders correctly with 3 items (mixed states)", () => {
+    const items = [
+      makeItem("A-1", "implementing", "Active work"),
+      makeItem("A-2", "merged", "Done item", 42),
+      makeItem("Q-1", "queued", "Waiting"),
+    ];
+    const output = stripAnsi(formatStatusTable(items, 80));
+    expect(output).toContain("A-1");
+    expect(output).toContain("A-2");
+    expect(output).toContain("Q-1");
+    expect(output).toContain("Queue (1 waiting)");
+  });
+
+  it("renders correctly with 6+ items (full batch)", () => {
+    const items = [
+      makeItem("A-1", "merged", "Done 1", 10),
+      makeItem("A-2", "merged", "Done 2", 11),
+      makeItem("A-3", "implementing", "Active 1"),
+      makeItem("A-4", "ci-pending", "CI check", 12),
+      makeItem("Q-1", "queued", "Waiting 1"),
+      makeItem("Q-2", "queued", "Waiting 2"),
+      makeItem("Q-3", "queued", "Waiting 3"),
+    ];
+    const output = stripAnsi(formatStatusTable(items, 100));
+    // All items should appear
+    for (const item of items) {
+      expect(output).toContain(item.id);
+    }
+    // Queue section should show 3 waiting
+    expect(output).toContain("Queue (3 waiting)");
+    // Progress should show all states
+    expect(output).toContain("2 merged");
+    expect(output).toContain("1 implementing");
+    expect(output).toContain("3 queued");
+    // Total should show all
+    expect(output).toContain("7 items");
+  });
+});
+
+// ─── Column alignment at different terminal widths ────────────────────────────
+
+describe("column alignment", () => {
+  const items = [
+    makeItem("H-STU-1", "implementing", "Short title", 42),
+    makeItem("LONG-ID-999", "ci-failed", "Another title", 100),
+    makeItem("Q-1", "queued", "Queued item"),
+  ];
+
+  it("aligns columns at 60-column width", () => {
+    const output = stripAnsi(formatStatusTable(items, 60));
+    const lines = output.split("\n").filter((l) => l.includes("H-STU-1") || l.includes("LONG-ID-999"));
+    // Both active item rows should have the same structure
+    expect(lines.length).toBe(2);
+    for (const line of lines) {
+      expect(line.length).toBeLessThanOrEqual(60);
+    }
+  });
+
+  it("aligns columns at 120-column width", () => {
+    const output = stripAnsi(formatStatusTable(items, 120));
+    const lines = output.split("\n").filter((l) => l.includes("H-STU-1") || l.includes("LONG-ID-999"));
+    expect(lines.length).toBe(2);
+    for (const line of lines) {
+      expect(line.length).toBeLessThanOrEqual(120);
+    }
+  });
+
+  it("aligns columns at minimum 50-column width", () => {
+    const output = stripAnsi(formatStatusTable(items, 50));
+    const lines = output.split("\n");
+    for (const line of lines) {
+      expect(line.length).toBeLessThanOrEqual(80); // separator clamps at 78+2
+    }
+  });
+
+  it("header and data rows have consistent column positions", () => {
+    const singleItem = [makeItem("TEST-1", "implementing", "Title here", 5)];
+    const output = stripAnsi(formatStatusTable(singleItem, 80));
+    const lines = output.split("\n");
+    const headerLine = lines.find((l) => l.includes("ID") && l.includes("STATE"));
+    const dataLine = lines.find((l) => l.includes("TEST-1"));
+    expect(headerLine).toBeDefined();
+    expect(dataLine).toBeDefined();
+    // "ID" in header should start at the same position as "TEST-1" in data
+    // Both should start at position 4 (2 indent + 2 icon space)
+    const headerIdPos = headerLine!.indexOf("ID");
+    const dataIdPos = dataLine!.indexOf("TEST-1");
+    expect(headerIdPos).toBe(dataIdPos);
+  });
+});
+
+// ─── State indicator rendering for each state ────────────────────────────────
+
+describe("state indicators in formatItemRow", () => {
+  const allStates: Array<{ state: ItemState; icon: string; label: string }> = [
+    { state: "merged", icon: "✓", label: "Merged" },
+    { state: "implementing", icon: "▸", label: "Implementing" },
+    { state: "ci-failed", icon: "✗", label: "CI Failed" },
+    { state: "ci-pending", icon: "◌", label: "CI Pending" },
+    { state: "review", icon: "●", label: "In Review" },
+    { state: "pr-open", icon: "○", label: "PR Open" },
+    { state: "in-progress", icon: "▸", label: "In Progress" },
+    { state: "queued", icon: "·", label: "Queued" },
+  ];
+
+  for (const { state, icon, label } of allStates) {
+    it(`renders ${state} with icon "${icon}" and label "${label}"`, () => {
+      const item = makeItem("T-1", state, `Test ${state}`);
+      const row = stripAnsi(formatItemRow(item, 30));
+      expect(row).toContain(icon);
+      expect(row).toContain(label);
+    });
+  }
+});
+
+// ─── Watch mode line clearing ─────────────────────────────────────────────────
+
+describe("cmdStatusWatch line clearing", () => {
+  it("includes clear-to-end-of-line sequences to prevent garbled output", async () => {
+    const controller = new AbortController();
+
+    const writeSpy = vi.spyOn(process.stdout, "write").mockImplementation(() => true);
+
+    const watchPromise = cmdStatusWatch(
+      "/nonexistent",
+      "/nonexistent",
+      10,
+      controller.signal,
+    );
+
+    await new Promise<void>((resolve) => setTimeout(resolve, 30));
+    controller.abort();
+    await watchPromise;
+
+    const allWrites = writeSpy.mock.calls.map((call) => String(call[0]));
+
+    // Content writes should include \x1B[K (clear to end of line)
+    const contentWrites = allWrites.filter(
+      (s) => s !== "\x1B[H" && s !== "\x1B[J",
+    );
+    const hasLineClear = contentWrites.some((s) => s.includes("\x1B[K"));
+    expect(hasLineClear).toBe(true);
+
+    writeSpy.mockRestore();
   });
 });
 

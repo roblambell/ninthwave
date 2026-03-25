@@ -1453,23 +1453,23 @@ export async function cmdOrchestrate(
   // Analytics directory — always enabled, writes to .ninthwave/analytics/
   const analyticsDir = join(projectRoot, ".ninthwave", "analytics");
 
-  // Daemon state persistence: serialize state each poll cycle when running as daemon child.
+  // State persistence: serialize state each poll cycle so the status pane can display all items.
+  // Written in both daemon and interactive mode — the status pane reads this file to show
+  // the full queue including queued items that don't have worktrees yet.
   // statusPaneRef is captured by reference so the closure always persists the current value.
   const daemonStartedAt = new Date().toISOString();
   let statusPaneRef: string | null = null;
-  const onPollComplete = isDaemonChild
-    ? (items: OrchestratorItem[]) => {
-        try {
-          const state = serializeOrchestratorState(items, process.pid, daemonStartedAt, {
-            statusPaneRef,
-            wipLimit,
-          });
-          writeStateFile(projectRoot, state);
-        } catch {
-          // Non-fatal — state persistence failure shouldn't block the orchestrator
-        }
-      }
-    : undefined;
+  const onPollComplete = (items: OrchestratorItem[]) => {
+    try {
+      const state = serializeOrchestratorState(items, process.pid, daemonStartedAt, {
+        statusPaneRef,
+        wipLimit,
+      });
+      writeStateFile(projectRoot, state);
+    } catch {
+      // Non-fatal — state persistence failure shouldn't block the orchestrator
+    }
+  };
 
   if (isDaemonChild) {
     structuredLog({
@@ -1592,10 +1592,12 @@ export async function cmdOrchestrate(
       });
     }
 
-    // Clean up daemon files when running as daemon child
+    // Always clean up state file on exit (written in both daemon and interactive mode)
+    cleanStateFile(projectRoot);
+
+    // Clean up daemon-specific files when running as daemon child
     if (isDaemonChild) {
       cleanPidFile(projectRoot);
-      cleanStateFile(projectRoot);
       structuredLog({
         ts: new Date().toISOString(),
         level: "info",

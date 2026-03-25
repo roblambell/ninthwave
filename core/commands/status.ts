@@ -65,6 +65,29 @@ export function stateColor(state: ItemState): string {
   }
 }
 
+/** Map state to a single-character unicode indicator. */
+export function stateIcon(state: ItemState): string {
+  switch (state) {
+    case "merged":
+      return "✓";
+    case "implementing":
+    case "in-progress":
+      return "▸";
+    case "ci-failed":
+      return "✗";
+    case "ci-pending":
+      return "◌";
+    case "review":
+      return "●";
+    case "pr-open":
+      return "○";
+    case "queued":
+      return "·";
+    default:
+      return " ";
+  }
+}
+
 /** Map state to human-readable label. */
 export function stateLabel(state: ItemState): string {
   switch (state) {
@@ -129,6 +152,7 @@ export function pad(s: string, width: number): string {
  * Returns a string with ANSI color codes.
  */
 export function formatItemRow(item: StatusItem, titleWidth: number): string {
+  const icon = stateIcon(item.state);
   const id = pad(item.id, 12);
   const color = stateColor(item.state);
   const label = pad(stateLabel(item.state), 14);
@@ -137,7 +161,7 @@ export function formatItemRow(item: StatusItem, titleWidth: number): string {
   const title = truncateTitle(item.title || item.id, titleWidth);
   const repo = item.repoLabel ? ` ${DIM}[${item.repoLabel}]${RESET}` : "";
 
-  return `  ${id}${color}${label}${RESET} ${pr} ${age} ${title}${repo}`;
+  return `  ${color}${icon}${RESET} ${id}${color}${label}${RESET} ${pr} ${age} ${title}${repo}`;
 }
 
 /**
@@ -199,6 +223,7 @@ export function formatSummary(items: StatusItem[]): string {
  * Returns a string with DIM applied to the entire row.
  */
 export function formatQueuedItemRow(item: StatusItem, titleWidth: number): string {
+  const icon = stateIcon(item.state);
   const id = pad(item.id, 12);
   const label = pad(stateLabel(item.state), 14);
   const pr = item.prNumber ? pad(`#${item.prNumber}`, 7) : pad("-", 7);
@@ -206,7 +231,7 @@ export function formatQueuedItemRow(item: StatusItem, titleWidth: number): strin
   const title = truncateTitle(item.title || item.id, titleWidth);
   const repo = item.repoLabel ? ` [${item.repoLabel}]` : "";
 
-  return `  ${DIM}${id}${label} ${pr} ${age} ${title}${repo}${RESET}`;
+  return `  ${DIM}${icon} ${id}${label} ${pr} ${age} ${title}${repo}${RESET}`;
 }
 
 /**
@@ -238,13 +263,13 @@ export function formatStatusTable(
   const queuedItems = items.filter((i) => i.state === "queued");
   const mergedItems = items.filter((i) => i.state === "merged");
 
-  // Column widths: 2 indent + 12 ID + 14 state + 1 + 7 PR + 1 + 8 age + 1 + title
-  // = 46 fixed + title
-  const fixedWidth = 46;
+  // Column widths: 2 indent + 2 icon+space + 12 ID + 14 state + 1 + 7 PR + 1 + 8 age + 1 + title
+  // = 48 fixed + title
+  const fixedWidth = 48;
   const titleWidth = Math.max(10, termWidth - fixedWidth);
 
-  // Header
-  const header = `  ${DIM}${pad("ID", 12)}${pad("STATE", 14)} ${pad("PR", 7)} ${pad("AGE", 8)} TITLE${RESET}`;
+  // Header (2-space placeholder for icon column)
+  const header = `  ${DIM}  ${pad("ID", 12)}${pad("STATE", 14)} ${pad("PR", 7)} ${pad("AGE", 8)} TITLE${RESET}`;
   lines.push(header);
 
   // Separator
@@ -517,8 +542,11 @@ export async function cmdStatusWatch(
   while (!signal?.aborted) {
     // Move cursor to top-left (no full-screen clear — avoids flicker)
     process.stdout.write("\x1B[H");
-    // Write status content
-    process.stdout.write(renderStatus(worktreeDir, projectRoot));
+    // Write status content with clear-to-end-of-line (\x1B[K) after each line
+    // to prevent stale characters from previous renders bleeding through
+    // when lines become shorter between refreshes
+    const content = renderStatus(worktreeDir, projectRoot);
+    process.stdout.write(content.replace(/\n/g, "\x1B[K\n") + "\x1B[K");
     // Clear from cursor to end of screen (removes stale trailing lines)
     process.stdout.write("\x1B[J");
     await new Promise<void>((resolve) => {
@@ -546,18 +574,27 @@ export async function cmdStatusWatch(
 export function renderStatus(worktreeDir: string, projectRoot: string): string {
   const lines: string[] = [];
 
-  // Fast path: when daemon is running, read state file (no GitHub API calls)
+  // Fast path: read state file (written by orchestrator in both daemon and interactive mode)
+  const daemonState = readStateFile(projectRoot);
   const daemonPid = isDaemonRunning(projectRoot);
-  if (daemonPid !== null) {
-    const daemonState = readStateFile(projectRoot);
-    if (daemonState) {
+
+  if (daemonState) {
+    const updatedMs = new Date(daemonState.updatedAt).getTime();
+    const stateAgeMs = Date.now() - updatedMs;
+    const isFresh = stateAgeMs < 60_000; // Consider fresh if updated within 60 seconds
+
+    if (isFresh || daemonPid !== null) {
       const items = daemonStateToStatusItems(daemonState);
       const termWidth = getTerminalWidth();
       lines.push(formatStatusTable(items, termWidth, daemonState.wipLimit));
-      lines.push(`\n  ${DIM}Daemon running (PID ${daemonPid}), updated ${daemonState.updatedAt}${RESET}`);
+      const agoStr = formatAge(stateAgeMs) + " ago";
+      if (daemonPid !== null) {
+        lines.push(`\n  ${DIM}Daemon running (PID ${daemonPid}), updated ${agoStr}${RESET}`);
+      } else {
+        lines.push(`\n  ${DIM}Orchestrating, updated ${agoStr}${RESET}`);
+      }
       return lines.join("\n") + "\n";
     }
-    // State file missing but daemon running — fall through to normal scan
   }
 
   if (!existsSync(worktreeDir)) {
