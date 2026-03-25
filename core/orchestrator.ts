@@ -768,39 +768,45 @@ export class Orchestrator {
       }
     }
 
-    // Post-merge conflict detection: check all in-flight sibling PRs for merge conflicts
-    if (deps.checkPrMergeable) {
-      for (const other of this.getAllItems()) {
-        if (other.id === item.id) continue;
-        if (!WIP_STATES.has(other.state)) continue;
-        if (!other.prNumber) continue;
+    // Post-merge daemon-rebase: proactively rebase ALL in-flight sibling PRs.
+    // This eliminates most conflicts before workers notice, reducing CI churn.
+    for (const other of this.getAllItems()) {
+      if (other.id === item.id) continue;
+      if (!WIP_STATES.has(other.state)) continue;
+      if (!other.prNumber) continue;
 
+      const otherBranch = `todo/${other.id}`;
+      const otherWorktreePath = join(ctx.worktreeDir, `todo-${other.id}`);
+
+      // Try daemon-rebase first for all siblings
+      let daemonSuccess = false;
+      if (deps.daemonRebase) {
+        try {
+          daemonSuccess = deps.daemonRebase(otherWorktreePath, otherBranch);
+        } catch {
+          // Fall through to conflict check
+        }
+      }
+
+      if (daemonSuccess) continue; // CI re-runs automatically on force-push
+
+      // Daemon rebase failed or unavailable — check if actually conflicting
+      if (deps.checkPrMergeable) {
         const mergeable = deps.checkPrMergeable(ctx.projectRoot, other.prNumber);
         if (!mergeable) {
+          // Actually conflicting — send worker rebase message as fallback
           if (other.workspaceRef) {
             deps.sendMessage(
               other.workspaceRef,
               `Sibling PR #${other.prNumber} has merge conflicts after ${item.id} was merged. Please rebase onto latest main.`,
             );
           } else {
-            // Worker is dead — try daemon-side rebase
-            const otherBranch = `todo/${other.id}`;
-            const otherWorktreePath = join(ctx.worktreeDir, `todo-${other.id}`);
-            let daemonSuccess = false;
-            if (deps.daemonRebase) {
-              try {
-                daemonSuccess = deps.daemonRebase(otherWorktreePath, otherBranch);
-              } catch {
-                // Fall through to warning
-              }
-            }
-            if (!daemonSuccess) {
-              deps.warn?.(
-                `[Orchestrator] PR #${other.prNumber} (${other.id}) has merge conflicts but daemon rebase failed and worker has no workspace reference. Manual rebase needed.`,
-              );
-            }
+            deps.warn?.(
+              `[Orchestrator] PR #${other.prNumber} (${other.id}) has merge conflicts but daemon rebase failed and worker has no workspace reference. Manual rebase needed.`,
+            );
           }
         }
+        // Not conflicting — skip, no action needed
       }
     }
 
