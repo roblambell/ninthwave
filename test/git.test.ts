@@ -23,6 +23,7 @@ import {
   gitCommit,
   hasChanges,
   rebaseOnto,
+  REMOTE_REF_GONE_RE,
 } from "../core/git.ts";
 
 /** Helper: run a git command in a temp repo via child_process (for setup). */
@@ -433,6 +434,115 @@ describe("git.ts error handling", () => {
       expect(result.exitCode).not.toBe(0);
       expect(result.stderr).not.toContain("remote ref does not exist");
       // deleteRemoteBranch would throw for this case (genuine failure)
+    });
+  });
+
+  // ── REMOTE_REF_GONE_RE — regex pattern coverage ────────────────────────
+  // Exported from git.ts for testability. Verifies all known stderr formats
+  // are matched, including edge cases across git versions and transports.
+
+  describe("REMOTE_REF_GONE_RE matches known git stderr formats", () => {
+    // Standard git 2.x format (local bare remote)
+    it("matches 'remote ref does not exist' (standard format)", () => {
+      const stderr =
+        "error: unable to delete 'todo/H-RVW-4': remote ref does not exist\n" +
+        "error: failed to push some refs to '../repo-bare'";
+      expect(REMOTE_REF_GONE_RE.test(stderr)).toBe(true);
+    });
+
+    // GitHub SSH format
+    it("matches GitHub SSH stderr format", () => {
+      const stderr =
+        "error: unable to delete 'todo/H-RVW-4': remote ref does not exist\n" +
+        "error: failed to push some refs to 'git@github.com:org/repo.git'";
+      expect(REMOTE_REF_GONE_RE.test(stderr)).toBe(true);
+    });
+
+    // GitHub HTTPS format
+    it("matches GitHub HTTPS stderr format", () => {
+      const stderr =
+        "error: unable to delete 'todo/H-RVW-4': remote ref does not exist\n" +
+        "error: failed to push some refs to 'https://github.com/org/repo.git'";
+      expect(REMOTE_REF_GONE_RE.test(stderr)).toBe(true);
+    });
+
+    // Case variation (defensive)
+    it("matches case-insensitive variants", () => {
+      expect(
+        REMOTE_REF_GONE_RE.test("Remote ref does not exist"),
+      ).toBe(true);
+      expect(
+        REMOTE_REF_GONE_RE.test("REMOTE REF DOES NOT EXIST"),
+      ).toBe(true);
+    });
+
+    // "unable to delete" prefix variant
+    it("matches 'unable to delete' with remote ref context", () => {
+      expect(
+        REMOTE_REF_GONE_RE.test(
+          "error: unable to delete 'feature/branch': remote ref does not exist",
+        ),
+      ).toBe(true);
+    });
+
+    // Hypothetical "not found" variant for future git versions
+    it("matches 'remote ref not found' variant", () => {
+      expect(
+        REMOTE_REF_GONE_RE.test("error: remote ref 'branch' not found"),
+      ).toBe(true);
+    });
+
+    // Ensure genuine errors are NOT matched
+    it("does NOT match generic push failures", () => {
+      expect(
+        REMOTE_REF_GONE_RE.test(
+          "error: failed to push some refs to 'origin'",
+        ),
+      ).toBe(false);
+    });
+
+    it("does NOT match authentication errors", () => {
+      expect(
+        REMOTE_REF_GONE_RE.test(
+          "fatal: Authentication failed for 'https://github.com/org/repo.git'",
+        ),
+      ).toBe(false);
+    });
+
+    it("does NOT match network errors", () => {
+      expect(
+        REMOTE_REF_GONE_RE.test(
+          "fatal: unable to access 'https://github.com/org/repo.git': Could not resolve host: github.com",
+        ),
+      ).toBe(false);
+    });
+  });
+
+  // ── deleteRemoteBranch() captures actual git stderr format ────────────
+  // Verifies the exact stderr from the current git version is handled.
+
+  describe("deleteRemoteBranch() actual stderr format capture", () => {
+    it("captures stderr containing 'remote ref does not exist' from current git version", () => {
+      const repo = setupTempRepo();
+      initWithCommit(repo);
+      const bare = `${repo}-bare`;
+      spawnSync("git", ["clone", "--bare", repo, bare], { stdio: "pipe" });
+      gitSetup(repo, "remote", "add", "origin", bare);
+
+      // Push to delete a nonexistent branch — captures the actual stderr
+      const result = run("git", [
+        "-C",
+        repo,
+        "push",
+        "origin",
+        "--delete",
+        "already-deleted-branch",
+      ]);
+      expect(result.exitCode).not.toBe(0);
+
+      // Verify our regex matches the exact stderr from the current git version
+      const output = `${result.stderr}\n${result.stdout}`;
+      expect(REMOTE_REF_GONE_RE.test(output)).toBe(true);
     });
   });
 
