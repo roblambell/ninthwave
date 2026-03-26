@@ -1,7 +1,7 @@
 // start command: launch parallel AI coding sessions for TODO items.
 
-import { existsSync, mkdirSync, readFileSync, writeFileSync, unlinkSync } from "fs";
-import { join, basename } from "path";
+import { existsSync, mkdirSync, readFileSync, writeFileSync, unlinkSync, copyFileSync } from "fs";
+import { join, basename, dirname } from "path";
 import { tmpdir } from "os";
 import { parseTodos } from "../parser.ts";
 import { die, warn, info, GREEN, RESET } from "../output.ts";
@@ -45,6 +45,60 @@ export function sanitizeTitle(title: string): string {
 export interface LaunchResult {
   worktreePath: string;
   workspaceRef: string;
+}
+
+/** Agent files to seed into worktrees (matches setup.ts AGENT_SOURCES). */
+const AGENT_FILES: { source: string; targets: { dir: string; suffix: string }[] }[] = [
+  {
+    source: "todo-worker.md",
+    targets: [
+      { dir: ".claude/agents", suffix: ".md" },
+      { dir: ".opencode/agents", suffix: ".md" },
+      { dir: ".github/agents", suffix: ".agent.md" },
+    ],
+  },
+  {
+    source: "review-worker.md",
+    targets: [
+      { dir: ".claude/agents", suffix: ".md" },
+      { dir: ".opencode/agents", suffix: ".md" },
+      { dir: ".github/agents", suffix: ".agent.md" },
+    ],
+  },
+];
+
+/**
+ * Seed agent files into a worktree if they don't already exist.
+ * Copies from the hub repo's agents/ directory. Returns the list of
+ * relative paths that were seeded (so the worker can commit them).
+ */
+export function seedAgentFiles(worktreePath: string, hubRoot: string): string[] {
+  const seeded: string[] = [];
+
+  for (const agent of AGENT_FILES) {
+    const sourcePath = join(hubRoot, "agents", agent.source);
+    // Resolve symlinks — the hub might have a symlink in .claude/agents/ pointing to agents/
+    if (!existsSync(sourcePath)) continue;
+    const sourceContent = readFileSync(sourcePath, "utf-8");
+    const baseName = agent.source.replace(/\.md$/, "");
+
+    for (const target of agent.targets) {
+      const filename = target.suffix === ".agent.md" ? `${baseName}.agent.md` : agent.source;
+      const destPath = join(worktreePath, target.dir, filename);
+
+      if (existsSync(destPath)) continue;
+
+      mkdirSync(dirname(destPath), { recursive: true });
+      writeFileSync(destPath, sourceContent);
+      seeded.push(join(target.dir, filename));
+    }
+  }
+
+  if (seeded.length > 0) {
+    info(`Seeded agent files into worktree: ${seeded.join(", ")}`);
+  }
+
+  return seeded;
 }
 
 /**
@@ -282,6 +336,9 @@ export function launchSingleItem(
     writeCrossRepoIndex(crossRepoIndex, item.id, targetRepo, worktreePath);
   }
 
+  // Seed agent files into worktree if missing (cross-repo or first-time setup)
+  const seededAgents = seedAgentFiles(worktreePath, projectRoot);
+
   // Allocate partition
   const partitionDir = join(worktreeDir, ".partitions");
   let partition = getPartitionFor(partitionDir, item.id);
@@ -298,11 +355,14 @@ export function launchSingleItem(
   // Build system prompt
   const todoText = extractTodoText(todosDir, item.id);
   const baseBranchLine = options.baseBranch ? `BASE_BRANCH: ${options.baseBranch}\n` : "";
+  const seededAgentsLine = seededAgents.length > 0
+    ? `\nNOTE: The following files were seeded into this worktree by ninthwave and should be included in your first commit: ${seededAgents.join(", ")}\n`
+    : "";
   const systemPrompt = `YOUR_TODO_ID: ${item.id}
 YOUR_PARTITION: ${partition}
 PROJECT_ROOT: ${targetRepo}
 HUB_ROOT: ${projectRoot}
-${baseBranchLine}
+${baseBranchLine}${seededAgentsLine}
 ${todoText}`;
 
   // Write system prompt to a temp file
