@@ -176,10 +176,15 @@ export function launchAiSession(
       cmd = `opencode --agent ${agentName} --title 'TODO ${id}: ${safeTitle}'`;
       initialPrompt = `${readFileSync(promptFile, "utf-8")}\n\nStart implementing this TODO now.`;
       break;
-    case "copilot":
-      cmd = `copilot --agent=${agentName} --allow-all-tools --allow-all-paths`;
-      initialPrompt = `${readFileSync(promptFile, "utf-8")}\n\nStart implementing this TODO now.`;
+    case "copilot": {
+      const promptText = `${readFileSync(promptFile, "utf-8")}\n\nStart implementing this TODO now.`;
+      const shellQuoted = run("bash", ["-c", 'printf %q "$1"', "--", promptText]);
+      const quotedPrompt =
+        shellQuoted.exitCode === 0 ? shellQuoted.stdout.trim() : JSON.stringify(promptText);
+      cmd = `copilot --agent=${agentName} --allow-all -i ${quotedPrompt}`;
+      initialPrompt = ""; // embedded in cmd via -i — skip post-launch send
       break;
+    }
     default:
       die(
         `Unknown AI tool: ${tool}. Ensure claude, opencode, or copilot is in your PATH.`,
@@ -199,6 +204,9 @@ export function launchAiSession(
     warn(`${mux.type} launch failed for ${id} -- is ${mux.type} running?`);
     return null;
   }
+
+  // Skip send when the prompt was already embedded in the launch command (e.g. copilot -i).
+  if (!initialPrompt) return wsRef;
 
   // Wait for the AI tool's input prompt, send the initial message, and
   // verify the worker started processing. Uses prompt-specific detection
