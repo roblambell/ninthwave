@@ -110,11 +110,15 @@ export function getWorktreeLastCommitTime(
   branchName: string,
 ): string | null {
   try {
-    const result = run("git", ["log", "-1", "--format=%cI", branchName], {
+    // Only count commits the worker actually made (on this branch but not on main).
+    // Using `main..branchName` avoids treating the base branch's last commit time
+    // as worker activity — which would cause the heartbeat to immediately declare
+    // stale workers as stalled when the base branch hasn't been updated recently.
+    const result = run("git", ["log", "-1", "--format=%cI", `main..${branchName}`], {
       cwd: projectRoot,
     });
-    if (result.exitCode !== 0 || !result.stdout) return null;
-    return result.stdout;
+    if (result.exitCode !== 0 || !result.stdout?.trim()) return null;
+    return result.stdout.trim();
   } catch {
     return null;
   }
