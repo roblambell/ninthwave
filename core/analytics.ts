@@ -20,6 +20,12 @@ export interface ItemMetric {
   costUsd?: number | null;
   /** Detection latency in milliseconds for this item's last transition. */
   detectionLatencyMs?: number;
+  /** ISO timestamp of when the worker was launched. */
+  startedAt?: string;
+  /** ISO timestamp of when the worker completed or failed. */
+  endedAt?: string;
+  /** Exit code from the worker process (null when unknown). */
+  exitCode?: number | null;
 }
 
 /** Aggregate detection latency percentiles for a run. */
@@ -146,6 +152,51 @@ export function parseCostSummary(text: string): CostSummary {
   return { tokensUsed, costUsd };
 }
 
+// ── Worker telemetry parsing ────────────────────────────────────────
+
+/** Parsed telemetry from worker screen output. */
+export interface WorkerTelemetry {
+  exitCode: number | null;
+  stderrTail: string;
+}
+
+/**
+ * Parse worker telemetry from screen output.
+ *
+ * Extracts:
+ * - Exit code: looks for patterns like "exit code 1", "exited with 1",
+ *   "Process exited with code 1", or "Exit status: 1"
+ * - Stderr tail: extracts the last 20 non-empty lines from the screen
+ *   (the screen content itself serves as the stderr proxy since worker
+ *   output is captured on the terminal)
+ *
+ * Returns null exit code and empty stderr when input is empty.
+ */
+export function parseWorkerTelemetry(screenText: string): WorkerTelemetry {
+  if (!screenText) return { exitCode: null, stderrTail: "" };
+
+  let exitCode: number | null = null;
+
+  // Match exit code patterns:
+  // "exit code 1", "exit code: 1", "exited with 1", "exited with code 1"
+  // "Process exited with code 1", "Exit status: 1"
+  const exitMatch = screenText.match(
+    /(?:exit\s+(?:code|status)\s*[:=]?\s*|exited\s+with\s+(?:code\s+)?|process\s+exited\s+with\s+code\s+)(\d+)/i,
+  );
+  if (exitMatch) {
+    const parsed = parseInt(exitMatch[1]!, 10);
+    if (!isNaN(parsed)) {
+      exitCode = parsed;
+    }
+  }
+
+  // Extract last 20 non-empty lines as stderr tail
+  const lines = screenText.split("\n").filter((l) => l.trim());
+  const tail = lines.slice(-20).join("\n");
+
+  return { exitCode, stderrTail: tail };
+}
+
 // ── Metrics collection ────────────────────────────────────────────────
 
 /**
@@ -182,6 +233,9 @@ export function collectRunMetrics(
       tokensUsed: cost?.tokensUsed ?? null,
       costUsd: cost?.costUsd ?? null,
       ...(item.detectionLatencyMs != null ? { detectionLatencyMs: item.detectionLatencyMs } : {}),
+      ...(item.startedAt ? { startedAt: item.startedAt } : {}),
+      ...(item.endedAt ? { endedAt: item.endedAt } : {}),
+      ...(item.exitCode != null ? { exitCode: item.exitCode } : {}),
     };
   });
 

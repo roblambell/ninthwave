@@ -83,6 +83,14 @@ export interface OrchestratorItem {
   permissionCount?: number;
   /** Descriptive reason for why this item failed (e.g., "launch-failed: repo not found", "ci-failed: test timeout"). Set on ci-failed/stuck states, cleared on recovery. */
   failureReason?: string;
+  /** ISO timestamp of when the worker was launched (set on transition to implementing). */
+  startedAt?: string;
+  /** ISO timestamp of when the worker completed (set on transition to done or stuck). */
+  endedAt?: string;
+  /** Exit code from the worker process (parsed from screen output on completion/failure). */
+  exitCode?: number | null;
+  /** Last N lines of stderr captured from the worker on failure (for diagnostics). */
+  stderrTail?: string;
   /** Number of consecutive polls where isWorkerAlive returned false. Used to debounce stuck detection — a single flaky listing shouldn't kill a healthy worker. */
   notAliveCount?: number;
 }
@@ -475,6 +483,14 @@ export class Orchestrator {
     // Clear failureReason when recovering from a failure state
     if (state !== "ci-failed" && state !== "stuck") {
       item.failureReason = undefined;
+    }
+    // Telemetry: record startedAt when worker begins implementing
+    if (state === "implementing" && !item.startedAt) {
+      item.startedAt = detectedTime;
+    }
+    // Telemetry: record endedAt when worker reaches a terminal state
+    if (state === "done" || state === "stuck") {
+      item.endedAt = detectedTime;
     }
   }
 

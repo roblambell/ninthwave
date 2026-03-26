@@ -29,6 +29,14 @@ export interface DaemonStateItem {
   failureReason?: string;
   /** Dependency IDs for this item (omitted when empty). */
   dependencies?: string[];
+  /** ISO timestamp of when the worker was launched. */
+  startedAt?: string;
+  /** ISO timestamp of when the worker completed or failed. */
+  endedAt?: string;
+  /** Exit code from the worker process (null when unknown). */
+  exitCode?: number | null;
+  /** Last lines of stderr captured from the worker on failure. */
+  stderrTail?: string;
 }
 
 export interface DaemonState {
@@ -315,6 +323,10 @@ export function serializeOrchestratorState(
       ...(item.reviewCompleted ? { reviewCompleted: item.reviewCompleted } : {}),
       ...(item.failureReason ? { failureReason: item.failureReason } : {}),
       ...(item.todo.dependencies.length > 0 ? { dependencies: item.todo.dependencies } : {}),
+      ...(item.startedAt ? { startedAt: item.startedAt } : {}),
+      ...(item.endedAt ? { endedAt: item.endedAt } : {}),
+      ...(item.exitCode != null ? { exitCode: item.exitCode } : {}),
+      ...(item.stderrTail ? { stderrTail: item.stderrTail } : {}),
     })),
   };
 }

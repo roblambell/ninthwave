@@ -65,6 +65,7 @@ import {
   writeRunMetrics,
   commitAnalyticsFiles,
   parseCostSummary,
+  parseWorkerTelemetry,
   type AnalyticsIO,
   type AnalyticsCommitDeps,
   type CostSummary,
@@ -953,8 +954,8 @@ function handleActionExecution(
   log: (entry: LogEntry) => void,
   costData: Map<string, CostSummary>,
 ): void {
-  // Before clean action: capture worker screen for cost/token parsing
-  if (action.type === "clean" && deps.readScreen) {
+  // Before clean/retry action: capture worker screen for cost/token parsing and telemetry
+  if ((action.type === "clean" || action.type === "retry") && deps.readScreen) {
     const orchItem = orch.getItem(action.itemId);
     if (orchItem?.workspaceRef) {
       try {
@@ -971,8 +972,26 @@ function handleActionExecution(
             costUsd: cost.costUsd,
           });
         }
+        // Capture worker telemetry (exit code, stderr tail) for diagnostics
+        const telemetry = parseWorkerTelemetry(screenText);
+        if (telemetry.exitCode != null) {
+          orchItem.exitCode = telemetry.exitCode;
+        }
+        if (telemetry.stderrTail && (orchItem.state === "stuck" || orchItem.state === "ci-failed")) {
+          orchItem.stderrTail = telemetry.stderrTail;
+        }
+        if (telemetry.exitCode != null || telemetry.stderrTail) {
+          log({
+            ts: new Date().toISOString(),
+            level: "info",
+            event: "telemetry_captured",
+            itemId: action.itemId,
+            exitCode: telemetry.exitCode,
+            stderrLines: telemetry.stderrTail ? telemetry.stderrTail.split("\n").length : 0,
+          });
+        }
       } catch {
-        // Non-fatal — cost capture failure doesn't block cleanup
+        // Non-fatal — cost/telemetry capture failure doesn't block cleanup
       }
     }
   }
