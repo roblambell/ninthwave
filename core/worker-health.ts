@@ -77,13 +77,21 @@ const ERROR_INDICATORS = [
   "spawn Unknown system error",
 ];
 
-/** Indicators that a permission/approval dialog is waiting. */
+/**
+ * Strong dialog indicators — patterns that are specific to actual interactive
+ * permission/approval dialogs (e.g., Claude Code's tool approval prompts).
+ *
+ * Generic words like "permission", "approve", and bare "Allow " are excluded
+ * because they frequently appear in normal file content and tool output,
+ * causing false positives when workers are actively reading/searching. See M-SUP-3.
+ *
+ * Only checked in the last few lines of screen content (the active terminal area),
+ * not the full scroll buffer, to avoid matching documentation or code that
+ * happens to contain these patterns.
+ */
 const PERMISSION_INDICATORS = [
   "(Y/n)",
   "(y/N)",
-  "Allow ",       // "Allow tool_name?" prompts
-  "approve",
-  "permission",
   "Yes / No",
   "(Y)es / (N)o",
 ];
@@ -123,11 +131,20 @@ export function isWorkerInError(screenContent: string): boolean {
 
 /**
  * Detect if a permission/approval dialog is visible on screen.
+ *
+ * Only checks the last few lines of screen content (the active terminal area)
+ * to avoid false positives from documentation, code, or tool output that
+ * happens to contain dialog-like patterns in scroll history. Real permission
+ * prompts appear at the bottom of the screen. See M-SUP-3.
  */
 export function isPermissionPrompt(screenContent: string): boolean {
   if (!screenContent.trim()) return false;
+  // Check only the last 5 lines — permission dialogs appear at the active prompt,
+  // not buried in scroll history from previous tool output
+  const lines = screenContent.split("\n");
+  const activeArea = lines.slice(-5).join("\n");
   return PERMISSION_INDICATORS.some((indicator) =>
-    screenContent.includes(indicator),
+    activeArea.includes(indicator),
   );
 }
 
@@ -151,22 +168,45 @@ export function simpleHash(str: string): string {
  * worker's health into actionable categories. Mutates orchItem to track
  * unchanged screen state across polls.
  *
+ * Priority order: error > permission > processing (healthy) > prompt > unchanged > healthy.
+ * Permission detection uses tightened heuristics (M-SUP-3):
+ * - Only strong dialog indicators (Y/n, y/N, etc.) — not generic words like "permission"
+ * - Only checked in the last few lines of screen content (the active terminal area)
+ * - Requires multiple consecutive polls (permissionThreshold) before flagging
+ *
+ * These changes prevent false positives when workers are actively reading/searching
+ * files whose content contains permission-related words.
+ *
  * @param screenContent - Raw screen content from readScreen
- * @param orchItem - The orchestrator item (mutated: lastScreenHash, unchangedCount)
+ * @param orchItem - The orchestrator item (mutated: lastScreenHash, unchangedCount, permissionCount)
  * @param unchangedThreshold - Number of consecutive unchanged polls before declaring stalled (default 3)
+ * @param permissionThreshold - Number of consecutive permission-detected polls before declaring stalled (default 2)
  */
 export function computeScreenHealth(
   screenContent: string,
-  orchItem: { lastScreenHash?: string; unchangedCount?: number },
+  orchItem: { lastScreenHash?: string; unchangedCount?: number; permissionCount?: number },
   unchangedThreshold: number = 3,
+  permissionThreshold: number = 2,
 ): ScreenHealthStatus {
   if (!screenContent.trim()) return "unknown";
 
   // Check error first (highest priority)
   if (isWorkerInError(screenContent)) return "stalled-error";
 
-  // Check permission prompt
-  if (isPermissionPrompt(screenContent)) return "stalled-permission";
+  // Check permission prompt — uses tightened detection that only checks
+  // strong dialog patterns in the last few lines of screen content.
+  // Requires multiple consecutive polls to avoid flagging transient content.
+  if (isPermissionPrompt(screenContent)) {
+    orchItem.permissionCount = (orchItem.permissionCount ?? 0) + 1;
+    if (orchItem.permissionCount >= permissionThreshold) {
+      return "stalled-permission";
+    }
+    // Not yet at threshold — treat as healthy for now
+    return "healthy";
+  } else {
+    // No permission indicators — reset the counter
+    orchItem.permissionCount = 0;
+  }
 
   // If actively processing, worker is healthy
   if (isWorkerProcessing(screenContent)) {

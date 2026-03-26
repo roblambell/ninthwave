@@ -2502,7 +2502,7 @@ describe("buildSnapshot screenHealth", () => {
     expect(snapItem!.screenHealth).toBe("stalled-empty");
   });
 
-  it("sets screenHealth to stalled-permission when screen shows Y/n dialog", () => {
+  it("sets screenHealth to stalled-permission when screen shows Y/n dialog after threshold (M-SUP-3)", () => {
     const orch = new Orchestrator({ wipLimit: 2 });
     orch.addItem(makeTodo("BSH-2-1"));
     orch.setState("BSH-2-1", "implementing");
@@ -2511,11 +2511,17 @@ describe("buildSnapshot screenHealth", () => {
     const screenContent = "Allow tool_name? (Y/n)\nSome context above\n";
     const mux = mockMux("workspace:2", screenContent);
 
-    const snapshot = buildSnapshot(orch, "/tmp/project", "/tmp/project/.worktrees", mux, noOpCommitTime, noOpCheckPr);
+    // First poll: permission detected but below threshold → healthy
+    const snapshot1 = buildSnapshot(orch, "/tmp/project", "/tmp/project/.worktrees", mux, noOpCommitTime, noOpCheckPr);
+    const snapItem1 = snapshot1.items.find((i) => i.id === "BSH-2-1");
+    expect(snapItem1).toBeDefined();
+    expect(snapItem1!.screenHealth).toBe("healthy");
 
-    const snapItem = snapshot.items.find((i) => i.id === "BSH-2-1");
-    expect(snapItem).toBeDefined();
-    expect(snapItem!.screenHealth).toBe("stalled-permission");
+    // Second poll: hits threshold → stalled-permission
+    const snapshot2 = buildSnapshot(orch, "/tmp/project", "/tmp/project/.worktrees", mux, noOpCommitTime, noOpCheckPr);
+    const snapItem2 = snapshot2.items.find((i) => i.id === "BSH-2-1");
+    expect(snapItem2).toBeDefined();
+    expect(snapItem2!.screenHealth).toBe("stalled-permission");
   });
 
   it("sets screenHealth to healthy when screen shows active processing", () => {

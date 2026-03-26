@@ -79,6 +79,8 @@ export interface OrchestratorItem {
   lastScreenHash?: string;
   /** Number of consecutive polls where screen content was unchanged. */
   unchangedCount?: number;
+  /** Number of consecutive polls where a permission prompt was detected without active processing. */
+  permissionCount?: number;
   /** Descriptive reason for why this item failed (e.g., "launch-failed: repo not found", "ci-failed: test timeout"). Set on ci-failed/stuck states, cleared on recovery. */
   failureReason?: string;
   /** Number of consecutive polls where isWorkerAlive returned false. Used to debounce stuck detection — a single flaky listing shouldn't kill a healthy worker. */

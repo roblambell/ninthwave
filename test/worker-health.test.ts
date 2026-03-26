@@ -551,8 +551,14 @@ describe("isPermissionPrompt", () => {
     expect(isPermissionPrompt(screen)).toBe(true);
   });
 
-  it("detects 'Allow ' prefix", () => {
+  it("does not match bare 'Allow ' without dialog indicator (M-SUP-3)", () => {
+    // "Allow " alone is not enough — requires a strong dialog indicator like (Y/n)
     const screen = "Allow Bash(git status)?";
+    expect(isPermissionPrompt(screen)).toBe(false);
+  });
+
+  it("detects 'Allow ' with (Y/n) indicator", () => {
+    const screen = "Allow Bash(git status)? (Y/n)";
     expect(isPermissionPrompt(screen)).toBe(true);
   });
 
@@ -576,6 +582,18 @@ describe("isPermissionPrompt", () => {
 
   it("returns false for normal processing output", () => {
     const screen = "⠋ Thinking...\nReading file\nDone";
+    expect(isPermissionPrompt(screen)).toBe(false);
+  });
+
+  it("returns false for content containing 'permission' word (M-SUP-3)", () => {
+    // "permission" was removed from indicators because it appears in normal code/docs
+    const screen = "if (!user.hasPermission('admin')) throw new Error('permission denied');";
+    expect(isPermissionPrompt(screen)).toBe(false);
+  });
+
+  it("returns false for content containing 'approve' word (M-SUP-3)", () => {
+    // "approve" was removed from indicators because it appears in normal code
+    const screen = "// approve the request and send notification\nawait approveRequest(req.id);";
     expect(isPermissionPrompt(screen)).toBe(false);
   });
 });
@@ -618,9 +636,15 @@ describe("computeScreenHealth", () => {
     expect(computeScreenHealth("Error: something broke\nStack trace\nLine3", item)).toBe("stalled-error");
   });
 
-  it("returns 'stalled-permission' for permission prompt", () => {
-    const item = {};
-    expect(computeScreenHealth("Allow Bash(rm -rf)? (Y/n)\nLine2\nLine3", item)).toBe("stalled-permission");
+  it("returns 'stalled-permission' for permission prompt after threshold", () => {
+    const item: { permissionCount?: number } = {};
+    const screen = "Allow Bash(rm -rf)? (Y/n)\nLine2\nLine3";
+    // First poll: detected but below threshold → healthy
+    expect(computeScreenHealth(screen, item)).toBe("healthy");
+    expect(item.permissionCount).toBe(1);
+    // Second poll: hits threshold → stalled-permission
+    expect(computeScreenHealth(screen, item)).toBe("stalled-permission");
+    expect(item.permissionCount).toBe(2);
   });
 
   it("returns 'healthy' for processing output", () => {
@@ -690,11 +714,76 @@ describe("computeScreenHealth", () => {
     expect(computeScreenHealth(screen, item)).toBe("stalled-error");
   });
 
-  it("permission takes priority over processing", () => {
-    const item = {};
-    // Screen with permission and processing indicators
-    const screen = "⠋ Thinking\nAllow Bash(test)? (Y/n)";
+  it("permission prompt requires threshold count (M-SUP-3)", () => {
+    const item: { permissionCount?: number } = {};
+    // Permission prompt with strong dialog indicator in the last few lines
+    const screen = "Allow Bash(test)? (Y/n)\nWaiting for approval...\nLine3";
+    // First poll: detected but below threshold
+    expect(computeScreenHealth(screen, item)).toBe("healthy");
+    expect(item.permissionCount).toBe(1);
+    // Second poll: hits threshold → stalled
     expect(computeScreenHealth(screen, item)).toBe("stalled-permission");
+  });
+
+  it("active Read/Grep output with 'permission' word is healthy (M-SUP-3)", () => {
+    const item: { permissionCount?: number } = {};
+    // Worker is reading a file that contains the word "permission" — NOT a real stall.
+    // No strong dialog indicators (Y/n etc.) appear in the last 5 lines.
+    const screen = "Read(core/auth.ts)\n  if (!user.hasPermission('admin')) {\n    throw new Error('permission denied');\n  }";
+    expect(computeScreenHealth(screen, item)).toBe("healthy");
+    expect(item.permissionCount).toBe(0);
+  });
+
+  it("active Grep output with 'Allow' in results is healthy (M-SUP-3)", () => {
+    const item: { permissionCount?: number } = {};
+    // Worker is grepping and results contain "Allow " — NOT a real stall.
+    // No strong dialog indicator in last 5 lines.
+    const screen = "Grep(pattern)\n  // Allow users to configure\n  config.allow = true;";
+    expect(computeScreenHealth(screen, item)).toBe("healthy");
+    expect(item.permissionCount).toBe(0);
+  });
+
+  it("permission count resets when screen shows processing (M-SUP-3)", () => {
+    const item: { permissionCount?: number } = {};
+    // First poll: permission prompt (strong indicator in last 5 lines)
+    const permScreen = "Allow Bash(rm)? (Y/n)\nLine2\nLine3";
+    expect(computeScreenHealth(permScreen, item)).toBe("healthy");
+    expect(item.permissionCount).toBe(1);
+    // Worker starts processing (user answered the prompt) — count resets
+    const processScreen = "⠋ Running Bash command\nLine2\nLine3";
+    expect(computeScreenHealth(processScreen, item)).toBe("healthy");
+    expect(item.permissionCount).toBe(0);
+    // Permission prompt again: starts from 0
+    expect(computeScreenHealth(permScreen, item)).toBe("healthy");
+    expect(item.permissionCount).toBe(1);
+  });
+
+  it("(Y/n) in scroll history above active area is not flagged (M-SUP-3)", () => {
+    const item: { permissionCount?: number } = {};
+    // Screen has a (Y/n) pattern in old scroll history (line 1), but the
+    // last 5 lines show active work — not a permission stall
+    const screen = [
+      "Previous permission prompt: (Y/n)",  // old, in scroll history
+      "Read(src/config.ts)",                 // active tool output
+      "  export const MAX_RETRIES = 3;",
+      "  export const TIMEOUT = 5000;",
+      "  export const API_URL = 'https://api.example.com';",
+      "  export const DEBUG = false;",
+    ].join("\n");
+    expect(computeScreenHealth(screen, item)).toBe("healthy");
+    expect(item.permissionCount).toBe(0);
+  });
+
+  it("worker pausing between large file reads is healthy (M-SUP-3)", () => {
+    const item: { lastScreenHash?: string; unchangedCount?: number; permissionCount?: number } = {};
+    // Screen shows completed Read output but no active spinner — normal pause
+    // between sequential tool calls. No permission indicators.
+    const screen = "Read(src/config.ts)\n  export const MAX_RETRIES = 3;\n  export const TIMEOUT = 5000;\nLine4";
+    const result = computeScreenHealth(screen, item);
+    expect(result).toBe("healthy");
+    // Change screen slightly (next tool call output)
+    const screen2 = "Read(src/utils.ts)\n  export function sleep(ms: number) {\n    return new Promise(r => setTimeout(r, ms));\n  }";
+    expect(computeScreenHealth(screen2, item)).toBe("healthy");
   });
 
   it("respects custom unchanged threshold", () => {
