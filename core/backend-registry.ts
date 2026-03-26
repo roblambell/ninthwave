@@ -8,6 +8,7 @@ import {
   resolvePagerDutyConfig,
 } from "./backends/pagerduty.ts";
 import { ClickUpBackend, resolveClickUpConfig } from "./backends/clickup.ts";
+import { LinearBackend, resolveLinearConfig } from "./backends/linear.ts";
 
 export interface DiscoveredBackend {
   name: string;
@@ -67,6 +68,15 @@ export function discoverBackends(
     backends.push({
       name: "clickup",
       backend: new ClickUpBackend(ckConfig.listId, ckConfig.apiToken),
+    });
+  }
+
+  // Linear
+  const linearConfig = resolveLinearConfig(getter);
+  if (linearConfig) {
+    backends.push({
+      name: "linear",
+      backend: new LinearBackend(linearConfig.apiKey, linearConfig.teamKey),
     });
   }
 
