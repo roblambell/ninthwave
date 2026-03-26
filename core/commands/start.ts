@@ -196,7 +196,7 @@ export function launchAiSession(
 
   const wsRef = mux.launchWorkspace(worktreePath, cmd, id);
   if (!wsRef) {
-    warn(`cmux launch failed for ${id} -- is cmux running?`);
+    warn(`${mux.type} launch failed for ${id} -- is ${mux.type} running?`);
     return null;
   }
 

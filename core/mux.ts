@@ -15,8 +15,12 @@ export type ShellRunner = (
 
 /** Terminal multiplexer abstraction for workspace management. */
 export interface Multiplexer {
-  /** Check if the multiplexer backend is available. */
+  /** Identifier for this mux backend (e.g., "cmux", "tmux", "zellij"). */
+  readonly type: MuxType;
+  /** Check if the multiplexer backend is available (binary installed + session active). */
   isAvailable(): boolean;
+  /** Return a human-readable message explaining why isAvailable() returned false. */
+  diagnoseUnavailable(): string;
   /** Launch a new workspace. Returns a ref (e.g., "workspace:1") or null on failure. */
   launchWorkspace(cwd: string, command: string, todoId?: string): string | null;
   /** Split a pane in the current workspace. Returns a ref or null on failure. */
@@ -33,8 +37,14 @@ export interface Multiplexer {
 
 /** Adapter that delegates to the cmux CLI binary. */
 export class CmuxAdapter implements Multiplexer {
+  readonly type: MuxType = "cmux";
+
   isAvailable(): boolean {
     return cmux.isAvailable();
+  }
+
+  diagnoseUnavailable(): string {
+    return "cmux is not available. Ensure cmux is installed and running.";
   }
   launchWorkspace(cwd: string, command: string, _todoId?: string): string | null {
     return cmux.launchWorkspace(cwd, command);
@@ -65,6 +75,8 @@ export interface TmuxAdapterOptions {
   sleep?: Sleeper;
   maxRetries?: number;
   baseDelayMs?: number;
+  /** Env vars for session detection — injectable for testing. Defaults to process.env. */
+  env?: Record<string, string | undefined>;
 }
 
 /**
@@ -80,10 +92,12 @@ export interface TmuxAdapterOptions {
  * approach fails.
  */
 export class TmuxAdapter implements Multiplexer {
+  readonly type: MuxType = "tmux";
   private run: ShellRunner;
   private sleep: Sleeper;
   private maxRetries: number;
   private baseDelayMs: number;
+  private env: Record<string, string | undefined>;
   private counter = 0;
 
   constructor(run?: ShellRunner, options?: TmuxAdapterOptions) {
@@ -91,11 +105,22 @@ export class TmuxAdapter implements Multiplexer {
     this.sleep = options?.sleep ?? defaultSleep;
     this.maxRetries = options?.maxRetries ?? 3;
     this.baseDelayMs = options?.baseDelayMs ?? 100;
+    this.env = options?.env ?? process.env;
   }
 
   isAvailable(): boolean {
     const result = this.run("tmux", ["-V"]);
-    return result.exitCode === 0;
+    if (result.exitCode !== 0) return false;
+    // Binary exists — also verify we're inside a tmux session
+    return this.env.TMUX !== undefined;
+  }
+
+  diagnoseUnavailable(): string {
+    const result = this.run("tmux", ["-V"]);
+    if (result.exitCode !== 0) {
+      return "tmux binary not found. Install tmux or use a different multiplexer (--mux zellij).";
+    }
+    return "No active tmux session found. Run ninthwave orchestrate from inside a tmux session.";
   }
 
   launchWorkspace(cwd: string, command: string, todoId?: string): string | null {
@@ -241,6 +266,8 @@ export interface ZellijAdapterOptions {
   sleep?: Sleeper;
   maxRetries?: number;
   baseDelayMs?: number;
+  /** Env vars for session detection — injectable for testing. Defaults to process.env. */
+  env?: Record<string, string | undefined>;
 }
 
 /**
@@ -255,10 +282,12 @@ export interface ZellijAdapterOptions {
  * to a temp file via `dump-screen` and reads it back with `cat`.
  */
 export class ZellijAdapter implements Multiplexer {
+  readonly type: MuxType = "zellij";
   private run: ShellRunner;
   private sleep: Sleeper;
   private maxRetries: number;
   private baseDelayMs: number;
+  private env: Record<string, string | undefined>;
   private counter = 0;
 
   constructor(run?: ShellRunner, options?: ZellijAdapterOptions) {
@@ -266,11 +295,22 @@ export class ZellijAdapter implements Multiplexer {
     this.sleep = options?.sleep ?? defaultSleep;
     this.maxRetries = options?.maxRetries ?? 3;
     this.baseDelayMs = options?.baseDelayMs ?? 100;
+    this.env = options?.env ?? process.env;
   }
 
   isAvailable(): boolean {
     const result = this.run("zellij", ["--version"]);
-    return result.exitCode === 0;
+    if (result.exitCode !== 0) return false;
+    // Binary exists — also verify we're inside a zellij session
+    return this.env.ZELLIJ_SESSION_NAME !== undefined;
+  }
+
+  diagnoseUnavailable(): string {
+    const result = this.run("zellij", ["--version"]);
+    if (result.exitCode !== 0) {
+      return "zellij binary not found. Install zellij or use a different multiplexer (--mux tmux).";
+    }
+    return "No active zellij session found. Run ninthwave orchestrate from inside a zellij session.";
   }
 
   launchWorkspace(cwd: string, command: string, todoId?: string): string | null {
