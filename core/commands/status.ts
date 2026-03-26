@@ -43,6 +43,14 @@ export interface StatusItem {
   /** Descriptive reason for failure, displayed alongside ci-failed/stuck states. */
   failureReason?: string;
   dependencies?: string[];
+  /** ISO timestamp of when the worker was launched. */
+  startedAt?: string;
+  /** ISO timestamp of when the worker completed or failed. */
+  endedAt?: string;
+  /** Exit code from the worker process (null when unknown). */
+  exitCode?: number | null;
+  /** Last lines of stderr captured from the worker on failure. */
+  stderrTail?: string;
 }
 
 // ─── Dependency tree types ────────────────────────────────────────────────────
@@ -163,6 +171,54 @@ export function pad(s: string, width: number): string {
 }
 
 /**
+ * Format elapsed duration from startedAt to now (for active workers) or to endedAt (for completed workers).
+ * Returns a human-readable string like "2h 15m" or empty string when no startedAt is available.
+ */
+export function formatElapsed(item: StatusItem): string {
+  if (!item.startedAt) return "";
+  const start = new Date(item.startedAt).getTime();
+  if (isNaN(start)) return "";
+  const end = item.endedAt ? new Date(item.endedAt).getTime() : Date.now();
+  if (isNaN(end)) return "";
+  return formatAge(Math.max(0, end - start));
+}
+
+/**
+ * Format telemetry suffix for an item row.
+ * Active workers: show elapsed duration.
+ * Failed workers: show exit code and stderr tail.
+ */
+export function formatTelemetrySuffix(item: StatusItem): string {
+  const parts: string[] = [];
+
+  // Show elapsed duration for active workers
+  const isActive = item.state === "implementing" || item.state === "bootstrapping" || item.state === "in-progress";
+  if (isActive && item.startedAt) {
+    const elapsed = formatElapsed(item);
+    if (elapsed) {
+      parts.push(`elapsed: ${elapsed}`);
+    }
+  }
+
+  // Show exit code for failed/stuck workers
+  if (item.state === "ci-failed" && item.exitCode != null) {
+    parts.push(`exit: ${item.exitCode}`);
+  }
+
+  // Show stderr tail for failed workers
+  if (item.state === "ci-failed" && item.stderrTail) {
+    // Show first line of stderr for compact display
+    const firstLine = item.stderrTail.split("\n").filter(l => l.trim())[0];
+    if (firstLine) {
+      const trimmed = firstLine.length > 60 ? firstLine.slice(0, 57) + "..." : firstLine;
+      parts.push(`stderr: ${trimmed}`);
+    }
+  }
+
+  return parts.length > 0 ? ` ${DIM}(${parts.join(", ")})${RESET}` : "";
+}
+
+/**
  * Format a single item row for the status table.
  * Returns a string with ANSI color codes.
  */
@@ -176,8 +232,9 @@ export function formatItemRow(item: StatusItem, titleWidth: number): string {
   const title = truncateTitle(item.title || item.id, titleWidth);
   const repo = item.repoLabel ? ` ${DIM}[${item.repoLabel}]${RESET}` : "";
   const reason = item.failureReason ? ` ${DIM}(${item.failureReason})${RESET}` : "";
+  const telemetry = formatTelemetrySuffix(item);
 
-  return `  ${color}${icon}${RESET} ${id}${color}${label}${RESET} ${pr} ${age} ${title}${repo}${reason}`;
+  return `  ${color}${icon}${RESET} ${id}${color}${label}${RESET} ${pr} ${age} ${title}${repo}${reason}${telemetry}`;
 }
 
 /**
@@ -549,6 +606,10 @@ export function daemonStateToStatusItems(state: DaemonState): StatusItem[] {
     repoLabel: "",
     failureReason: item.failureReason,
     dependencies: item.dependencies ?? [],
+    startedAt: item.startedAt,
+    endedAt: item.endedAt,
+    exitCode: item.exitCode,
+    stderrTail: item.stderrTail,
   }));
 }
 
