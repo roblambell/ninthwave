@@ -10,6 +10,7 @@ import {
   PagerDutyBackend,
   resolvePagerDutyConfig,
 } from "../backends/pagerduty.ts";
+import { LinearBackend, resolveLinearConfig } from "../backends/linear.ts";
 import { ghInRepo } from "../gh.ts";
 import { loadConfig } from "../config.ts";
 import {
@@ -146,6 +147,23 @@ export function cmdList(
     const ckBackend = new ClickUpBackend(ckConfig!.listId, ckConfig!.apiToken);
     items = ckBackend.list();
     for (const item of items) sourceMap.set(item, "clickup");
+    showSource = true;
+  } else if (backend === "linear") {
+    if (!projectRoot) die("Project root is required for linear backend");
+    const config = loadConfig(projectRoot!);
+    const linearConfig = resolveLinearConfig((key) => config[key]);
+    if (!linearConfig) {
+      die(
+        "Linear backend requires LINEAR_API_KEY env var " +
+          "(or linear_api_key in .ninthwave/config)",
+      );
+    }
+    const linearBackend = new LinearBackend(
+      linearConfig.apiKey,
+      linearConfig.teamKey,
+    );
+    items = linearBackend.list();
+    for (const item of items) sourceMap.set(item, "linear");
     showSource = true;
   } else if (backend) {
     die(`Unknown backend: ${backend}`);

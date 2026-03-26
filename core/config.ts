@@ -26,6 +26,8 @@ export const KNOWN_CONFIG_KEYS = new Set([
   "review_can_approve",
   "review_external",
   "github_token",
+  "linear_api_key",
+  "linear_team_key",
 ]);
 
 /**

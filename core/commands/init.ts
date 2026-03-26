@@ -231,6 +231,7 @@ export function detectObservabilityBackends(deps: InitDeps = {}): string[] {
 
   if (getEnv("SENTRY_AUTH_TOKEN")) backends.push("sentry");
   if (getEnv("PAGERDUTY_API_TOKEN")) backends.push("pagerduty");
+  if (getEnv("LINEAR_API_KEY")) backends.push("linear");
 
   return backends;
 }
@@ -315,6 +316,10 @@ export function generateConfig(detection: DetectionResult): string {
     lines.push("# PagerDuty integration (PAGERDUTY_API_TOKEN detected)");
     lines.push("# pagerduty_service_id=your-service-id");
     lines.push("# pagerduty_from_email=your@email.com");
+  }
+  if (detection.observabilityBackends.includes("linear")) {
+    lines.push("# Linear integration (LINEAR_API_KEY detected)");
+    lines.push("# linear_team_key=ENG");
   }
 
   lines.push("");
@@ -402,7 +407,7 @@ export function printSummary(detection: DetectionResult): void {
     );
   } else {
     console.log(
-      `  ${DIM}–${RESET} Observability: ${DIM}no backends detected (set SENTRY_AUTH_TOKEN or PAGERDUTY_API_TOKEN)${RESET}`,
+      `  ${DIM}–${RESET} Observability: ${DIM}no backends detected (set SENTRY_AUTH_TOKEN, PAGERDUTY_API_TOKEN, or LINEAR_API_KEY)${RESET}`,
     );
   }
 
