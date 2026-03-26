@@ -208,7 +208,7 @@ Acceptance: <concrete, verifiable conditions>
 Key files: `path/to/file.ts`, `path/to/other.ex`
 ```
 
-   Note: The heading uses `# ` (not `### `). The `**Domain:**` field is required — it was previously inferred from TODOS.md section headers but must now be explicit in each file.
+   Note: The heading uses `# ` (not `### `). The `**Domain:**` field is required and must be explicit in each file.
 
 5. Verify every item has a `**Test plan:**` section (non-optional for decomposed items)
 6. Verify parseable: `ls .ninthwave/todos/` to confirm files were written, then `ninthwave list | grep <feature_code>`
