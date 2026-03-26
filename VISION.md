@@ -10,7 +10,7 @@ ninthwave is that orchestration layer. It doesn't write code. It manages the pip
 
 ## What Exists Today
 
-v0.1.0 shipped March 2026. Seven grind cycles (0-6) have shipped since then.
+v0.1.0 shipped March 2026. Nine grind cycles (0-8) have shipped since then.
 
 **Core pipeline (v0.1.0):**
 - **Decompose + orchestrate pipeline.** `/decompose` breaks a spec into batched work items (~200-400 LOC each). `ninthwave orchestrate` runs an event-driven daemon that launches workers, monitors CI and PR state, merges, cleans up, and recovers from crashes. The full cycle: spec in, merged PRs out.
@@ -65,11 +65,20 @@ v0.1.0 shipped March 2026. Seven grind cycles (0-6) have shipped since then.
 - **BYOT tunnel model** — Bring Your Own Tunnel. Users expose the localhost dashboard with their tunneling tool of choice (cloudflared, ngrok, zrok, SSH, Tailscale). ninthwave does not manage tunnels in the OSS CLI. `nw doctor` checks for cloudflared as an optional info-level dependency.
 - **`nw doctor` command** — health check for the ninthwave environment. Required checks: gh CLI, AI tool, multiplexer, git config. Recommended checks: project config, nono sandbox, pre-commit hook. Optional checks: cloudflared (for remote access), webhook URL (M-DX-1).
 
-**Grind cycle 7 (Phase B continuation + C-bis: Worker Health Monitoring):**
-- **Policy proxy decomposition** — 9 TODOs (H-PRX-1 through M-PRX-9) for a standalone Rust MITM proxy with Cedar policy evaluation, credential injection, and structured audit logging. H-PRX-1 (design doc decomposition) and H-PRX-2 (Cedar entity hierarchy validation) shipped. H-PRX-3 through M-PRX-9 in progress.
-- **Worker health monitoring decomposition** — 4 TODOs (H-HLT-1, M-HLT-2, M-ORC-7, M-CLN-1) for deterministic screen-based health checks, supervisor screen awareness, and orchestrator polish. Driven by friction log review (supervisor-missed-stalled-workers, remote-branch-delete-fails).
+**Shipped in grind cycle 7 (Phase B completion + C-bis: Worker Health Monitoring):**
+- **Review worker integration** — full review pipeline: reviewing state and config (H-RVW-1), review worker agent prompt (H-RVW-2), parameterized session launcher (H-RVW-3), CLI/setup/daemon wiring (H-RVW-4), external PR scanning and review (M-RVW-5). The orchestrator now dispatches review workers against PRs as part of the standard lifecycle.
+- **Worker health monitoring** — deterministic screen-based health checks (H-HLT-1), supervisor screen awareness (M-HLT-2), suppressed false branch-delete warnings (M-ORC-7), cleanup of superseded TODOs (M-CLN-1). Driven by friction log: the supervisor reported "ok" while workers were stalled at empty prompts — now the daemon detects this deterministically.
+- **Policy proxy foundation** — nono CONNECT forwarding + CA trust chain validation (H-PRX-1), Cedar entity hierarchy for URL path matching (H-PRX-2).
 
-**Self-developing.** ninthwave dogfoods itself. The friction log has surfaced 25+ issues across 7 grind cycles, driving improvements from poll interval tuning to the file-per-todo migration to deterministic worker health monitoring. The L-VIS recurring item in `.ninthwave/todos/` keeps the self-improvement loop running.
+**Shipped in grind cycle 8 (Phase B completion + orchestrator maturity):**
+- **Policy proxy completion** — proxy-launcher module with detection, spawn, and health check (H-PRX-7), `--upstream-proxy` flag and config keys (H-PRX-8), E2E integration test for nono + proxy + GitHub API (M-PRX-9). The full policy-driven sandboxing tier is now shipped.
+- **Multiplexer reliability** — fail-fast when multiplexer is unavailable or misconfigured (H-MFV-1), prevent zellij session exit when orchestrator launches (H-MZJ-1).
+- **ID collision protection** — prevent orchestrator from falsely completing TODOs when IDs collide with old PRs (H-MID-1).
+- **Orchestrator improvements** — granular failure states (M-ORC-8), `--watch` persistent daemon mode (M-ORC-9), robust remote branch deletion (M-ORC-10), `ninthwave retry` command for stuck items (H-ORC-8), cross-repo bootstrap for non-existent repos (H-ORC-9), custom GitHub identity for daemon and workers (L-ORC-3), cross-repo daemon awareness fix.
+- **CLI and UX** — comma/space-separated ID parsing (M-CLI-2), dependency tree visualization in status output (M-UX-1), interactive CLI flow for orchestrate command (L-UX-1).
+- **Testing** — daemon lifecycle integration tests (M-TST-5).
+
+**Self-developing.** ninthwave dogfoods itself. The friction log has surfaced 25+ issues across 8+ grind cycles, driving improvements from poll interval tuning to the file-per-todo migration to deterministic worker health monitoring to multiplexer reliability fixes. The L-VIS recurring item in `.ninthwave/todos/` keeps the self-improvement loop running.
 
 **Competitive positioning (Q1 2026).** Parallel AI coding exploded: Claude Code Agent Teams (16+ agents), Cursor (8 agents), Superset IDE (10+ agents), dmux, Conductor. All launch parallel sessions. None decompose work, order dependencies, manage CI lifecycle, or orchestrate merges. ninthwave's moat is the integrated pipeline, not session launching. Agent Teams is complementary (intra-task collaboration on one item) while ninthwave is inter-task orchestration (N workers on N items).
 
@@ -91,9 +100,11 @@ v0.1.0 shipped March 2026. Seven grind cycles (0-6) have shipped since then.
 
 8. **Test confidence is merge confidence.** Every work item has a test plan. Every PR has verified test outcomes. The orchestrator surfaces aggregate test confidence so humans review with context. ninthwave doesn't run tests — it tracks and surfaces the results of tests that workers and CI already run.
 
+9. **Reduce entropy, maintain outcomes.** Systems should get simpler over time, not more complex and fragile. Every fix or feature should leave the system no more complex than before — prefer removing code over adding code, convention over configuration, fewer moving parts achieving the same results. Complexity is debt. This applies to ninthwave itself (the C-bis cycle moved intelligence from the LLM supervisor into deterministic daemon logic, making the system simpler and more reliable) and to the codebases it operates on (human-sized PRs and decomposition keep each change reviewable and reversible). The goal is always: same or better outcomes, less machinery.
+
 ## What's Next
 
-Priority areas ordered by dependency and impact. Phases A through A-sexies and C-alpha are complete.
+Priority areas ordered by dependency and impact. Phases A through A-sexies, B (local + policy tiers), C-alpha, and C-bis are complete.
 
 ### A. Solidify the Foundation *(complete)*
 
@@ -123,25 +134,24 @@ Priority areas ordered by dependency and impact. Phases A through A-sexies and C
 
 ~~Ship the OSS foundation for remote session access: dashboard server, auth, provider pattern, health checks.~~ Done. Orchestrator dashboard server with token auth (H-REM-1), dashboard lifecycle wiring with `--remote` flag (H-REM-2), `SessionUrlProvider` pattern for cloud extensibility, BYOT tunnel model, and `nw doctor` health check command (M-DX-1) all shipped. Architecture: one dashboard per orchestration run (not per-worker servers). OSS provides the server, user brings their own tunnel. Cloud adds managed tunneling + persistent domains via the provider pattern.
 
-### B. Sandboxed Workers *(in progress)*
+### ~~B. Sandboxed Workers~~ *(complete — local + policy tiers shipped; Firecracker future)*
 
-Workers run in isolated environments. Prevent accidental destructive operations and contain blast radius.
+~~Workers run in isolated environments. Prevent accidental destructive operations and contain blast radius.~~ Done. Two of three tiers shipped:
 
-Tiered approach based on trust level and environment:
-
-- **Local/lightweight (default):** [nono](https://github.com/always-further/nono) — kernel-level sandboxing via Seatbelt (macOS) and Landlock (Linux). Zero startup latency, granular filesystem allowlisting, snapshot and rollback, credential injection via proxy. Best fit for trusted local development. Convention: this is the default, zero-config. *(Shipped: SBX-1 through SBX-4.)*
-- **Policy-driven:** MITM policy proxy — standalone Rust binary with Cedar policy engine. Selective MITM for credentialed services (GitHub API), per-request policy evaluation, credential injection, structured JSON audit logging. Integrates with nono via `--upstream-proxy`. *(In progress: H-PRX-3 through M-PRX-9.)*
-- **Maximum isolation:** [Firecracker](https://github.com/firecracker-microvm/firecracker) microVMs — hardware virtualization via KVM. Minimal overhead, battle-tested at AWS Lambda scale. For untrusted code or multi-tenant scenarios. *(Future.)*
+- **Local/lightweight (default):** [nono](https://github.com/always-further/nono) — kernel-level sandboxing via Seatbelt (macOS) and Landlock (Linux). Zero startup latency, granular filesystem allowlisting, snapshot and rollback, credential injection via proxy. Convention: this is the default, zero-config. *(Shipped: SBX-1 through SBX-4.)*
+- **Policy-driven:** MITM policy proxy — standalone Rust binary with Cedar policy engine. Selective MITM for credentialed services (GitHub API), per-request policy evaluation, credential injection, structured JSON audit logging. Integrates with nono via `--upstream-proxy`. Proxy-launcher module handles detection, spawn, and health checks. E2E tested with nono + proxy + GitHub API flow. *(Shipped: H-PRX-1, H-PRX-2, H-PRX-7, H-PRX-8, M-PRX-9.)*
+- **Maximum isolation:** [Firecracker](https://github.com/firecracker-microvm/firecracker) microVMs — hardware virtualization via KVM. Minimal overhead, battle-tested at AWS Lambda scale. For untrusted code or multi-tenant scenarios. *(Future — deferred until multi-tenant demand materializes.)*
 
 Worker snapshots enable pre-commit review of filesystem changes before they're applied to the repo.
 
-### C-bis. Worker Health Monitoring
+### ~~C-bis. Worker Health Monitoring~~ *(complete)*
 
-Deterministic worker health checks — the daemon detects stalled workers by reading terminal screens, not just checking state-level data. Friction log surfaced this as the #1 reliability gap: the supervisor reported "ok" while all 3 workers were stalled at empty prompts.
+~~Deterministic worker health checks — the daemon detects stalled workers by reading terminal screens, not just checking state-level data.~~ Done. Friction log surfaced this as the #1 reliability gap: the supervisor reported "ok" while all 3 workers were stalled at empty prompts.
 
-- **Deterministic screen health checks (H-HLT-1).** Orchestrator reads worker screens during snapshot building. Detects: empty input (stalled), permission prompts (waiting for user), error output (stuck), no change (hung process). Emits nudge actions automatically.
-- **Supervisor screen awareness (M-HLT-2).** Feed screen health classifications into the supervisor prompt so the LLM can detect subtler anomalies and systemic patterns (e.g., all workers stalled = environment issue).
-- **Orchestrator log cleanup (M-ORC-7).** Suppress false "branch delete failed" warnings when GitHub auto-delete is enabled.
+- **Deterministic screen health checks (H-HLT-1).** Orchestrator reads worker screens during snapshot building. Detects: empty input (stalled), permission prompts (waiting for user), error output (stuck), no change (hung process). Emits nudge actions automatically. *(Shipped.)*
+- **Supervisor screen awareness (M-HLT-2).** Screen health classifications fed into the supervisor prompt for detecting subtler anomalies and systemic patterns (e.g., all workers stalled = environment issue). *(Shipped.)*
+- **Orchestrator log cleanup (M-ORC-7).** Suppressed false "branch delete failed" warnings when GitHub auto-delete is enabled. *(Shipped.)*
+- **TODO cleanup (M-CLN-1).** Removed superseded TODO files. *(Shipped.)*
 
 ### C-beta. Remote Session Access — Cloud Track
 
@@ -161,8 +171,8 @@ An optional advisory layer on top of the deterministic daemon.
 - Periodically reviews the daemon's structured logs and applies judgment: stuck workers, repeating CI errors, patterns suggesting systemic issues, process improvements the daemon can't detect. *(Shipped — core supervisor tick loop with prompt construction, response parsing, action application, and friction file writing.)*
 - Advisory outputs only: structured log events, friction log entries, suggested actions (send worker a hint, adjust WIP). The daemon continues regardless of supervisor output. *(Shipped.)*
 - Error resilience: exponential backoff after 3 consecutive LLM failures, auto-disable after 10 failures, error details logged. *(Shipped.)*
-- **Key principle: the LLM makes itself less necessary over time.** Each dogfooding cycle should move more intelligence from the supervisor into deterministic daemon logic. The supervisor's job is to detect what the daemon doesn't handle yet — then that detection gets codified. *(In progress — C-bis moves screen health checks from supervisor into deterministic daemon logic.)*
-- **Remaining:** Worker screen content in supervisor prompt (M-HLT-2). Supervisor-generated friction entries auto-decomposed into TODOs. Integration with external notification channels beyond log entries.
+- **Key principle: the LLM makes itself less necessary over time.** Each dogfooding cycle should move more intelligence from the supervisor into deterministic daemon logic. The supervisor's job is to detect what the daemon doesn't handle yet — then that detection gets codified. *(Demonstrated — C-bis moved screen health checks from supervisor into deterministic daemon logic, making the system simpler and more reliable.)*
+- **Remaining:** Supervisor-generated friction entries auto-decomposed into TODOs (next priority — closes the loop between friction detection and work item creation). Integration with external notification channels beyond log entries.
 
 ### E. Expand the Surface Area
 
