@@ -1877,6 +1877,13 @@ export async function cmdOrchestrate(
   // workspace refs can be recovered from live workspaces.
   const mux = getMux();
 
+  // Pre-flight: fail fast if the mux backend is not usable (binary missing
+  // or no active session). Without this, workers launch and immediately fail
+  // with misleading errors, wasting 10+ minutes in retry/stuck cycles.
+  if (!mux.isAvailable()) {
+    die(mux.diagnoseUnavailable());
+  }
+
   // Clean orphaned worktrees before state reconstruction so stale worktrees
   // from previous runs don't confuse reconstructState or count toward WIP.
   cleanOrphanedWorktrees(todosDir, worktreeDir, projectRoot, {
