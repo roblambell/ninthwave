@@ -1888,6 +1888,37 @@ describe("statusDisplayForState", () => {
     expect(d.icon).toBe("checkmark.seal.fill");
     expect(d.color).toBe("#22c55e");
   });
+
+  it("returns Rebasing display when rebaseRequested is true and state is ci-pending", () => {
+    const d = statusDisplayForState("ci-pending", { rebaseRequested: true });
+    expect(d.text).toBe("Rebasing");
+    expect(d.icon).toBe("arrow.triangle.branch");
+    expect(d.color).toBe("#f59e0b");
+  });
+
+  it("returns Rebasing display when rebaseRequested is true and state is ci-failed", () => {
+    const d = statusDisplayForState("ci-failed", { rebaseRequested: true });
+    expect(d.text).toBe("Rebasing");
+    expect(d.icon).toBe("arrow.triangle.branch");
+    expect(d.color).toBe("#f59e0b");
+  });
+
+  it("returns normal CI Pending display when rebaseRequested is not set", () => {
+    const d = statusDisplayForState("ci-pending");
+    expect(d.text).toBe("CI Pending");
+    expect(d.icon).toBe("clock.fill");
+    expect(d.color).toBe("#06b6d4");
+  });
+
+  it("returns normal CI Pending display when rebaseRequested is false", () => {
+    const d = statusDisplayForState("ci-pending", { rebaseRequested: false });
+    expect(d.text).toBe("CI Pending");
+  });
+
+  it("ignores rebaseRequested for non ci-pending/ci-failed states", () => {
+    const d = statusDisplayForState("implementing", { rebaseRequested: true });
+    expect(d.text).toBe("Implementing");
+  });
 });
 
 // ── buildSnapshot heartbeat integration ─────────────────────────────

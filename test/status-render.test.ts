@@ -86,12 +86,16 @@ function makeOrchestratorItem(id: string, state: OrchestratorItem["state"] = "im
 describe("stateColor", () => {
   it("returns a string for every valid state", () => {
     const states: ItemState[] = [
-      "merged", "bootstrapping", "implementing", "ci-failed", "ci-pending",
+      "merged", "bootstrapping", "implementing", "rebasing", "ci-failed", "ci-pending",
       "review", "pr-open", "in-progress", "queued",
     ];
     for (const state of states) {
       expect(typeof stateColor(state)).toBe("string");
     }
+  });
+  it("returns YELLOW for rebasing", () => {
+    // rebasing shares the same color as bootstrapping/implementing/in-progress
+    expect(stateColor("rebasing")).toBe(stateColor("implementing"));
   });
 });
 
@@ -107,12 +111,15 @@ describe("stateIcon", () => {
   });
   it("returns a string for every valid state", () => {
     const states: ItemState[] = [
-      "merged", "bootstrapping", "implementing", "ci-failed", "ci-pending",
+      "merged", "bootstrapping", "implementing", "rebasing", "ci-failed", "ci-pending",
       "review", "pr-open", "in-progress", "queued",
     ];
     for (const state of states) {
       expect(typeof stateIcon(state)).toBe("string");
     }
+  });
+  it("returns the rebasing icon", () => {
+    expect(stateIcon("rebasing")).toBe("⟲");
   });
 });
 
@@ -123,6 +130,9 @@ describe("stateLabel", () => {
     expect(stateLabel("ci-pending")).toBe("CI Pending");
     expect(stateLabel("review")).toBe("In Review");
     expect(stateLabel("queued")).toBe("Queued");
+  });
+  it("returns Rebasing label for rebasing state", () => {
+    expect(stateLabel("rebasing")).toBe("Rebasing");
   });
 });
 
@@ -321,6 +331,13 @@ describe("formatStatusTable", () => {
     expect(() => formatStatusTable(items, 40)).not.toThrow();
     expect(() => formatStatusTable(items, 80)).not.toThrow();
     expect(() => formatStatusTable(items, 200)).not.toThrow();
+  });
+
+  it("renders rebasing icon and label for rebasing state items", () => {
+    const items = [makeStatusItem({ id: "REB-1", title: "Rebasing item", state: "rebasing" })];
+    const table = stripAnsi(formatStatusTable(items, 80));
+    expect(table).toContain("Rebasing");
+    expect(table).toContain("⟲");
   });
 
   it("renders DURATION header instead of AGE", () => {
@@ -555,6 +572,27 @@ describe("mapDaemonItemState", () => {
   it("maps unknown states to in-progress", () => {
     expect(mapDaemonItemState("unknown-state")).toBe("in-progress");
   });
+
+  it("returns rebasing when rebaseRequested is true and state is ci-pending", () => {
+    expect(mapDaemonItemState("ci-pending", { rebaseRequested: true })).toBe("rebasing");
+  });
+
+  it("returns rebasing when rebaseRequested is true and state is ci-failed", () => {
+    expect(mapDaemonItemState("ci-failed", { rebaseRequested: true })).toBe("rebasing");
+  });
+
+  it("returns ci-pending when rebaseRequested is false", () => {
+    expect(mapDaemonItemState("ci-pending", { rebaseRequested: false })).toBe("ci-pending");
+  });
+
+  it("returns ci-pending when no flags passed (backward compat)", () => {
+    expect(mapDaemonItemState("ci-pending")).toBe("ci-pending");
+  });
+
+  it("ignores rebaseRequested for non ci-pending/ci-failed states", () => {
+    expect(mapDaemonItemState("implementing", { rebaseRequested: true })).toBe("implementing");
+    expect(mapDaemonItemState("merged", { rebaseRequested: true })).toBe("merged");
+  });
 });
 
 // ── daemonStateToStatusItems ──────────────────────────────────────────────────
@@ -613,6 +651,51 @@ describe("daemonStateToStatusItems", () => {
     expect(items[0]!.dependencies).toEqual(["C-1-1"]);
     expect(items[0]!.exitCode).toBe(1);
     expect(items[0]!.stderrTail).toBe("Error: test failed");
+  });
+
+  it("maps rebaseRequested flag to rebasing display state", () => {
+    const now = new Date().toISOString();
+    const state: DaemonState = {
+      pid: 1,
+      startedAt: now,
+      updatedAt: now,
+      items: [
+        {
+          id: "C-1-3",
+          state: "ci-pending",
+          prNumber: 10,
+          title: "Rebasing item",
+          lastTransition: now,
+          ciFailCount: 0,
+          retryCount: 0,
+          rebaseRequested: true,
+        },
+      ],
+    };
+    const items = daemonStateToStatusItems(state);
+    expect(items[0]!.state).toBe("rebasing");
+  });
+
+  it("does not map to rebasing when rebaseRequested is absent", () => {
+    const now = new Date().toISOString();
+    const state: DaemonState = {
+      pid: 1,
+      startedAt: now,
+      updatedAt: now,
+      items: [
+        {
+          id: "C-1-4",
+          state: "ci-pending",
+          prNumber: 10,
+          title: "Normal item",
+          lastTransition: now,
+          ciFailCount: 0,
+          retryCount: 0,
+        },
+      ],
+    };
+    const items = daemonStateToStatusItems(state);
+    expect(items[0]!.state).toBe("ci-pending");
   });
 });
 

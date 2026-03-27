@@ -34,6 +34,7 @@ export type ItemState =
   | "merged"
   | "bootstrapping"
   | "implementing"
+  | "rebasing"
   | "ci-failed"
   | "ci-pending"
   | "review"
@@ -118,6 +119,7 @@ export function stateColor(state: ItemState): string {
       return GREEN;
     case "bootstrapping":
     case "implementing":
+    case "rebasing":
     case "in-progress":
       return YELLOW;
     case "ci-failed":
@@ -143,6 +145,8 @@ export function stateIcon(state: ItemState): string {
     case "implementing":
     case "in-progress":
       return "▸";
+    case "rebasing":
+      return "⟲";
     case "ci-failed":
       return "✗";
     case "ci-pending":
@@ -167,6 +171,8 @@ export function stateLabel(state: ItemState): string {
       return "Bootstrapping";
     case "implementing":
       return "Implementing";
+    case "rebasing":
+      return "Rebasing";
     case "ci-failed":
       return "CI Failed";
     case "ci-pending":
@@ -319,6 +325,7 @@ export function formatBatchProgress(items: StatusItem[]): string {
     "review",
     "pr-open",
     "ci-pending",
+    "rebasing",
     "bootstrapping",
     "implementing",
     "in-progress",
@@ -794,7 +801,11 @@ export function formatStatusTable(
  * Map orchestrator item state strings to status display ItemState.
  * Orchestrator uses finer-grained states; status display groups them.
  */
-export function mapDaemonItemState(orchState: string): ItemState {
+export function mapDaemonItemState(orchState: string, flags?: { rebaseRequested?: boolean }): ItemState {
+  // Composite display state: rebase is a transient operation overlaid on ci-pending/ci-failed
+  if (flags?.rebaseRequested && (orchState === "ci-pending" || orchState === "ci-failed")) {
+    return "rebasing";
+  }
   switch (orchState) {
     case "merged":
     case "done":
@@ -831,7 +842,7 @@ export function daemonStateToStatusItems(state: DaemonState): StatusItem[] {
   return state.items.map((item) => ({
     id: item.id,
     title: item.title,
-    state: mapDaemonItemState(item.state),
+    state: mapDaemonItemState(item.state, { rebaseRequested: item.rebaseRequested }),
     prNumber: item.prNumber,
     ageMs: Date.now() - new Date(item.lastTransition).getTime(),
     repoLabel: "",

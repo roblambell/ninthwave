@@ -355,7 +355,7 @@ export function syncWorkerDisplay(
     if (!item.workspaceRef) continue;
     if (!activeStates.has(item.state)) continue;
 
-    const display = statusDisplayForState(item.state);
+    const display = statusDisplayForState(item.state, { rebaseRequested: item.rebaseRequested });
     const statusKey = `todo-${item.id}`;
 
     // Set status pill (best-effort)
@@ -584,7 +584,7 @@ export function reconstructState(
   daemonState?: DaemonState | null,
 ): void {
   // Build a lookup map from saved daemon state for restoring persisted counters and review fields
-  const savedItems = new Map<string, { ciFailCount: number; retryCount: number; reviewWorkspaceRef?: string; reviewCompleted?: boolean; lastCommentCheck?: string }>();
+  const savedItems = new Map<string, { ciFailCount: number; retryCount: number; reviewWorkspaceRef?: string; reviewCompleted?: boolean; lastCommentCheck?: string; rebaseRequested?: boolean }>();
   if (daemonState?.items) {
     for (const si of daemonState.items) {
       savedItems.set(si.id, {
@@ -593,6 +593,7 @@ export function reconstructState(
         reviewWorkspaceRef: si.reviewWorkspaceRef,
         reviewCompleted: si.reviewCompleted,
         lastCommentCheck: si.lastCommentCheck,
+        rebaseRequested: si.rebaseRequested,
       });
     }
   }
@@ -612,6 +613,7 @@ export function reconstructState(
       if (saved.reviewWorkspaceRef) item.reviewWorkspaceRef = saved.reviewWorkspaceRef;
       if (saved.reviewCompleted) item.reviewCompleted = saved.reviewCompleted;
       if (saved.lastCommentCheck) item.lastCommentCheck = saved.lastCommentCheck;
+      if (saved.rebaseRequested) item.rebaseRequested = saved.rebaseRequested;
     }
 
     // Check for worktree: cross-repo index first, then hub-local fallback

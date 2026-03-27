@@ -1328,6 +1328,43 @@ describe("serializeOrchestratorState includes ciFailCount", () => {
   });
 });
 
+describe("serializeOrchestratorState includes rebaseRequested", () => {
+  it("serializes rebaseRequested when true", () => {
+    const { serializeOrchestratorState } = require("../core/daemon.ts");
+    const item: OrchestratorItem = {
+      id: "REB-1",
+      todo: makeTodo("REB-1"),
+      state: "ci-pending",
+      prNumber: 20,
+      lastTransition: "2026-01-01T00:00:00Z",
+      ciFailCount: 0,
+      retryCount: 0,
+      rebaseRequested: true,
+    };
+
+    const state = serializeOrchestratorState([item], 9999, "2026-01-01T00:00:00Z");
+    expect(state.items).toHaveLength(1);
+    expect(state.items[0].rebaseRequested).toBe(true);
+  });
+
+  it("omits rebaseRequested when false", () => {
+    const { serializeOrchestratorState } = require("../core/daemon.ts");
+    const item: OrchestratorItem = {
+      id: "REB-2",
+      todo: makeTodo("REB-2"),
+      state: "ci-pending",
+      prNumber: 21,
+      lastTransition: "2026-01-01T00:00:00Z",
+      ciFailCount: 0,
+      retryCount: 0,
+      rebaseRequested: false,
+    };
+
+    const state = serializeOrchestratorState([item], 9999, "2026-01-01T00:00:00Z");
+    expect(state.items[0].rebaseRequested).toBeUndefined();
+  });
+});
+
 describe("interruptibleSleep", () => {
   it("resolves after timeout", async () => {
     const start = Date.now();

@@ -40,6 +40,8 @@ export interface DaemonStateItem {
   stderrTail?: string;
   /** ISO timestamp of the last comment check for this item's PR. */
   lastCommentCheck?: string;
+  /** Whether a rebase request is in progress for this item. */
+  rebaseRequested?: boolean;
 }
 
 export interface DaemonState {
@@ -406,6 +408,7 @@ export function serializeOrchestratorState(
       ...(item.exitCode != null ? { exitCode: item.exitCode } : {}),
       ...(item.stderrTail ? { stderrTail: item.stderrTail } : {}),
       ...(item.lastCommentCheck ? { lastCommentCheck: item.lastCommentCheck } : {}),
+      ...(item.rebaseRequested ? { rebaseRequested: item.rebaseRequested } : {}),
     })),
   };
 }
