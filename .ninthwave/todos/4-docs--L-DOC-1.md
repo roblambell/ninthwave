@@ -2,14 +2,14 @@
 
 **Priority:** Low
 **Source:** Vision L-VIS-12 — tool integration polish
-**Depends on:** M-CPT-1
+**Depends on:** (none)
 **Domain:** docs
 
 ## Context
 
 ninthwave supports three AI tools: Claude Code, OpenCode, and Copilot CLI. Claude Code has the deepest integration (agent mode, permissions bypass, append-system-prompt). Copilot CLI integration works but has undocumented quirks: prompt delivery via launcher scripts in `/tmp`, trusted folder requirements, and different session lifecycle behavior.
 
-With M-CPT-1 adding auto-trust for Copilot folders, the Copilot integration story is more complete. Document it so Copilot CLI users can get started without hitting known pitfalls.
+With Copilot CLI support maturing, document it so Copilot CLI users can get started without hitting known pitfalls. Note: auto-trust for Copilot folders was considered (M-CPT-1) but cancelled — users should manage their own `~/.copilot/config.json` trusted folders.
 
 ## Requirements
 
