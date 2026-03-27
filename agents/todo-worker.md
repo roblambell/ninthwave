@@ -53,9 +53,9 @@ git rebase --abort
 git reset --hard origin/main  # or origin/$BASE_BRANCH if stacked
 ```
 
-Then set status:
+Then report progress:
 ```bash
-cmux set-status "todo-YOUR_TODO_ID" "Implementing" --icon "hammer.fill" --color "#b45309"
+nw heartbeat --progress 0.0 --label "Starting"
 ```
 
 ## 4. Implement the Change
@@ -64,6 +64,18 @@ cmux set-status "todo-YOUR_TODO_ID" "Implementing" --icon "hammer.fill" --color 
 - Follow all project conventions from the project instruction file
 - Keep changes tightly scoped to files mentioned in the TODO
 - If you discover related issues, note them in the PR body but do NOT fix them
+
+### Progress updates
+
+Call `nw heartbeat` at natural milestones during implementation:
+
+```bash
+nw heartbeat --progress 0.1 --label "Reading code"    # after reading affected files
+nw heartbeat --progress 0.3 --label "Writing code"     # while implementing changes
+nw heartbeat --progress 0.5 --label "Writing tests"    # when adding/updating tests
+```
+
+You don't need to hit every milestone — call heartbeat when you transition between phases of work.
 
 ### No-Op Path: When No Code Change Is Needed
 
@@ -156,10 +168,8 @@ Walk through each criterion from the `Acceptance:` line in the TODO. For each on
 
 If any criterion is not met, fix the implementation before proceeding.
 
-### Set Status: Testing passed
-
 ```bash
-cmux set-status "todo-YOUR_TODO_ID" "Testing ✓" --icon "checkmark.circle" --color "#2563eb"
+nw heartbeat --progress 0.7 --label "Tests passing"
 ```
 
 ## 7. Quality Review
@@ -173,10 +183,8 @@ cmux set-status "todo-YOUR_TODO_ID" "Testing ✓" --icon "checkmark.circle" --co
 
 For UI/visual changes, run `/design-review` if available. For bug fixes with UI impact, run `/qa` if available. These are optional -- skip if not installed.
 
-### Set Status: Reviewed
-
 ```bash
-cmux set-status "todo-YOUR_TODO_ID" "Reviewed" --icon "eye.fill" --color "#7c3aed"
+nw heartbeat --progress 0.85 --label "Reviewed"
 ```
 
 ## 8. Remove Your TODO File
@@ -269,10 +277,8 @@ If the project instruction file indicates dogfooding mode or auto-merge, enable 
 gh pr merge --squash --auto
 ```
 
-### Set Status: PR Created
-
 ```bash
-cmux set-status "todo-YOUR_TODO_ID" "PR Created" --icon "checkmark.circle.fill" --color "#22c55e"
+nw heartbeat --progress 1.0 --label "PR created"
 ```
 
 ## 10. Dogfooding Friction Log (ninthwave projects only)
@@ -313,12 +319,6 @@ After creating the PR, your implementation work is done. The **orchestrator daem
 
 You do NOT need to poll, watch, or take any post-PR action. The daemon handles it.
 
-### Set Status: Awaiting Review
-
-```bash
-cmux set-status "todo-YOUR_TODO_ID" "Awaiting Review" --icon "clock.fill" --color "#6366f1"
-```
-
 **Do NOT poll or watch the PR.** Simply stop and wait. Your session stays alive. The orchestrator daemon will send messages into your session via `cmux send` only when it needs you to act.
 
 ### Responding to orchestrator daemon messages
@@ -329,31 +329,28 @@ When you receive a message, it will be one of these categories:
 
 #### CI Fix Request
 
-1. Set status: `cmux set-status "todo-YOUR_TODO_ID" "Fixing CI" --icon "hammer.fill" --color "#b45309"`
+1. Report progress: `nw heartbeat --progress 0.9 --label "Fixing CI"`
 2. Pull latest (the daemon may have rebased your branch): `git fetch origin && git reset --hard origin/todo/YOUR_TODO_ID`
 3. Investigate and fix the failure, run tests locally
-4. Commit and push
-5. Set status back to "Awaiting Review"
+4. Commit and push: `nw heartbeat --progress 1.0 --label "PR created"`
 
 #### Review Feedback
 
 > **Note:** Feedback is pre-filtered by the toolchain to only include comments from trusted collaborators (`OWNER`, `MEMBER`, `COLLABORATOR`). PR conversations are locked at creation time, and the `pr-activity`/`pr-watch` commands ignore comments from non-collaborators. You can safely act on any feedback the orchestrator daemon relays.
 
-1. Set status: `cmux set-status "todo-YOUR_TODO_ID" "Addressing Feedback" --icon "pencil.circle.fill" --color "#b45309"`
+1. Report progress: `nw heartbeat --progress 0.85 --label "Addressing feedback"`
 2. Pull latest: `git fetch origin && git reset --hard origin/todo/YOUR_TODO_ID`
 3. Address the feedback
 4. Run tests
 5. Commit and push
-6. Post a reply on the PR summarizing changes (prefix with `**[Worker: YOUR_TODO_ID]**`)
-7. Set status back to "Awaiting Review"
+6. Post a reply on the PR summarizing changes (prefix with `**[Worker: YOUR_TODO_ID]**`): `nw heartbeat --progress 1.0 --label "PR created"`
 
 #### Rebase Request
 
-1. Set status: `cmux set-status "todo-YOUR_TODO_ID" "Rebasing" --icon "arrow.triangle.2.circlepath" --color "#b45309"`
+1. Report progress: `nw heartbeat --progress 0.95 --label "Rebasing"`
 2. `git fetch origin main --quiet && git rebase origin/main`
-3. If success: `git push --force-with-lease`
-4. If conflicts: abort, set "Needs Attention" status, post PR comment explaining
-5. Set status back to "Awaiting Review"
+3. If success: `git push --force-with-lease` then `nw heartbeat --progress 1.0 --label "PR created"`
+4. If conflicts: abort, post PR comment explaining
 
 #### Stop Request
 
