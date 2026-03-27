@@ -372,7 +372,27 @@ export async function onboard(
 
   // ── Step 4: Run setup ───────────────────────────────────────────
   console.log(`${DIM}Setting up ninthwave...${RESET}`);
-  initProject(projectDir, bundleDir, { commandExists });
+  const detection = initProject(projectDir, bundleDir, { commandExists });
+
+  // ── Step 4b: Workspace confirmation ─────────────────────────────
+  if (detection.workspace) {
+    console.log(
+      `${BOLD}Workspace detected:${RESET} ${detection.workspace.tool} (${detection.workspace.packages.length} packages)`,
+    );
+    for (const pkg of detection.workspace.packages) {
+      const cmd = pkg.testCmd || "no test command";
+      console.log(`  ${pkg.name} ${DIM}(${pkg.path})${RESET} — ${cmd}`);
+    }
+    console.log();
+    const confirm = await prompt(
+      `  Does this look right? [Y/n]: `,
+    );
+    if (confirm.toLowerCase() === "n") {
+      console.log(
+        `  Edit workspace config in ${BOLD}.ninthwave/config.json${RESET}`,
+      );
+    }
+  }
   console.log();
 
   // ── Step 5: Launch session ──────────────────────────────────────

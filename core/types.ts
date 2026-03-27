@@ -26,6 +26,18 @@ export const PRIORITY_NUM: Record<Priority, number> = {
   low: 3,
 };
 
+export interface WorkspacePackage {
+  name: string;
+  path: string;
+  testCmd: string;
+}
+
+export interface WorkspaceConfig {
+  tool: "pnpm" | "yarn" | "npm" | "turborepo";
+  root: string;
+  packages: WorkspacePackage[];
+}
+
 export interface ProjectConfig {
   locExtensions: string;
   [key: string]: string;

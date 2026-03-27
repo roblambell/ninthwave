@@ -19,6 +19,7 @@ import { getBundleDir } from "../paths.ts";
 import { userStateDir } from "../daemon.ts";
 import { info, GREEN, BOLD, DIM, RESET, YELLOW, RED } from "../output.ts";
 import { run } from "../shell.ts";
+import type { WorkspaceConfig, WorkspacePackage } from "../types.ts";
 import {
   createSkillSymlinks,
   isSelfHosting,
@@ -41,6 +42,8 @@ export interface DetectionResult {
   repoType: "monorepo" | "single";
   /** Detected observability backends (from env vars) */
   observabilityBackends: string[];
+  /** Detected workspace configuration (monorepo packages) */
+  workspace: WorkspaceConfig | null;
 }
 
 /**
@@ -226,6 +229,251 @@ export function detectObservabilityBackends(deps: InitDeps = {}): string[] {
   return backends;
 }
 
+// --- Workspace detection ---
+
+/**
+ * Parse package globs from pnpm-workspace.yaml content.
+ * Handles the simple YAML structure: `packages:` followed by `- glob` items.
+ */
+export function parsePnpmWorkspaceYaml(content: string): string[] {
+  const globs: string[] = [];
+  let inPackages = false;
+
+  for (const line of content.split("\n")) {
+    const trimmed = line.trim();
+    if (!trimmed || trimmed.startsWith("#")) continue;
+
+    if (/^packages\s*:/.test(trimmed)) {
+      inPackages = true;
+      continue;
+    }
+
+    // New top-level key ends the packages section
+    if (inPackages && /^\S/.test(line)) {
+      break;
+    }
+
+    if (inPackages && trimmed.startsWith("- ")) {
+      const glob = trimmed.slice(2).trim().replace(/^['"]|['"]$/g, "");
+      if (glob) globs.push(glob);
+    }
+  }
+
+  return globs;
+}
+
+/**
+ * Pick the best test script from a package.json scripts object.
+ * Priority: test:ci > test > first script key containing "test".
+ */
+export function pickTestScript(
+  scripts?: Record<string, string>,
+): string | null {
+  if (!scripts) return null;
+  if (scripts["test:ci"]) return "test:ci";
+  if (scripts["test"]) return "test";
+  for (const key of Object.keys(scripts)) {
+    if (key.includes("test")) return key;
+  }
+  return null;
+}
+
+/**
+ * Format a workspace-scoped test command for a given tool and package.
+ */
+export function formatTestCommand(
+  tool: "pnpm" | "yarn" | "npm",
+  name: string,
+  path: string,
+  script: string,
+): string {
+  switch (tool) {
+    case "pnpm":
+      return script === "test"
+        ? `pnpm test --filter ${name}`
+        : `pnpm run ${script} --filter ${name}`;
+    case "yarn":
+      return script === "test"
+        ? `yarn workspace ${name} test`
+        : `yarn workspace ${name} run ${script}`;
+    case "npm":
+      return script === "test"
+        ? `npm test -w ${path}`
+        : `npm run ${script} -w ${path}`;
+  }
+}
+
+/**
+ * Resolve workspace glob patterns to directories containing package.json.
+ * Handles common patterns like `packages/*` and `apps/*`.
+ * Only detects first-level matches (no recursion into nested workspaces).
+ */
+export function resolveWorkspaceGlobs(
+  projectDir: string,
+  globs: string[],
+  tool: "pnpm" | "yarn" | "npm",
+  deps: InitDeps = {},
+): WorkspacePackage[] {
+  const fileExists = deps.fileExists ?? defaultFileExists;
+  const readDir = deps.readDir ?? defaultReadDir;
+  const rf = deps.readFile ?? defaultReadFile;
+
+  const packages: WorkspacePackage[] = [];
+  const seen = new Set<string>();
+
+  for (const glob of globs) {
+    // Skip negation patterns
+    if (glob.startsWith("!")) continue;
+
+    // Strip quotes
+    const cleaned = glob.replace(/^['"]|['"]$/g, "");
+
+    // Split into prefix and wildcard
+    const parts = cleaned.split("/");
+    const wildcardIdx = parts.findIndex((p) => p.includes("*"));
+
+    let dirs: string[];
+    if (wildcardIdx === -1) {
+      // Literal path — check if it has a package.json
+      if (fileExists(join(projectDir, cleaned, "package.json"))) {
+        dirs = [cleaned];
+      } else {
+        dirs = [];
+      }
+    } else {
+      // Resolve: list entries under the prefix directory
+      const prefix = parts.slice(0, wildcardIdx).join("/");
+      const baseDir = prefix ? join(projectDir, prefix) : projectDir;
+
+      const entries = readDir(baseDir);
+      dirs = entries
+        .filter((e) => !e.startsWith("."))
+        .filter((e) =>
+          fileExists(join(baseDir, e, "package.json")),
+        )
+        .map((e) => (prefix ? `${prefix}/${e}` : e));
+    }
+
+    for (const dir of dirs) {
+      if (seen.has(dir)) continue;
+      seen.add(dir);
+
+      const content = rf(join(projectDir, dir, "package.json"));
+      if (!content) continue;
+
+      let pkg: { name?: string; scripts?: Record<string, string> };
+      try {
+        pkg = JSON.parse(content);
+      } catch {
+        continue;
+      }
+
+      const name = pkg.name ?? dir.split("/").pop()!;
+      const testScript = pickTestScript(pkg.scripts);
+      const testCmd = testScript
+        ? formatTestCommand(tool, name, dir, testScript)
+        : "";
+
+      packages.push({ name, path: dir, testCmd });
+    }
+  }
+
+  return packages;
+}
+
+/**
+ * Detect workspace configuration for monorepo projects.
+ *
+ * Detection order:
+ * 1. pnpm-workspace.yaml → pnpm
+ * 2. package.json workspaces → yarn (if yarn.lock) / npm (otherwise)
+ * 3. turbo.json or package.json turbo field → override tool to "turborepo"
+ *
+ * Returns null for single-package repos or when globs match no packages.
+ */
+export function detectWorkspace(
+  projectDir: string,
+  deps: InitDeps = {},
+): WorkspaceConfig | null {
+  const fileExists = deps.fileExists ?? defaultFileExists;
+  const rf = deps.readFile ?? defaultReadFile;
+
+  let baseTool: "pnpm" | "yarn" | "npm" | null = null;
+  let globs: string[] = [];
+
+  // 1. Check pnpm-workspace.yaml
+  const pnpmYaml = rf(join(projectDir, "pnpm-workspace.yaml"));
+  if (pnpmYaml) {
+    baseTool = "pnpm";
+    globs = parsePnpmWorkspaceYaml(pnpmYaml);
+  }
+
+  // 2. Check package.json workspaces
+  if (!baseTool) {
+    const pkgContent = rf(join(projectDir, "package.json"));
+    if (pkgContent) {
+      try {
+        const pkg = JSON.parse(pkgContent) as {
+          workspaces?: string[] | { packages?: string[] };
+        };
+        if (pkg.workspaces) {
+          const ws = Array.isArray(pkg.workspaces)
+            ? pkg.workspaces
+            : (pkg.workspaces.packages ?? []);
+          if (ws.length > 0) {
+            globs = ws;
+            // Determine tool from lockfile
+            if (fileExists(join(projectDir, "pnpm-lock.yaml"))) {
+              baseTool = "pnpm";
+            } else if (fileExists(join(projectDir, "yarn.lock"))) {
+              baseTool = "yarn";
+            } else {
+              baseTool = "npm";
+            }
+          }
+        }
+      } catch {
+        // Invalid JSON — skip
+      }
+    }
+  }
+
+  if (!baseTool || globs.length === 0) return null;
+
+  // Resolve globs to actual packages
+  const packages = resolveWorkspaceGlobs(projectDir, globs, baseTool, deps);
+
+  if (packages.length === 0) {
+    console.warn(
+      `  ${YELLOW}!${RESET} Workspace globs matched no packages`,
+    );
+    return null;
+  }
+
+  // 3. Check for turborepo overlay
+  let tool: WorkspaceConfig["tool"] = baseTool;
+  const hasTurboJson = fileExists(join(projectDir, "turbo.json"));
+  if (hasTurboJson) {
+    tool = "turborepo";
+  } else {
+    const pkgContent = rf(join(projectDir, "package.json"));
+    if (pkgContent) {
+      try {
+        const pkg = JSON.parse(pkgContent) as { turbo?: unknown };
+        if (pkg.turbo) tool = "turborepo";
+      } catch {
+        // Already parsed above — skip
+      }
+    }
+  }
+
+  return {
+    tool,
+    root: ".",
+    packages,
+  };
+}
+
 /**
  * Run all detections and return the combined result.
  */
@@ -240,6 +488,7 @@ export function detectAll(
     aiTools: detectAITools(projectDir, deps),
     repoType: detectRepoType(projectDir, deps),
     observabilityBackends: detectObservabilityBackends(deps),
+    workspace: detectWorkspace(projectDir, deps),
   };
 }
 
@@ -362,6 +611,19 @@ export function printSummary(detection: DetectionResult): void {
     console.log(
       `  ${DIM}–${RESET} Observability: ${DIM}no backends detected (set SENTRY_AUTH_TOKEN, PAGERDUTY_API_TOKEN, or LINEAR_API_KEY)${RESET}`,
     );
+  }
+
+  // Workspace
+  if (detection.workspace) {
+    console.log(
+      `  ${GREEN}✓${RESET} Workspace: ${detection.workspace.tool} (${detection.workspace.packages.length} packages)`,
+    );
+    for (const pkg of detection.workspace.packages) {
+      const cmd = pkg.testCmd || `${DIM}no test command${RESET}`;
+      console.log(
+        `    ${DIM}·${RESET} ${pkg.name} ${DIM}(${pkg.path})${RESET} — ${cmd}`,
+      );
+    }
   }
 
   console.log();
@@ -515,6 +777,14 @@ export function initProject(
   writeFileSync(configPath, generateConfig(detection));
   console.log("Configured:");
   console.log(`  .ninthwave/config ${DIM}(auto-detected settings)${RESET}`);
+
+  // 3b. Write workspace config as JSON (structured data)
+  if (detection.workspace) {
+    const configJsonPath = join(projectDir, ".ninthwave/config.json");
+    const configJson = { workspace: detection.workspace };
+    writeFileSync(configJsonPath, JSON.stringify(configJson, null, 2) + "\n");
+    console.log(`  .ninthwave/config.json ${DIM}(workspace packages)${RESET}`);
+  }
 
   // 4. Run scaffolding
   scaffold(projectDir, bundleDir);
