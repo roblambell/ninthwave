@@ -37,6 +37,7 @@ import { cmdStop } from "./commands/stop.ts";
 import { cmdRetry } from "./commands/retry.ts";
 import { shouldOnboard, cmdOnboard } from "./commands/onboard.ts";
 import { cmdDoctor } from "./commands/doctor.ts";
+import { cmdHeartbeat } from "./commands/heartbeat.ts";
 
 // ── Help definitions ─────────────────────────────────────────────────
 
@@ -89,6 +90,10 @@ export const COMMANDS: ReadonlyArray<[string, string]> = [
   ["repos", "List discovered repos"],
   ["reconcile", "Sync todo files with merged PRs"],
   ["analytics [--all]", "Show orchestration performance trends"],
+  [
+    "heartbeat --progress <0-1> --label <text>",
+    "Report worker progress (auto-detects TODO ID from branch)",
+  ],
 
 ];
 
@@ -240,6 +245,7 @@ const needsTodos = ![
   "pr-activity",
   "version-bump",
   "analytics",
+  "heartbeat",
 
 ].includes(command);
 
@@ -331,6 +337,9 @@ switch (command) {
     break;
   case "analytics":
     cmdAnalytics(args, projectRoot);
+    break;
+  case "heartbeat":
+    cmdHeartbeat(args, projectRoot);
     break;
 
   default:
