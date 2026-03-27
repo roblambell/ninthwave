@@ -157,7 +157,7 @@ if (command === "init") {
 }
 
 if (command === "setup") {
-  cmdSetup(args);
+  await cmdSetup(args);
   process.exit(0);
 }
 
