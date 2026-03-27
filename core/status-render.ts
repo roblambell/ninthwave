@@ -949,3 +949,270 @@ export function getTerminalWidth(): number {
   }
   return 80;
 }
+
+/**
+ * Get terminal height (rows), defaulting to 24 for non-TTY contexts.
+ * Gracefully handles environments where process.stdout.rows is undefined.
+ */
+export function getTerminalHeight(): number {
+  try {
+    const rows = process.stdout.rows;
+    if (typeof rows === "number" && rows > 0) return rows;
+  } catch {
+    // non-TTY or error accessing rows
+  }
+  return 24;
+}
+
+// ─── Full-screen scrollable layout ──────────────────────────────────────────
+
+/**
+ * A structured layout with pinned header, scrollable items, and pinned footer.
+ * Produced by buildStatusLayout() and consumed by renderFullScreenFrame().
+ */
+export interface FrameLayout {
+  headerLines: string[];
+  itemLines: string[];
+  footerLines: string[];
+}
+
+/**
+ * Format compact single-line metrics for the footer.
+ * E.g., "✓ 2 merged  ▸ 2 active  · 3 queued    Lead: 5m  Thru: 4.2/hr"
+ */
+export function formatCompactMetrics(
+  items: StatusItem[],
+  sessionStartedAt?: string,
+): string {
+  const merged = items.filter((i) => i.state === "merged").length;
+  const active = items.filter(
+    (i) => i.state !== "merged" && i.state !== "queued",
+  ).length;
+  const queued = items.filter((i) => i.state === "queued").length;
+
+  const parts: string[] = [];
+  if (merged > 0) parts.push(`${GREEN}✓ ${merged} merged${RESET}`);
+  if (active > 0) parts.push(`${YELLOW}▸ ${active} active${RESET}`);
+  if (queued > 0) parts.push(`${DIM}· ${queued} queued${RESET}`);
+
+  const metrics = computeSessionMetrics(items, sessionStartedAt);
+  if (metrics.leadTimeMedianMs !== null) {
+    parts.push(`Lead: ${formatAge(metrics.leadTimeMedianMs)}`);
+  }
+  if (metrics.throughputPerHour !== null) {
+    parts.push(`Thru: ${metrics.throughputPerHour.toFixed(1)}/hr`);
+  }
+
+  return `  ${parts.join("  ")}`;
+}
+
+/**
+ * Build a FrameLayout from StatusItems, splitting the table into
+ * header (column headers + summary), item rows, and footer (metrics + shortcuts).
+ *
+ * This is a pure function suitable for unit testing.
+ */
+export function buildStatusLayout(
+  items: StatusItem[],
+  termWidth: number = 80,
+  wipLimit?: number,
+  flat: boolean = false,
+  viewOptions?: ViewOptions,
+): FrameLayout {
+  const headerLines: string[] = [];
+  const footerLines: string[] = [];
+
+  if (items.length === 0) {
+    headerLines.push(`${BOLD}ninthwave status${RESET}`);
+    headerLines.push("");
+    headerLines.push(`  ${DIM}No active items${RESET}`);
+    headerLines.push("");
+    headerLines.push(`  ${DIM}To get started:${RESET}`);
+    headerLines.push(`    ${DIM}ninthwave list --ready${RESET}     ${DIM}Show available TODOs${RESET}`);
+    headerLines.push(`    ${DIM}ninthwave start <ID>${RESET}       ${DIM}Start working on an item${RESET}`);
+    return { headerLines, itemLines: [], footerLines };
+  }
+
+  const opts = viewOptions ?? {};
+  const repoUrl = opts.repoUrl;
+  const hasDeps = !flat && items.some((i) => (i.dependencies ?? []).length > 0);
+  const blockedBy = hasDeps ? computeBlockedBy(items) : undefined;
+
+  let depsColWidth = 0;
+  if (hasDeps) {
+    if (opts.showBlockerDetail && blockedBy) {
+      let maxLen = 4;
+      for (const [, blockers] of blockedBy) {
+        const str = blockers.length > 0 ? blockers.join(",") : "-";
+        if (str.length > maxLen) maxLen = str.length;
+      }
+      depsColWidth = maxLen + 1;
+    } else {
+      depsColWidth = 5;
+    }
+  }
+
+  const stateColWidth = computeStateColWidth(items);
+  const fixedWidth = 26 + stateColWidth + depsColWidth;
+  const titleWidth = Math.max(10, termWidth - fixedWidth);
+
+  // Header: title + column headers + separator
+  headerLines.push(`${BOLD}ninthwave status${RESET}`);
+  headerLines.push("");
+  const depsHeader = hasDeps ? `${pad("DEPS", depsColWidth)}` : "";
+  headerLines.push(`  ${DIM}  ${pad("ID", 12)}${pad("STATE", stateColWidth)} ${pad("DURATION", 8)} ${depsHeader}TITLE${RESET}`);
+  const sep = `  ${DIM}${"─".repeat(Math.min(termWidth - 2, fixedWidth + titleWidth))}${RESET}`;
+  headerLines.push(sep);
+
+  // Build item lines
+  const itemLines: string[] = [];
+
+  function depsStr(itemId: string): string {
+    if (!blockedBy) return "-";
+    const blockers = blockedBy.get(itemId) ?? [];
+    if (opts.showBlockerDetail) {
+      return blockers.length > 0 ? blockers.join(",") : "-";
+    }
+    return blockers.length > 0 ? String(blockers.length) : "-";
+  }
+
+  if (hasDeps) {
+    const sorted = sortByBlockedThenId(items, blockedBy!);
+    const activeItems = sorted.filter((i) => i.state !== "queued" && i.state !== "merged");
+    const mergedItems = sorted.filter((i) => i.state === "merged");
+    const queuedItems = sorted.filter((i) => i.state === "queued");
+
+    for (const item of activeItems) {
+      itemLines.push(formatItemRow(item, titleWidth, pad(depsStr(item.id), depsColWidth), stateColWidth, repoUrl));
+    }
+    for (const item of mergedItems) {
+      itemLines.push(formatItemRow(item, titleWidth, pad(depsStr(item.id), depsColWidth), stateColWidth, repoUrl));
+    }
+    if (queuedItems.length > 0) {
+      const activeCount = items.filter((i) => i.state !== "queued" && i.state !== "merged").length;
+      let queueHeader = `Queue (${queuedItems.length} waiting`;
+      if (wipLimit !== undefined) queueHeader += `, ${activeCount}/${wipLimit} WIP slots active`;
+      queueHeader += ")";
+      itemLines.push("");
+      itemLines.push(`  ${DIM}${queueHeader}${RESET}`);
+      itemLines.push(sep);
+      for (const item of queuedItems) {
+        itemLines.push(formatQueuedItemRow(item, titleWidth, pad(depsStr(item.id), depsColWidth), stateColWidth));
+      }
+    }
+  } else {
+    const activeItems = items.filter((i) => i.state !== "queued" && i.state !== "merged");
+    const queuedItems = items.filter((i) => i.state === "queued");
+    const mergedItems = items.filter((i) => i.state === "merged");
+
+    for (const item of activeItems) {
+      itemLines.push(formatItemRow(item, titleWidth, undefined, stateColWidth, repoUrl));
+    }
+    for (const item of mergedItems) {
+      itemLines.push(formatItemRow(item, titleWidth, undefined, stateColWidth, repoUrl));
+    }
+    if (queuedItems.length > 0) {
+      const activeCount = activeItems.length;
+      let queueHeader = `Queue (${queuedItems.length} waiting`;
+      if (wipLimit !== undefined) queueHeader += `, ${activeCount}/${wipLimit} WIP slots active`;
+      queueHeader += ")";
+      itemLines.push("");
+      itemLines.push(`  ${DIM}${queueHeader}${RESET}`);
+      itemLines.push(sep);
+      for (const item of queuedItems) {
+        itemLines.push(formatQueuedItemRow(item, titleWidth, undefined, stateColWidth));
+      }
+    }
+  }
+
+  // Footer: separator, progress, summary, optional metrics/help, shortcuts
+  footerLines.push(sep);
+  footerLines.push(formatBatchProgress(items));
+  footerLines.push(formatSummary(items));
+
+  if (opts.showMetrics) {
+    const metrics = computeSessionMetrics(items, opts.sessionStartedAt);
+    footerLines.push(formatMetricsPanel(metrics));
+  }
+
+  // Compact metrics line
+  footerLines.push(formatCompactMetrics(items, opts.sessionStartedAt));
+
+  // Always show keyboard shortcuts in full-screen mode
+  footerLines.push(`  ${DIM}q quit  m metrics  d deps  ↑/↓ scroll  ? help${RESET}`);
+
+  if (opts.showHelp) {
+    footerLines.push("");
+    footerLines.push(formatHelpFooter());
+  }
+
+  return { headerLines, itemLines, footerLines };
+}
+
+/**
+ * Clamp a scroll offset to valid bounds given item count and viewport height.
+ * Returns the clamped offset (0 when items fit in viewport).
+ */
+export function clampScrollOffset(
+  scrollOffset: number,
+  itemCount: number,
+  viewportHeight: number,
+): number {
+  if (itemCount <= viewportHeight) return 0;
+  const maxOffset = itemCount - viewportHeight;
+  return Math.max(0, Math.min(scrollOffset, maxOffset));
+}
+
+/**
+ * Render a full-screen frame from a FrameLayout, slicing item lines to fit
+ * the viewport between pinned header and footer. Adds scroll indicators
+ * ("↑ N more" / "↓ N more") when items overflow.
+ *
+ * Returns the final lines to display (one string per terminal row).
+ */
+export function renderFullScreenFrame(
+  layout: FrameLayout,
+  termRows: number,
+  termCols: number,
+  scrollOffset: number,
+): string[] {
+  const { headerLines, itemLines, footerLines } = layout;
+
+  // Reserve space for scroll indicators (1 line each when needed)
+  const hasScrollUp = scrollOffset > 0;
+  const maxOffset = Math.max(0, itemLines.length - Math.max(1, termRows - headerLines.length - footerLines.length));
+  const hasScrollDown = scrollOffset < maxOffset && itemLines.length > (termRows - headerLines.length - footerLines.length);
+
+  const scrollIndicatorLines = (hasScrollUp ? 1 : 0) + (hasScrollDown ? 1 : 0);
+  const viewportHeight = Math.max(1, termRows - headerLines.length - footerLines.length - scrollIndicatorLines);
+
+  // Clamp scroll offset
+  const clampedOffset = clampScrollOffset(scrollOffset, itemLines.length, viewportHeight);
+
+  // Slice visible items
+  const visibleItems = itemLines.slice(clampedOffset, clampedOffset + viewportHeight);
+
+  // Assemble output
+  const output: string[] = [...headerLines];
+
+  // Scroll-up indicator
+  const hiddenAbove = clampedOffset;
+  if (hiddenAbove > 0) {
+    output.push(`  ${DIM}↑ ${hiddenAbove} more above${RESET}`);
+  }
+
+  output.push(...visibleItems);
+
+  // Scroll-down indicator
+  const hiddenBelow = Math.max(0, itemLines.length - clampedOffset - viewportHeight);
+  if (hiddenBelow > 0) {
+    output.push(`  ${DIM}↓ ${hiddenBelow} more below${RESET}`);
+  }
+
+  output.push(...footerLines);
+
+  return output;
+}
+
+/** Minimum terminal rows for full-screen mode. Below this, use legacy non-fullscreen rendering. */
+export const MIN_FULLSCREEN_ROWS = 10;

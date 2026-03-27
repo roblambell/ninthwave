@@ -17,6 +17,7 @@ import {
   type StatusItem,
   type TreeNode,
   type ViewOptions,
+  type FrameLayout,
   stateColor,
   stateIcon,
   stateLabel,
@@ -40,9 +41,14 @@ import {
   mapDaemonItemState,
   daemonStateToStatusItems,
   getTerminalWidth,
+  getTerminalHeight,
+  buildStatusLayout,
+  renderFullScreenFrame,
+  clampScrollOffset,
+  MIN_FULLSCREEN_ROWS,
 } from "../status-render.ts";
 
-export type { ItemState, StatusItem, TreeNode, ViewOptions };
+export type { ItemState, StatusItem, TreeNode, ViewOptions, FrameLayout };
 export {
   stateColor,
   stateIcon,
@@ -67,6 +73,11 @@ export {
   mapDaemonItemState,
   daemonStateToStatusItems,
   getTerminalWidth,
+  getTerminalHeight,
+  buildStatusLayout,
+  renderFullScreenFrame,
+  clampScrollOffset,
+  MIN_FULLSCREEN_ROWS,
 };
 
 // ─── Data gathering ──────────────────────────────────────────────────────────
@@ -244,10 +255,15 @@ function getWorktreeAge(wtDir: string): number {
  * Uses cursor-home + clear-trailing to avoid visible flicker.
  * Exits when the abort signal fires, `q` is pressed, or Ctrl-C.
  *
+ * Full-screen mode (terminals >= 10 rows):
+ *   Header and footer are pinned. Middle section scrolls with up/down arrows.
+ *   Scroll indicators show when items overflow. Terminal resize is handled.
+ *
  * Keyboard shortcuts (TTY only):
  *   m — toggle metrics panel
  *   d — toggle deps detail view
  *   ? — toggle help footer
+ *   ↑/↓ — scroll item list
  *   q — quit
  *
  * Each keypress triggers an immediate re-render (does not wait for interval).
@@ -269,9 +285,19 @@ export async function cmdStatusWatch(
 
   const isTTY = process.stdin.isTTY === true;
   let quitRequested = false;
+  let scrollOffset = 0;
+  /** Track last item count for scroll clamping on data changes */
+  let lastItemCount = 0;
 
   // Resolver to wake the sleep early on keypress
   let wakeResolver: (() => void) | null = null;
+
+  function wake() {
+    if (wakeResolver) {
+      wakeResolver();
+      wakeResolver = null;
+    }
+  }
 
   function handleKey(key: string) {
     switch (key) {
@@ -284,17 +310,27 @@ export async function cmdStatusWatch(
       case "?":
         viewOpts.showHelp = !viewOpts.showHelp;
         break;
+      case "\x1b[A": // Up arrow
+        scrollOffset = Math.max(0, scrollOffset - 1);
+        break;
+      case "\x1b[B": // Down arrow
+        scrollOffset += 1;
+        break;
       case "q":
         quitRequested = true;
         break;
       default:
         return; // Don't wake for unknown keys
     }
-    // Wake the interval sleep to trigger immediate re-render
-    if (wakeResolver) {
-      wakeResolver();
-      wakeResolver = null;
-    }
+    wake();
+  }
+
+  // Resize handler: clamp scroll offset and trigger re-render
+  function handleResize() {
+    const termRows = getTerminalHeight();
+    const viewportHeight = Math.max(1, termRows - 10); // approximate
+    scrollOffset = clampScrollOffset(scrollOffset, lastItemCount, viewportHeight);
+    wake();
   }
 
   // Enter raw mode for TTY so individual keypresses are received
@@ -303,11 +339,13 @@ export async function cmdStatusWatch(
     process.stdin.resume();
     process.stdin.setEncoding("utf8");
     process.stdin.on("data", handleKey);
+    process.stdout.on("resize", handleResize);
   }
 
   function cleanup() {
     if (isTTY) {
       process.stdin.removeListener("data", handleKey);
+      process.stdout.removeListener("resize", handleResize);
       try {
         process.stdin.setRawMode(false);
       } catch {
@@ -319,13 +357,28 @@ export async function cmdStatusWatch(
 
   try {
     while (!signal?.aborted && !quitRequested) {
+      const termRows = getTerminalHeight();
+      const termCols = getTerminalWidth();
+
       // Move cursor to top-left (no full-screen clear — avoids flicker)
       process.stdout.write("\x1B[H");
-      // Write status content with clear-to-end-of-line (\x1B[K) after each line
-      // to prevent stale characters from previous renders bleeding through
-      // when lines become shorter between refreshes
-      const content = renderStatus(worktreeDir, projectRoot, flat, viewOpts);
-      process.stdout.write(content.replace(/\n/g, "\x1B[K\n") + "\x1B[K");
+
+      if (termRows >= MIN_FULLSCREEN_ROWS) {
+        // Full-screen mode: build layout, render with scroll
+        const statusItems = gatherStatusItems(worktreeDir, projectRoot);
+        const mergedOpts: ViewOptions = { ...viewOpts, sessionStartedAt: statusItems.sessionStartedAt ?? viewOpts.sessionStartedAt };
+        const layout = buildStatusLayout(statusItems.items, termCols, statusItems.wipLimit, flat, mergedOpts);
+        lastItemCount = layout.itemLines.length;
+        scrollOffset = clampScrollOffset(scrollOffset, lastItemCount, Math.max(1, termRows - layout.headerLines.length - layout.footerLines.length));
+
+        const frameLines = renderFullScreenFrame(layout, termRows, termCols, scrollOffset);
+        const content = frameLines.join("\n");
+        process.stdout.write(content.replace(/\n/g, "\x1B[K\n") + "\x1B[K");
+      } else {
+        // Fallback: legacy non-fullscreen rendering
+        const content = renderStatus(worktreeDir, projectRoot, flat, viewOpts);
+        process.stdout.write(content.replace(/\n/g, "\x1B[K\n") + "\x1B[K");
+      }
       // Clear from cursor to end of screen (removes stale trailing lines)
       process.stdout.write("\x1B[J");
 
@@ -357,6 +410,93 @@ export async function cmdStatusWatch(
   } finally {
     cleanup();
   }
+}
+
+/**
+ * Gather status items and metadata for full-screen layout rendering.
+ * Returns items, wipLimit, and sessionStartedAt (from daemon state if available).
+ */
+function gatherStatusItems(
+  worktreeDir: string,
+  projectRoot: string,
+): { items: StatusItem[]; wipLimit: number | undefined; sessionStartedAt?: string } {
+  // Fast path: read state file (written by orchestrator in both daemon and interactive mode)
+  const daemonState = readStateFile(projectRoot);
+  const daemonPid = isDaemonRunning(projectRoot);
+
+  if (daemonState) {
+    const updatedMs = new Date(daemonState.updatedAt).getTime();
+    const stateAgeMs = Date.now() - updatedMs;
+    const isFresh = stateAgeMs < 60_000;
+
+    if (isFresh || daemonPid !== null) {
+      const items = daemonStateToStatusItems(daemonState);
+      return {
+        items: items.map((i) => ({ ...i })), // copy to avoid mutation
+        wipLimit: daemonState.wipLimit,
+        sessionStartedAt: daemonState.startedAt,
+      };
+    }
+  }
+
+  if (!existsSync(worktreeDir)) {
+    return { items: [], wipLimit: undefined };
+  }
+
+  const todoMeta = loadTodoMetadata(projectRoot);
+  const items: StatusItem[] = [];
+
+  // Hub-local worktrees
+  try {
+    const entries = readdirSync(worktreeDir);
+    for (const entry of entries) {
+      if (!entry.startsWith("todo-")) continue;
+      const wtDir = join(worktreeDir, entry);
+      if (!existsSync(wtDir)) continue;
+      const id = entry.slice(5);
+      const { state, prNumber } = determineItemState(id, projectRoot);
+      const meta = todoMeta.get(id);
+      items.push({
+        id,
+        title: meta?.title ?? "",
+        state,
+        prNumber,
+        ageMs: getWorktreeAge(wtDir),
+        repoLabel: "",
+        dependencies: meta?.dependencies ?? [],
+      });
+    }
+  } catch {
+    // worktreeDir might not be readable
+  }
+
+  // Cross-repo worktrees
+  const crossRepoIndex = join(worktreeDir, ".cross-repo-index");
+  if (existsSync(crossRepoIndex)) {
+    const content = readFileSync(crossRepoIndex, "utf-8");
+    for (const line of content.split("\n")) {
+      if (!line || line.startsWith("#")) continue;
+      const parts = line.split("\t");
+      const idxId = parts[0];
+      const idxRepo = parts[1];
+      const idxPath = parts[2];
+      if (!idxId || !idxRepo || !idxPath) continue;
+      if (!existsSync(idxPath)) continue;
+      const { state, prNumber } = determineItemState(idxId, idxRepo);
+      const meta = todoMeta.get(idxId);
+      items.push({
+        id: idxId,
+        title: meta?.title ?? "",
+        state,
+        prNumber,
+        ageMs: getWorktreeAge(idxPath),
+        repoLabel: basename(idxRepo),
+        dependencies: meta?.dependencies ?? [],
+      });
+    }
+  }
+
+  return { items, wipLimit: undefined };
 }
 
 /**

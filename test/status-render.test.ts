@@ -28,10 +28,17 @@ import {
   mapDaemonItemState,
   daemonStateToStatusItems,
   getTerminalWidth,
+  getTerminalHeight,
+  buildStatusLayout,
+  renderFullScreenFrame,
+  clampScrollOffset,
+  formatCompactMetrics,
+  MIN_FULLSCREEN_ROWS,
   type StatusItem,
   type ItemState,
   type ViewOptions,
   type SessionMetrics,
+  type FrameLayout,
 } from "../core/status-render.ts";
 import {
   detectTuiMode,
@@ -1602,5 +1609,234 @@ describe("formatStatusTable with ViewOptions", () => {
     expect(table).toContain("q: quit");
     // A-1 is merged, so B-2 has no unresolved blockers → shows "-"
     expect(table).toContain("DEPS");
+  });
+});
+
+// ── Full-screen scrollable layout ───────────────────────────────────────────
+
+describe("getTerminalHeight", () => {
+  it("returns a positive number", () => {
+    const height = getTerminalHeight();
+    expect(typeof height).toBe("number");
+    expect(height).toBeGreaterThan(0);
+  });
+});
+
+describe("buildStatusLayout", () => {
+  it("returns correct header/item/footer structure", () => {
+    const items = [
+      makeStatusItem({ id: "A-1", state: "implementing" }),
+      makeStatusItem({ id: "A-2", state: "merged" }),
+      makeStatusItem({ id: "A-3", state: "queued" }),
+    ];
+    const layout = buildStatusLayout(items, 80);
+
+    // Header should include the title and column headers
+    const headerText = layout.headerLines.map(stripAnsi).join("\n");
+    expect(headerText).toContain("ninthwave status");
+    expect(headerText).toContain("ID");
+    expect(headerText).toContain("STATE");
+
+    // Items should include our item rows
+    expect(layout.itemLines.length).toBeGreaterThan(0);
+    const itemText = layout.itemLines.map(stripAnsi).join("\n");
+    expect(itemText).toContain("A-1");
+    expect(itemText).toContain("A-2");
+    expect(itemText).toContain("A-3");
+
+    // Footer should include progress, summary, keyboard shortcuts
+    const footerText = layout.footerLines.map(stripAnsi).join("\n");
+    expect(footerText).toContain("Progress:");
+    expect(footerText).toContain("scroll");
+    expect(footerText).toContain("quit");
+  });
+
+  it("returns empty itemLines for empty items array", () => {
+    const layout = buildStatusLayout([], 80);
+    expect(layout.itemLines).toHaveLength(0);
+    // Header should show no-items message
+    const headerText = layout.headerLines.map(stripAnsi).join("\n");
+    expect(headerText).toContain("No active items");
+  });
+
+  it("includes compact metrics in footer", () => {
+    const items = [
+      makeStatusItem({ id: "A-1", state: "merged" }),
+      makeStatusItem({ id: "A-2", state: "implementing" }),
+    ];
+    const layout = buildStatusLayout(items, 80);
+    const footerText = layout.footerLines.map(stripAnsi).join("\n");
+    expect(footerText).toContain("merged");
+    expect(footerText).toContain("active");
+  });
+
+  it("includes keyboard shortcuts in footer", () => {
+    const items = [makeStatusItem({ id: "A-1" })];
+    const layout = buildStatusLayout(items, 80);
+    const footerText = layout.footerLines.map(stripAnsi).join("\n");
+    expect(footerText).toContain("quit");
+    expect(footerText).toContain("scroll");
+    expect(footerText).toContain("metrics");
+  });
+});
+
+describe("renderFullScreenFrame", () => {
+  function makeLayout(itemCount: number): FrameLayout {
+    return {
+      headerLines: ["HEADER 1", "HEADER 2"],
+      itemLines: Array.from({ length: itemCount }, (_, i) => `ITEM ${i}`),
+      footerLines: ["FOOTER 1", "FOOTER 2"],
+    };
+  }
+
+  it("with viewport smaller than items: slices and shows scroll indicators", () => {
+    const layout = makeLayout(20);
+    // termRows = 10, header = 2, footer = 2 => 6 lines for items+indicators
+    const frame = renderFullScreenFrame(layout, 10, 80, 0);
+
+    const text = frame.join("\n");
+    // Should contain header and footer
+    expect(text).toContain("HEADER 1");
+    expect(text).toContain("FOOTER 1");
+    // Should have scroll-down indicator (items overflow)
+    expect(stripAnsi(text)).toContain("more below");
+    // Should not have scroll-up indicator (at top)
+    expect(stripAnsi(text)).not.toContain("more above");
+
+    // Total frame lines should not exceed termRows
+    expect(frame.length).toBeLessThanOrEqual(10);
+  });
+
+  it("with viewport larger than items: no scroll indicators", () => {
+    const layout = makeLayout(3);
+    // termRows = 30, header = 2, footer = 2 => 26 lines for items (3 items fit easily)
+    const frame = renderFullScreenFrame(layout, 30, 80, 0);
+
+    const text = stripAnsi(frame.join("\n"));
+    expect(text).not.toContain("more above");
+    expect(text).not.toContain("more below");
+    // All items should be present
+    expect(text).toContain("ITEM 0");
+    expect(text).toContain("ITEM 1");
+    expect(text).toContain("ITEM 2");
+  });
+
+  it("scroll offset > 0 shows up indicator", () => {
+    const layout = makeLayout(20);
+    const frame = renderFullScreenFrame(layout, 10, 80, 5);
+
+    const text = stripAnsi(frame.join("\n"));
+    expect(text).toContain("more above");
+    // With offset 5, ITEM 0 should not be visible
+    expect(text).not.toContain("ITEM 0");
+    // Should contain ITEM 5
+    expect(text).toContain("ITEM 5");
+  });
+
+  it("scroll offset at bottom shows only up indicator", () => {
+    const layout = makeLayout(20);
+    // Scroll to end
+    const frame = renderFullScreenFrame(layout, 10, 80, 999);
+
+    const text = stripAnsi(frame.join("\n"));
+    expect(text).toContain("more above");
+    expect(text).not.toContain("more below");
+    // Last item should be visible
+    expect(text).toContain("ITEM 19");
+  });
+});
+
+describe("clampScrollOffset", () => {
+  it("returns 0 when items fit in viewport", () => {
+    expect(clampScrollOffset(5, 3, 10)).toBe(0);
+    expect(clampScrollOffset(0, 10, 10)).toBe(0);
+  });
+
+  it("clamps to max offset when exceeding bounds", () => {
+    // 20 items, 6 viewport => max offset = 14
+    expect(clampScrollOffset(100, 20, 6)).toBe(14);
+    expect(clampScrollOffset(14, 20, 6)).toBe(14);
+    expect(clampScrollOffset(15, 20, 6)).toBe(14);
+  });
+
+  it("returns 0 for negative offsets", () => {
+    expect(clampScrollOffset(-5, 20, 6)).toBe(0);
+  });
+
+  it("preserves valid offset", () => {
+    expect(clampScrollOffset(5, 20, 6)).toBe(5);
+  });
+
+  it("terminal resize handler resets scroll if exceeds new bounds", () => {
+    // Simulate: 20 items, was at offset 15 with viewport 5
+    // Terminal resizes to viewport 10 => max offset = 10
+    expect(clampScrollOffset(15, 20, 10)).toBe(10);
+    // Terminal resizes large enough to show all items
+    expect(clampScrollOffset(15, 20, 25)).toBe(0);
+  });
+});
+
+describe("formatCompactMetrics", () => {
+  it("formats compact single-line metrics", () => {
+    const items = [
+      makeStatusItem({ id: "A-1", state: "merged" }),
+      makeStatusItem({ id: "A-2", state: "merged" }),
+      makeStatusItem({ id: "B-1", state: "implementing" }),
+      makeStatusItem({ id: "B-2", state: "implementing" }),
+      makeStatusItem({ id: "C-1", state: "queued" }),
+      makeStatusItem({ id: "C-2", state: "queued" }),
+      makeStatusItem({ id: "C-3", state: "queued" }),
+    ];
+    const text = stripAnsi(formatCompactMetrics(items));
+    expect(text).toContain("2 merged");
+    expect(text).toContain("2 active");
+    expect(text).toContain("3 queued");
+  });
+
+  it("shows lead time and throughput when sessionStartedAt is provided", () => {
+    const now = Date.now();
+    const items = [
+      makeStatusItem({
+        id: "A-1",
+        state: "merged",
+        startedAt: new Date(now - 600_000).toISOString(), // 10 min ago
+        endedAt: new Date(now - 300_000).toISOString(),   // 5 min ago (5m lead time)
+      }),
+    ];
+    const text = stripAnsi(formatCompactMetrics(items, new Date(now - 3_600_000).toISOString()));
+    expect(text).toContain("Lead:");
+    expect(text).toContain("Thru:");
+  });
+});
+
+describe("MIN_FULLSCREEN_ROWS", () => {
+  it("is 10", () => {
+    expect(MIN_FULLSCREEN_ROWS).toBe(10);
+  });
+});
+
+describe("small terminal fallback", () => {
+  it("buildStatusLayout produces valid output for any terminal size", () => {
+    const items = [
+      makeStatusItem({ id: "A-1", state: "implementing" }),
+    ];
+    // Even with very small width, should not crash
+    const layout = buildStatusLayout(items, 30);
+    expect(layout.headerLines.length).toBeGreaterThan(0);
+    expect(layout.itemLines.length).toBeGreaterThan(0);
+    expect(layout.footerLines.length).toBeGreaterThan(0);
+  });
+
+  it("renderFullScreenFrame handles very small viewport gracefully", () => {
+    const layout: FrameLayout = {
+      headerLines: ["H"],
+      itemLines: ["I1", "I2", "I3"],
+      footerLines: ["F"],
+    };
+    // Only 4 rows total — barely enough for header + footer + 1 item
+    const frame = renderFullScreenFrame(layout, 4, 40, 0);
+    // Should not crash and should contain header/footer
+    expect(frame.join("\n")).toContain("H");
+    expect(frame.join("\n")).toContain("F");
   });
 });

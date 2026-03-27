@@ -72,6 +72,11 @@ import {
   formatStatusTable,
   mapDaemonItemState,
   getTerminalWidth,
+  getTerminalHeight,
+  buildStatusLayout,
+  renderFullScreenFrame,
+  clampScrollOffset,
+  MIN_FULLSCREEN_ROWS,
   type StatusItem,
   type ViewOptions,
 } from "../status-render.ts";
@@ -125,18 +130,35 @@ export function orchestratorItemsToStatusItems(items: OrchestratorItem[]): Statu
  * Render the status table to stdout using ANSI cursor control for flicker-free updates.
  * Uses cursor-home + clear-line + clear-to-end to replace content in-place.
  * Injectable write function for testability.
+ *
+ * In full-screen mode (>= MIN_FULLSCREEN_ROWS), uses buildStatusLayout + renderFullScreenFrame
+ * with pinned header/footer and scrollable item area. Falls back to legacy rendering for
+ * very small terminals.
  */
 export function renderTuiFrame(
   items: OrchestratorItem[],
   wipLimit: number | undefined,
   write: (s: string) => void = (s) => process.stdout.write(s),
   viewOptions?: ViewOptions,
+  scrollOffset: number = 0,
 ): void {
   const statusItems = orchestratorItemsToStatusItems(items);
   const termWidth = getTerminalWidth();
-  const content = formatStatusTable(statusItems, termWidth, wipLimit, false, viewOptions);
+  const termRows = getTerminalHeight();
+
   write("\x1B[H");
-  write(content.replace(/\n/g, "\x1B[K\n") + "\x1B[K");
+
+  if (termRows >= MIN_FULLSCREEN_ROWS) {
+    const layout = buildStatusLayout(statusItems, termWidth, wipLimit, false, viewOptions);
+    const clamped = clampScrollOffset(scrollOffset, layout.itemLines.length, Math.max(1, termRows - layout.headerLines.length - layout.footerLines.length));
+    const frameLines = renderFullScreenFrame(layout, termRows, termWidth, clamped);
+    const content = frameLines.join("\n");
+    write(content.replace(/\n/g, "\x1B[K\n") + "\x1B[K");
+  } else {
+    const content = formatStatusTable(statusItems, termWidth, wipLimit, false, viewOptions);
+    write(content.replace(/\n/g, "\x1B[K\n") + "\x1B[K");
+  }
+
   write("\x1B[J");
 }
 
@@ -1425,11 +1447,23 @@ export async function orchestrateLoop(
 
 // ── Keyboard shortcuts (TUI mode) ────────────────────────────────────
 
+/** Shared mutable state for TUI keyboard shortcuts and scroll. */
+export interface TuiState {
+  scrollOffset: number;
+  viewOptions: ViewOptions;
+  /** Called after any key that should trigger an immediate re-render. */
+  onUpdate?: () => void;
+}
+
 /**
  * Set up raw-mode stdin to capture individual keystrokes in TUI mode.
  *
  * - `q` triggers graceful shutdown via the AbortController
  * - Ctrl-C (0x03) triggers the same graceful shutdown
+ * - `m` toggles metrics panel
+ * - `d` toggles deps detail view
+ * - `?` toggles help footer
+ * - Up/Down arrows scroll item list
  *
  * Returns a cleanup function that restores terminal state.
  * Only call this when tuiMode is true and stdin is a TTY.
@@ -1438,6 +1472,7 @@ export function setupKeyboardShortcuts(
   abortController: AbortController,
   log: (entry: LogEntry) => void,
   stdin: NodeJS.ReadStream = process.stdin,
+  tuiState?: TuiState,
 ): () => void {
   if (!stdin.isTTY || !stdin.setRawMode) {
     return () => {};
@@ -1451,13 +1486,51 @@ export function setupKeyboardShortcuts(
     if (key === "q" || key === "\x03") {
       log({ ts: new Date().toISOString(), level: "info", event: "keyboard_quit", key: key === "\x03" ? "ctrl-c" : "q" });
       abortController.abort();
+      return;
+    }
+
+    if (!tuiState) return;
+
+    let handled = true;
+    switch (key) {
+      case "m":
+        tuiState.viewOptions.showMetrics = !tuiState.viewOptions.showMetrics;
+        break;
+      case "d":
+        tuiState.viewOptions.showBlockerDetail = !tuiState.viewOptions.showBlockerDetail;
+        break;
+      case "?":
+        tuiState.viewOptions.showHelp = !tuiState.viewOptions.showHelp;
+        break;
+      case "\x1b[A": // Up arrow
+        tuiState.scrollOffset = Math.max(0, tuiState.scrollOffset - 1);
+        break;
+      case "\x1b[B": // Down arrow
+        tuiState.scrollOffset += 1;
+        break;
+      default:
+        handled = false;
+    }
+
+    if (handled) tuiState.onUpdate?.();
+  };
+
+  // Handle terminal resize: clamp scroll offset
+  const onResize = () => {
+    if (tuiState) {
+      const termRows = getTerminalHeight();
+      const viewportHeight = Math.max(1, termRows - 10); // approximate
+      tuiState.scrollOffset = clampScrollOffset(tuiState.scrollOffset, 999, viewportHeight);
+      tuiState.onUpdate?.();
     }
   };
 
   stdin.on("data", onData);
+  process.stdout.on("resize", onResize);
 
   return () => {
     stdin.removeListener("data", onData);
+    process.stdout.removeListener("resize", onResize);
     if (stdin.isTTY && stdin.setRawMode) {
       stdin.setRawMode(false);
     }
@@ -1912,7 +1985,30 @@ export async function cmdOrchestrate(
   });
   writeStateFile(projectRoot, initialState);
 
+  // TUI state: scroll offset and view option toggles (shared with keyboard handler)
+  let lastTuiItems: OrchestratorItem[] = orch.getAllItems();
+  const tuiState: TuiState = {
+    scrollOffset: 0,
+    viewOptions: {
+      showMetrics: false,
+      showBlockerDetail: false,
+      showHelp: false,
+      sessionStartedAt: daemonStartedAt,
+    },
+    // Immediate re-render on keypress (doesn't wait for poll cycle)
+    onUpdate: () => {
+      if (tuiMode) {
+        try {
+          renderTuiFrame(lastTuiItems, wipLimit, undefined, tuiState.viewOptions, tuiState.scrollOffset);
+        } catch {
+          // Non-fatal
+        }
+      }
+    },
+  };
+
   const onPollComplete = (items: OrchestratorItem[]) => {
+    lastTuiItems = items;
     try {
       const state = serializeOrchestratorState(items, process.pid, daemonStartedAt, {
         statusPaneRef: null,
@@ -1925,7 +2021,7 @@ export async function cmdOrchestrate(
     // TUI mode: render live status table to stdout after each poll cycle
     if (tuiMode) {
       try {
-        renderTuiFrame(items, wipLimit, undefined, { sessionStartedAt: daemonStartedAt });
+        renderTuiFrame(items, wipLimit, undefined, tuiState.viewOptions, tuiState.scrollOffset);
       } catch {
         // Non-fatal — TUI render failure shouldn't block the orchestrator
       }
@@ -2005,10 +2101,10 @@ export async function cmdOrchestrate(
     ...(watchIntervalSecs !== undefined ? { watchIntervalMs: watchIntervalSecs * 1000 } : {}),
   };
 
-  // Set up keyboard shortcuts in TUI mode (q and Ctrl-C for graceful shutdown)
+  // Set up keyboard shortcuts in TUI mode (q, Ctrl-C, m, d, ?, ↑/↓)
   let cleanupKeyboard = () => {};
   if (tuiMode) {
-    cleanupKeyboard = setupKeyboardShortcuts(abortController, log);
+    cleanupKeyboard = setupKeyboardShortcuts(abortController, log, process.stdin, tuiState);
   }
 
   // Write PID file for foreground mode too (prevents duplicate instances)
