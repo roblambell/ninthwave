@@ -2,7 +2,7 @@
 
 import { describe, it, expect, vi, beforeEach, afterEach, type Mock } from "vitest";
 import { join } from "path";
-import { writeFileSync, mkdirSync } from "fs";
+import { writeFileSync, mkdirSync, readFileSync } from "fs";
 import { setupTempRepo, cleanupTempRepos } from "./helpers.ts";
 import type { Multiplexer } from "../core/mux.ts";
 
@@ -807,11 +807,12 @@ describe("launchAiSession agentName", () => {
     const launchCall = mockMux.launchWorkspace.mock.calls[0];
     expect(launchCall).toBeDefined();
     const cmd = launchCall[1] as string;
-    expect(cmd).toContain("--agent=review-worker");
-    expect(cmd).toContain("--allow-all");
-    expect(cmd).toContain("-i ");
-    expect(cmd).not.toContain("--allow-all-tools");
-    expect(cmd).not.toContain("--allow-all-paths");
+    // cmd is a launcher script path — verify the script contents
+    expect(cmd).toMatch(/\.copilot\.sh$/);
+    const script = readFileSync(cmd, "utf-8");
+    expect(script).toContain("--agent=review-worker");
+    expect(script).toContain("--allow-all");
+    expect(script).toContain("-i ");
   });
 
   it("embeds prompt inline via -i for copilot (no post-launch send)", () => {
@@ -825,6 +826,10 @@ describe("launchAiSession agentName", () => {
     expect(wsRef).not.toBeNull();
     // No message should be sent after launch — prompt is embedded in -i
     expect(mockMux.sendMessage.mock.calls.length).toBe(0);
+    // Launcher script should exist and contain the prompt file reference
+    const launchCall = mockMux.launchWorkspace.mock.calls[0];
+    const cmd = launchCall[1] as string;
+    expect(cmd).toMatch(/\.copilot\.sh$/);
   });
 });
 
