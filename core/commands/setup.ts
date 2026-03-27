@@ -1,7 +1,11 @@
 // `ninthwave setup` — project and global setup command.
 //
-// Project mode (default): seeds .ninthwave/, .ninthwave/todos/, skill symlinks, agent copies, .gitignore
+// Project mode (default): seeds .ninthwave/, .ninthwave/todos/, skill symlinks, agent symlinks, .gitignore
 // Global mode (--global): seeds ~/.claude/skills/ symlinks only
+//
+// Agent installation is interactive: detects installed AI tools, presents a
+// checkbox for agent selection, shows a preview of symlinks, and asks for
+// confirmation before creating anything.
 
 import {
   existsSync,
@@ -10,12 +14,19 @@ import {
   readFileSync,
   symlinkSync,
   unlinkSync,
+  lstatSync,
+  readlinkSync,
 } from "fs";
 import { join, relative, dirname, resolve } from "path";
 import { getBundleDir } from "../paths.ts";
 import { userStateDir, migrateRuntimeState } from "../daemon.ts";
 import { info, die, warn, RED, YELLOW, GREEN, RESET, BOLD, DIM } from "../output.ts";
 import { run } from "../shell.ts";
+import {
+  checkboxPrompt as defaultCheckboxPrompt,
+  confirmPrompt as defaultConfirmPrompt,
+} from "../prompt.ts";
+import type { CheckboxChoice, CheckboxPromptFn, ConfirmPromptFn } from "../prompt.ts";
 
 /**
  * Resolve the absolute path to a command on PATH.
@@ -222,13 +233,190 @@ export function isSelfHosting(projectDir: string, bundleDir: string): boolean {
 
 const SKILLS = ["work", "decompose", "todo-preview", "ninthwave-upgrade"];
 
-const AGENT_SOURCES = ["todo-worker.md", "review-worker.md"];
+// ── Agent configuration ──────────────────────────────────────────────
 
-const AGENT_TARGET_DIRS = [
-  { dir: ".claude/agents", suffix: ".md" },
-  { dir: ".opencode/agents", suffix: ".md" },
-  { dir: ".github/agents", suffix: ".agent.md" },
+/** Agent source files available in the bundle's agents/ directory. */
+export const AGENT_SOURCES = [
+  "todo-worker.md",
+  "review-worker.md",
+  "supervisor.md",
 ];
+
+/** Human-readable descriptions for each agent file. */
+export const AGENT_DESCRIPTIONS: Record<string, string> = {
+  "todo-worker.md": "implementation agent for batch TODO processing",
+  "review-worker.md": "PR code review agent",
+  "supervisor.md": "pipeline monitoring agent",
+};
+
+/** AI tool target directories where agent symlinks are created. */
+export const AGENT_TARGET_DIRS = [
+  { dir: ".claude/agents", suffix: ".md", tool: "Claude Code" },
+  { dir: ".opencode/agents", suffix: ".md", tool: "OpenCode" },
+  { dir: ".github/agents", suffix: ".agent.md", tool: "GitHub Copilot" },
+];
+
+/** Agent selection result: which agents to install and which tool directories to target. */
+export interface AgentSelection {
+  /** Agent source filenames to install (e.g., ["todo-worker.md", "supervisor.md"]) */
+  agents: string[];
+  /** Tool target directory indices into AGENT_TARGET_DIRS */
+  toolDirs: { dir: string; suffix: string; tool: string }[];
+}
+
+// ── Tool detection ───────────────────────────────────────────────────
+
+/**
+ * Detect which AI tools are installed in the project directory.
+ *
+ * Checks for tool-specific directories and config files:
+ * - Claude Code: `.claude/` directory
+ * - OpenCode: `.opencode/` directory or `.opencode.json`
+ * - GitHub Copilot: `.github/` directory
+ *
+ * Returns the matching AGENT_TARGET_DIRS entries.
+ */
+export function detectProjectTools(
+  projectDir: string,
+): { dir: string; suffix: string; tool: string }[] {
+  const detected: { dir: string; suffix: string; tool: string }[] = [];
+
+  // Claude Code: check for .claude/ directory
+  if (existsSync(join(projectDir, ".claude"))) {
+    detected.push(AGENT_TARGET_DIRS[0]!);
+  }
+
+  // OpenCode: check for .opencode/ directory or .opencode.json
+  if (
+    existsSync(join(projectDir, ".opencode")) ||
+    existsSync(join(projectDir, ".opencode.json"))
+  ) {
+    detected.push(AGENT_TARGET_DIRS[1]!);
+  }
+
+  // GitHub Copilot: check for .github/ directory
+  if (existsSync(join(projectDir, ".github"))) {
+    detected.push(AGENT_TARGET_DIRS[2]!);
+  }
+
+  return detected;
+}
+
+/**
+ * Discover available agent source files in the bundle's agents/ directory.
+ * Only returns agents that actually exist on disk.
+ */
+export function discoverAgentSources(bundleDir: string): string[] {
+  return AGENT_SOURCES.filter((f) =>
+    existsSync(join(bundleDir, "agents", f)),
+  );
+}
+
+// ── Symlink plan ─────────────────────────────────────────────────────
+
+/** A single planned symlink operation. */
+export interface SymlinkPlan {
+  /** Relative path from project root (e.g., ".claude/agents/todo-worker.md") */
+  displayPath: string;
+  /** Absolute path where the symlink will be created */
+  linkPath: string;
+  /** Relative target the symlink will point to */
+  relTarget: string;
+  /** Status: "create", "exists" (already correct), "replace" (regular file exists) */
+  status: "create" | "exists" | "replace";
+}
+
+/**
+ * Build a plan of symlink operations for the given agent selection.
+ *
+ * Does not create any files — just computes what would happen.
+ */
+export function buildSymlinkPlan(
+  projectDir: string,
+  bundleDir: string,
+  selection: AgentSelection,
+): SymlinkPlan[] {
+  const plan: SymlinkPlan[] = [];
+
+  for (const agentFile of selection.agents) {
+    const agentSource = join(bundleDir, "agents", agentFile);
+    if (!existsSync(agentSource)) continue;
+    const baseName = agentFile.replace(/\.md$/, "");
+
+    for (const target of selection.toolDirs) {
+      const targetDir = join(projectDir, target.dir);
+      const filename =
+        target.suffix === ".agent.md"
+          ? `${baseName}.agent.md`
+          : agentFile;
+      const linkPath = join(targetDir, filename);
+      const relTarget = relative(targetDir, agentSource);
+      const displayPath = `${target.dir}/${filename}`;
+
+      let status: SymlinkPlan["status"] = "create";
+
+      if (existsSync(linkPath)) {
+        try {
+          const stat = lstatSync(linkPath);
+          if (stat.isSymbolicLink()) {
+            const currentTarget = readlinkSync(linkPath);
+            status = currentTarget === relTarget ? "exists" : "create";
+          } else {
+            // Regular file where a symlink should be
+            status = "replace";
+          }
+        } catch {
+          status = "create";
+        }
+      }
+
+      plan.push({ displayPath, linkPath, relTarget, status });
+    }
+  }
+
+  return plan;
+}
+
+/**
+ * Execute a symlink plan — create the actual symlinks.
+ */
+export function executeSymlinkPlan(plan: SymlinkPlan[]): void {
+  for (const entry of plan) {
+    if (entry.status === "exists") {
+      console.log(`  ${DIM}${entry.displayPath} (already set up)${RESET}`);
+      continue;
+    }
+
+    // Ensure parent directory exists
+    const parentDir = dirname(entry.linkPath);
+    mkdirSync(parentDir, { recursive: true });
+
+    // Remove existing file/symlink if present
+    if (existsSync(entry.linkPath) || lstatExists(entry.linkPath)) {
+      unlinkSync(entry.linkPath);
+    }
+
+    symlinkSync(entry.relTarget, entry.linkPath);
+
+    if (entry.status === "replace") {
+      console.log(
+        `  ${YELLOW}↻${RESET} ${entry.displayPath} -> ${entry.relTarget} ${DIM}(replaced regular file)${RESET}`,
+      );
+    } else {
+      console.log(`  ${GREEN}✓${RESET} ${entry.displayPath} -> ${entry.relTarget}`);
+    }
+  }
+}
+
+/** Check if a path exists as a symlink (including broken symlinks). */
+function lstatExists(path: string): boolean {
+  try {
+    lstatSync(path);
+    return true;
+  } catch {
+    return false;
+  }
+}
 
 /**
  * Create skill symlinks in the given skills directory, pointing to bundleDir/skills/<name>.
@@ -279,9 +467,11 @@ export function setupGlobal(bundleDir: string): void {
 }
 
 /**
- * Project setup: seed .ninthwave/, .ninthwave/todos/, skill symlinks, agent copies, .gitignore.
+ * Project setup: seed .ninthwave/, .ninthwave/todos/, skill symlinks, agent symlinks, .gitignore.
  *
  * Optional `deps` parameter allows injecting stubs for testing.
+ * When `agentSelection` is provided in deps, it's used directly (skipping interactive prompts).
+ * When not provided, all agents are installed to all tool directories (backward-compatible default).
  */
 export function setupProject(
   projectDir: string,
@@ -290,6 +480,8 @@ export function setupProject(
     commandExists?: CommandChecker;
     ghAuthCheck?: AuthChecker;
     resolveCommandPath?: CommandPathResolver;
+    /** Explicit agent selection — bypasses interactive prompts. */
+    agentSelection?: AgentSelection;
   },
 ): void {
   console.log(`Setting up ninthwave in: ${projectDir}`);
@@ -372,22 +564,14 @@ export function setupProject(
   // --- Agent files (symlinked to stay in sync with source) ---
   console.log("Agents...");
 
-  for (const agentFile of AGENT_SOURCES) {
-    const agentSource = join(bundleDir, "agents", agentFile);
-    if (!existsSync(agentSource)) continue;
-    const baseName = agentFile.replace(/\.md$/, "");
+  // Determine agent selection: use injected selection, or default to all agents + all tools
+  const selection: AgentSelection = deps?.agentSelection ?? {
+    agents: discoverAgentSources(bundleDir),
+    toolDirs: [...AGENT_TARGET_DIRS],
+  };
 
-    for (const target of AGENT_TARGET_DIRS) {
-      const targetDir = join(projectDir, target.dir);
-      mkdirSync(targetDir, { recursive: true });
-      const filename = target.suffix === ".agent.md" ? `${baseName}.agent.md` : agentFile;
-      const linkPath = join(targetDir, filename);
-      if (existsSync(linkPath)) unlinkSync(linkPath);
-      const relTarget = relative(targetDir, agentSource);
-      symlinkSync(relTarget, linkPath);
-      console.log(`  ${target.dir}/${filename} -> ${relTarget}`);
-    }
-  }
+  const plan = buildSymlinkPlan(projectDir, bundleDir, selection);
+  executeSymlinkPlan(plan);
 
   console.log();
 
@@ -474,11 +658,123 @@ export function setupProject(
   console.log(`${DIM}Tip: Use ${BOLD}nw${RESET}${DIM} as a short alias for ${BOLD}ninthwave${RESET}${DIM} in daily use.${RESET}`);
 }
 
+// ── Interactive agent selection ──────────────────────────────────────
+
+/**
+ * Run the interactive agent selection flow:
+ * 1. Detect installed AI tools
+ * 2. Present checkbox for agent selection
+ * 3. Show preview of symlinks to create
+ * 4. Ask for confirmation
+ *
+ * Returns the agent selection, or null if the user cancels.
+ */
+export async function interactiveAgentSelection(
+  projectDir: string,
+  bundleDir: string,
+  deps?: {
+    checkboxPrompt?: CheckboxPromptFn;
+    confirmPrompt?: ConfirmPromptFn;
+  },
+): Promise<AgentSelection | null> {
+  const checkbox = deps?.checkboxPrompt ?? defaultCheckboxPrompt;
+  const confirm = deps?.confirmPrompt ?? defaultConfirmPrompt;
+
+  // Step 1: Detect AI tools
+  const detectedTools = detectProjectTools(projectDir);
+  // Fall back to all tools if none detected (fresh project)
+  const toolDirs =
+    detectedTools.length > 0 ? detectedTools : [...AGENT_TARGET_DIRS];
+
+  const toolNames = toolDirs.map((t) => t.tool);
+  if (detectedTools.length > 0) {
+    console.log(
+      `Detected AI tools: ${BOLD}${toolNames.join(", ")}${RESET}`,
+    );
+  } else {
+    console.log(
+      `${DIM}No AI tool directories detected — will install to all tool directories.${RESET}`,
+    );
+  }
+  console.log();
+
+  // Step 2: Agent selection checkbox
+  const availableAgents = discoverAgentSources(bundleDir);
+  if (availableAgents.length === 0) {
+    console.log(`${YELLOW}No agent files found in bundle.${RESET}`);
+    return null;
+  }
+
+  const choices: CheckboxChoice[] = availableAgents.map((agent) => ({
+    value: agent,
+    label: agent.replace(/\.md$/, ""),
+    description: AGENT_DESCRIPTIONS[agent] ?? "",
+    checked: true, // All pre-selected by default
+  }));
+
+  const selectedAgents = await checkbox(
+    "Which agent files should be set up?",
+    choices,
+  );
+
+  if (selectedAgents.length === 0) {
+    console.log(`${DIM}No agents selected — skipping agent setup.${RESET}`);
+    return { agents: [], toolDirs };
+  }
+
+  console.log();
+
+  // Step 3: Show preview
+  const selection: AgentSelection = { agents: selectedAgents, toolDirs };
+  const plan = buildSymlinkPlan(projectDir, bundleDir, selection);
+
+  const toCreate = plan.filter((p) => p.status === "create");
+  const toReplace = plan.filter((p) => p.status === "replace");
+  const existing = plan.filter((p) => p.status === "exists");
+
+  if (toCreate.length > 0 || toReplace.length > 0) {
+    console.log("Will create:");
+    for (const entry of toCreate) {
+      console.log(`  ${GREEN}+${RESET} ${entry.displayPath} -> ${entry.relTarget}`);
+    }
+    for (const entry of toReplace) {
+      console.log(
+        `  ${YELLOW}↻${RESET} ${entry.displayPath} -> ${entry.relTarget} ${DIM}(replaces regular file)${RESET}`,
+      );
+    }
+  }
+
+  if (existing.length > 0) {
+    console.log(`${DIM}Already set up: ${existing.map((e) => e.displayPath).join(", ")}${RESET}`);
+  }
+
+  if (toCreate.length === 0 && toReplace.length === 0) {
+    console.log(`${GREEN}All selected agents are already set up.${RESET}`);
+    return selection;
+  }
+
+  console.log();
+
+  // Step 4: Confirm
+  const proceed = await confirm("Proceed?", true);
+  if (!proceed) {
+    console.log(`${DIM}Cancelled — no agent files created.${RESET}`);
+    return null;
+  }
+
+  return selection;
+}
+
 /**
  * CLI entry point for `ninthwave setup`.
+ *
+ * Flags:
+ *   --global  Set up global skills only
+ *   --yes     Skip interactive prompts, accept defaults
  */
-export function cmdSetup(args: string[]): void {
+export async function cmdSetup(args: string[]): Promise<void> {
   const isGlobal = args.includes("--global");
+  const autoYes = args.includes("--yes") || args.includes("-y");
   const bundleDir = getBundleDir();
 
   if (isGlobal) {
@@ -497,5 +793,37 @@ export function cmdSetup(args: string[]): void {
   }
   const projectDir = result.stdout.replace(/\/.git$/, "");
 
-  setupProject(projectDir, bundleDir);
+  // Determine agent selection
+  const isTTY = process.stdin.isTTY ?? false;
+
+  if (autoYes || !isTTY) {
+    // Non-interactive: install all agents to all detected tools (or all tools if none detected)
+    const detectedTools = detectProjectTools(projectDir);
+    const toolDirs =
+      detectedTools.length > 0 ? detectedTools : [...AGENT_TARGET_DIRS];
+    setupProject(projectDir, bundleDir, {
+      agentSelection: {
+        agents: discoverAgentSources(bundleDir),
+        toolDirs,
+      },
+    });
+  } else {
+    // Interactive: prompt for agent selection before running setup
+    // Run prerequisites check first (part of setupProject), then interactive selection
+    const selection = await interactiveAgentSelection(
+      projectDir,
+      bundleDir,
+    );
+
+    if (selection === null) {
+      // User cancelled — still run setup for non-agent parts
+      setupProject(projectDir, bundleDir, {
+        agentSelection: { agents: [], toolDirs: [] },
+      });
+    } else {
+      setupProject(projectDir, bundleDir, {
+        agentSelection: selection,
+      });
+    }
+  }
 }
