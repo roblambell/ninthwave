@@ -1438,3 +1438,265 @@ describe("executeMerge conflict-aware rebase", () => {
     expect(item.mergeFailCount).toBe(1);
   });
 });
+
+// ── PR comment relay (M-ORC-3) ───────────────────────────────────────
+
+describe("processComments (via processTransitions)", () => {
+  it("generates send-message action when new trusted comment detected", () => {
+    const orch = new Orchestrator();
+    orch.addItem(makeTodo("H-1-1"));
+    orch.setState("H-1-1", "ci-pending");
+    orch.getItem("H-1-1")!.prNumber = 42;
+    orch.getItem("H-1-1")!.workspaceRef = "workspace:1";
+
+    const actions = orch.processTransitions(
+      snapshotWith([{
+        id: "H-1-1",
+        ciStatus: "pending",
+        prState: "open",
+        newComments: [
+          { body: "Please fix the error handling", author: "reviewer", createdAt: "2026-01-15T12:01:00Z" },
+        ],
+      }]),
+    );
+
+    const sendMsg = actions.find((a) => a.type === "send-message" && a.itemId === "H-1-1");
+    expect(sendMsg).toBeDefined();
+    expect(sendMsg!.message).toContain("@reviewer");
+    expect(sendMsg!.message).toContain("Please fix the error handling");
+  });
+
+  it("does not generate action for untrusted comments (not in snapshot)", () => {
+    // Untrusted comments are filtered out during buildSnapshot (not included in newComments).
+    // Verify that empty newComments generates no relay actions.
+    const orch = new Orchestrator();
+    orch.addItem(makeTodo("H-1-1"));
+    orch.setState("H-1-1", "ci-pending");
+    orch.getItem("H-1-1")!.prNumber = 42;
+    orch.getItem("H-1-1")!.workspaceRef = "workspace:1";
+
+    const actions = orch.processTransitions(
+      snapshotWith([{
+        id: "H-1-1",
+        ciStatus: "pending",
+        prState: "open",
+        newComments: [],
+      }]),
+    );
+
+    expect(actions.filter((a) => a.type === "send-message")).toHaveLength(0);
+    expect(actions.filter((a) => a.type === "daemon-rebase")).toHaveLength(0);
+  });
+
+  it("does not relay previously-seen comments (lastCommentCheck prevents duplicates)", () => {
+    const orch = new Orchestrator();
+    orch.addItem(makeTodo("H-1-1"));
+    orch.setState("H-1-1", "ci-pending");
+    orch.getItem("H-1-1")!.prNumber = 42;
+    orch.getItem("H-1-1")!.workspaceRef = "workspace:1";
+
+    // First tick: comment appears → relay
+    const actions1 = orch.processTransitions(
+      snapshotWith([{
+        id: "H-1-1",
+        ciStatus: "pending",
+        prState: "open",
+        newComments: [
+          { body: "Looks good overall", author: "reviewer", createdAt: "2026-01-15T12:01:00Z" },
+        ],
+      }]),
+    );
+    expect(actions1.filter((a) => a.type === "send-message")).toHaveLength(1);
+    // lastCommentCheck should be updated
+    expect(orch.getItem("H-1-1")!.lastCommentCheck).toBe("2026-01-15T12:01:00Z");
+
+    // Second tick: no new comments (buildSnapshot would filter by lastCommentCheck)
+    const actions2 = orch.processTransitions(
+      snapshotWith([{
+        id: "H-1-1",
+        ciStatus: "pending",
+        prState: "open",
+        // No newComments — buildSnapshot filtered them because lastCommentCheck is after them
+      }]),
+    );
+    expect(actions2.filter((a) => a.type === "send-message")).toHaveLength(0);
+  });
+
+  it("generates daemon-rebase action for 'rebase' keyword in comment", () => {
+    const orch = new Orchestrator();
+    orch.addItem(makeTodo("H-1-1"));
+    orch.setState("H-1-1", "ci-pending");
+    orch.getItem("H-1-1")!.prNumber = 42;
+    orch.getItem("H-1-1")!.workspaceRef = "workspace:1";
+
+    const actions = orch.processTransitions(
+      snapshotWith([{
+        id: "H-1-1",
+        ciStatus: "pending",
+        prState: "open",
+        newComments: [
+          { body: "Please rebase onto main", author: "reviewer", createdAt: "2026-01-15T12:01:00Z" },
+        ],
+      }]),
+    );
+
+    const rebaseAction = actions.find((a) => a.type === "daemon-rebase" && a.itemId === "H-1-1");
+    expect(rebaseAction).toBeDefined();
+    expect(rebaseAction!.message).toContain("@reviewer");
+    expect(rebaseAction!.message).toContain("rebase");
+    // Should NOT also generate a send-message for the same comment
+    expect(actions.filter((a) => a.type === "send-message" && a.itemId === "H-1-1")).toHaveLength(0);
+  });
+
+  it("does not process comments for items without a prNumber", () => {
+    const orch = new Orchestrator();
+    orch.addItem(makeTodo("H-1-1"));
+    orch.setState("H-1-1", "implementing");
+    orch.getItem("H-1-1")!.workspaceRef = "workspace:1";
+    // No prNumber set
+
+    const actions = orch.processTransitions(
+      snapshotWith([{
+        id: "H-1-1",
+        workerAlive: true,
+        newComments: [
+          { body: "Some comment", author: "reviewer", createdAt: "2026-01-15T12:01:00Z" },
+        ],
+      }]),
+      NOW,
+    );
+
+    expect(actions.filter((a) => a.type === "send-message")).toHaveLength(0);
+    expect(actions.filter((a) => a.type === "daemon-rebase")).toHaveLength(0);
+  });
+
+  it("does not process comments for items without a workspaceRef", () => {
+    const orch = new Orchestrator();
+    orch.addItem(makeTodo("H-1-1"));
+    orch.setState("H-1-1", "ci-pending");
+    orch.getItem("H-1-1")!.prNumber = 42;
+    // No workspaceRef set
+
+    const actions = orch.processTransitions(
+      snapshotWith([{
+        id: "H-1-1",
+        ciStatus: "pending",
+        prState: "open",
+        newComments: [
+          { body: "Fix this", author: "reviewer", createdAt: "2026-01-15T12:01:00Z" },
+        ],
+      }]),
+    );
+
+    expect(actions.filter((a) => a.type === "send-message")).toHaveLength(0);
+  });
+
+  it("skips orchestrator's own audit-trail comments", () => {
+    const orch = new Orchestrator();
+    orch.addItem(makeTodo("H-1-1"));
+    orch.setState("H-1-1", "ci-pending");
+    orch.getItem("H-1-1")!.prNumber = 42;
+    orch.getItem("H-1-1")!.workspaceRef = "workspace:1";
+
+    const actions = orch.processTransitions(
+      snapshotWith([{
+        id: "H-1-1",
+        ciStatus: "pending",
+        prState: "open",
+        newComments: [
+          { body: "**[Orchestrator]** Auto-merged PR #42 for H-1-1.", author: "bot", createdAt: "2026-01-15T12:01:00Z" },
+        ],
+      }]),
+    );
+
+    expect(actions.filter((a) => a.type === "send-message")).toHaveLength(0);
+    expect(actions.filter((a) => a.type === "daemon-rebase")).toHaveLength(0);
+  });
+
+  it("processes comments in all active PR states", () => {
+    const prStates: Array<{ state: string; ciStatus: string }> = [
+      { state: "pr-open", ciStatus: "unknown" },
+      { state: "ci-pending", ciStatus: "pending" },
+      { state: "ci-passed", ciStatus: "pass" },
+      { state: "ci-failed", ciStatus: "fail" },
+      { state: "review-pending", ciStatus: "pass" },
+    ];
+
+    for (const { state, ciStatus } of prStates) {
+      const orch = new Orchestrator({ mergeStrategy: "ask" }); // ask prevents auto-merge
+      orch.addItem(makeTodo("H-1-1"));
+      orch.setState("H-1-1", state as any);
+      orch.getItem("H-1-1")!.prNumber = 42;
+      orch.getItem("H-1-1")!.workspaceRef = "workspace:1";
+      orch.getItem("H-1-1")!.ciFailCount = 0;
+
+      const actions = orch.processTransitions(
+        snapshotWith([{
+          id: "H-1-1",
+          ciStatus: ciStatus as any,
+          prState: "open",
+          isMergeable: true,
+          newComments: [
+            { body: "Please address this", author: "reviewer", createdAt: "2026-01-15T12:01:00Z" },
+          ],
+        }]),
+      );
+
+      const sendMsg = actions.find((a) => a.type === "send-message" && a.itemId === "H-1-1");
+      expect(sendMsg).toBeDefined();
+    }
+  });
+
+  it("does not duplicate daemon-rebase when CI already triggered one", () => {
+    const orch = new Orchestrator();
+    orch.addItem(makeTodo("H-1-1"));
+    orch.setState("H-1-1", "ci-pending");
+    orch.getItem("H-1-1")!.prNumber = 42;
+    orch.getItem("H-1-1")!.workspaceRef = "workspace:1";
+
+    // Merge conflict triggers daemon-rebase from CI logic,
+    // plus a "rebase" comment comes in simultaneously
+    const actions = orch.processTransitions(
+      snapshotWith([{
+        id: "H-1-1",
+        ciStatus: "fail",
+        prState: "open",
+        isMergeable: false, // triggers daemon-rebase from CI failure logic
+        newComments: [
+          { body: "Please rebase", author: "reviewer", createdAt: "2026-01-15T12:01:00Z" },
+        ],
+      }]),
+    );
+
+    // Should have exactly one daemon-rebase (from CI logic), not two
+    const rebaseActions = actions.filter((a) => a.type === "daemon-rebase" && a.itemId === "H-1-1");
+    expect(rebaseActions).toHaveLength(1);
+  });
+
+  it("handles multiple comments in one tick", () => {
+    const orch = new Orchestrator();
+    orch.addItem(makeTodo("H-1-1"));
+    orch.setState("H-1-1", "ci-pending");
+    orch.getItem("H-1-1")!.prNumber = 42;
+    orch.getItem("H-1-1")!.workspaceRef = "workspace:1";
+
+    const actions = orch.processTransitions(
+      snapshotWith([{
+        id: "H-1-1",
+        ciStatus: "pending",
+        prState: "open",
+        newComments: [
+          { body: "First comment", author: "alice", createdAt: "2026-01-15T12:01:00Z" },
+          { body: "Second comment", author: "bob", createdAt: "2026-01-15T12:02:00Z" },
+        ],
+      }]),
+    );
+
+    const sendMsgs = actions.filter((a) => a.type === "send-message" && a.itemId === "H-1-1");
+    expect(sendMsgs).toHaveLength(2);
+    expect(sendMsgs[0]!.message).toContain("@alice");
+    expect(sendMsgs[1]!.message).toContain("@bob");
+    // lastCommentCheck should be the latest comment timestamp
+    expect(orch.getItem("H-1-1")!.lastCommentCheck).toBe("2026-01-15T12:02:00Z");
+  });
+});

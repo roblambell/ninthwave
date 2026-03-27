@@ -27,7 +27,7 @@ import { checkPrStatus, scanExternalPRs } from "./watch.ts";
 import { launchSingleItem, launchReviewWorker, detectAiTool, cleanStaleBranchForReuse } from "./start.ts";
 import { getWorkerHealthStatus } from "../worker-health.ts";
 import { cleanSingleWorktree } from "./clean.ts";
-import { prMerge, prComment, checkPrMergeable, getRepoOwner, applyGithubToken } from "../gh.ts";
+import { prMerge, prComment, checkPrMergeable, getRepoOwner, applyGithubToken, fetchTrustedPrComments } from "../gh.ts";
 import { fetchOrigin, ffMerge, hasChanges, getStagedFiles, gitAdd, gitCommit, gitReset, daemonRebase } from "../git.ts";
 import { type Multiplexer, getMux } from "../mux.ts";
 import { reconcile } from "./reconcile.ts";
@@ -176,6 +176,7 @@ export function buildSnapshot(
   mux: Multiplexer = getMux(),
   getLastCommitTime: (projectRoot: string, branchName: string) => string | null = getWorktreeLastCommitTime,
   checkPr: (id: string, projectRoot: string) => string | null = checkPrStatus,
+  fetchComments?: (repoRoot: string, prNumber: number, since: string) => Array<{ body: string; author: string; createdAt: string }>,
 ): PollSnapshot {
   const items: ItemSnapshot[] = [];
   const readyIds: string[] = [];
@@ -304,6 +305,20 @@ export function buildSnapshot(
       const commitTime = getLastCommitTime(repoRoot, `todo/${orchItem.id}`);
       snap.lastCommitTime = commitTime;
       orchItem.lastCommitTime = commitTime;
+    }
+
+    // Fetch new trusted PR comments for items with open PRs in active states
+    if (orchItem.prNumber && fetchComments) {
+      const commentRelayStates = new Set(["pr-open", "ci-pending", "ci-passed", "ci-failed", "review-pending", "reviewing"]);
+      if (commentRelayStates.has(orchItem.state)) {
+        const since = orchItem.lastCommentCheck || orchItem.lastTransition;
+        try {
+          const comments = fetchComments(repoRoot, orchItem.prNumber, since);
+          if (comments.length > 0) {
+            snap.newComments = comments;
+          }
+        } catch { /* ignore — comment polling is best-effort */ }
+      }
     }
 
     items.push(snap);
@@ -526,7 +541,7 @@ export function reconstructState(
   daemonState?: DaemonState | null,
 ): void {
   // Build a lookup map from saved daemon state for restoring persisted counters and review fields
-  const savedItems = new Map<string, { ciFailCount: number; retryCount: number; reviewWorkspaceRef?: string; reviewCompleted?: boolean }>();
+  const savedItems = new Map<string, { ciFailCount: number; retryCount: number; reviewWorkspaceRef?: string; reviewCompleted?: boolean; lastCommentCheck?: string }>();
   if (daemonState?.items) {
     for (const si of daemonState.items) {
       savedItems.set(si.id, {
@@ -534,6 +549,7 @@ export function reconstructState(
         retryCount: si.retryCount,
         reviewWorkspaceRef: si.reviewWorkspaceRef,
         reviewCompleted: si.reviewCompleted,
+        lastCommentCheck: si.lastCommentCheck,
       });
     }
   }
@@ -552,6 +568,7 @@ export function reconstructState(
       item.retryCount = saved.retryCount;
       if (saved.reviewWorkspaceRef) item.reviewWorkspaceRef = saved.reviewWorkspaceRef;
       if (saved.reviewCompleted) item.reviewCompleted = saved.reviewCompleted;
+      if (saved.lastCommentCheck) item.lastCommentCheck = saved.lastCommentCheck;
     }
 
     // Check for worktree: cross-repo index first, then hub-local fallback
@@ -1900,7 +1917,7 @@ export async function cmdOrchestrate(
   }
 
   const loopDeps: OrchestrateLoopDeps = {
-    buildSnapshot: (o, pr, wd) => buildSnapshot(o, pr, wd, mux),
+    buildSnapshot: (o, pr, wd) => buildSnapshot(o, pr, wd, mux, undefined, undefined, fetchTrustedPrComments),
     sleep: (ms) => interruptibleSleep(ms, abortController.signal),
     log,
     actionDeps,

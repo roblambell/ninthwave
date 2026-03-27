@@ -90,6 +90,8 @@ export interface OrchestratorItem {
   ciFailureNotified?: boolean;
   /** The lastCommitTime when ciFailureNotified was set. Used to reset the flag when the worker pushes a fix. */
   ciFailureNotifiedAt?: string | null;
+  /** ISO timestamp of the last comment check for this item's PR. Used to avoid duplicate comment relay. */
+  lastCommentCheck?: string;
 }
 
 export interface OrchestratorConfig {
@@ -142,6 +144,8 @@ export interface ItemSnapshot {
   /** Timestamp from the external system for the current state (ISO string).
    *  e.g., GitHub's completedAt for CI checks, mergedAt for merges, updatedAt for PR changes. */
   eventTime?: string;
+  /** New trusted PR comments since last check. */
+  newComments?: Array<{ body: string; author: string; createdAt: string }>;
 }
 
 export interface PollSnapshot {
@@ -608,6 +612,9 @@ export class Orchestrator {
       }
     }
 
+    // Relay trusted PR comments to workers
+    actions.push(...this.processComments(item, snap, actions));
+
     return actions;
   }
 
@@ -896,6 +903,69 @@ export class Orchestrator {
     if (snap?.prState === "merged") {
       this.transition(item, "merged", snap?.eventTime);
       actions.push({ type: "clean", itemId: item.id });
+    }
+
+    return actions;
+  }
+
+  // ── States where PR comment relay is active ────────────────────
+  private static readonly COMMENT_RELAY_STATES: Set<OrchestratorItemState> = new Set([
+    "pr-open", "ci-pending", "ci-passed", "ci-failed", "review-pending", "reviewing",
+  ]);
+
+  /**
+   * Process new trusted PR comments and generate relay/action messages.
+   * Comments with "rebase" keyword trigger daemon-rebase directly.
+   * All other comments are relayed to the worker via send-message.
+   * Updates lastCommentCheck to prevent duplicate relay.
+   */
+  private processComments(
+    item: OrchestratorItem,
+    snap: ItemSnapshot | undefined,
+    existingActions: Action[],
+  ): Action[] {
+    if (!Orchestrator.COMMENT_RELAY_STATES.has(item.state)) return [];
+    if (!snap?.newComments || snap.newComments.length === 0) return [];
+    if (!item.prNumber) return [];
+    if (!item.workspaceRef) return [];
+
+    const actions: Action[] = [];
+
+    // Update lastCommentCheck to the latest comment timestamp
+    const latestCreatedAt = snap.newComments
+      .map((c) => c.createdAt)
+      .sort()
+      .pop();
+    if (latestCreatedAt) {
+      item.lastCommentCheck = latestCreatedAt;
+    }
+
+    // Check if daemon-rebase already queued for this item (avoid duplicates)
+    const hasDaemonRebase = existingActions.some(
+      (a) => a.type === "daemon-rebase" && a.itemId === item.id,
+    );
+
+    for (const comment of snap.newComments) {
+      // Skip orchestrator's own audit-trail comments
+      if (comment.body.startsWith("**[Orchestrator]**")) continue;
+
+      if (/\brebase\b/i.test(comment.body)) {
+        // "rebase" keyword → trigger daemon-rebase directly (only if not already queued)
+        if (!hasDaemonRebase) {
+          actions.push({
+            type: "daemon-rebase",
+            itemId: item.id,
+            message: `[ORCHESTRATOR] Rebase Request: @${comment.author} requested rebase on PR #${item.prNumber}.`,
+          });
+        }
+      } else {
+        // Relay comment to worker
+        actions.push({
+          type: "send-message",
+          itemId: item.id,
+          message: `[ORCHESTRATOR] Review Feedback: @${comment.author} commented on PR #${item.prNumber}:\n\n${comment.body}`,
+        });
+      }
     }
 
     return actions;

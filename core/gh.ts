@@ -202,6 +202,61 @@ export function resolveGithubToken(projectRoot: string): string | undefined {
   return undefined;
 }
 
+// ── Trusted PR comments ──────────────────────────────────────────────
+
+/** Trusted author associations for comment filtering. */
+export const TRUSTED_ASSOCIATIONS = new Set(["OWNER", "MEMBER", "COLLABORATOR"]);
+
+/** A PR comment from a trusted collaborator. */
+export interface PrComment {
+  body: string;
+  author: string;
+  authorAssociation: string;
+  createdAt: string;
+}
+
+/**
+ * Fetch PR comments from trusted collaborators since a given timestamp.
+ * Checks both issue comments (general) and review comments (inline).
+ * Returns comments sorted by createdAt ascending.
+ */
+export function fetchTrustedPrComments(
+  repoRoot: string,
+  prNumber: number,
+  since: string,
+): PrComment[] {
+  let ownerRepo: string;
+  try {
+    ownerRepo = getRepoOwner(repoRoot);
+  } catch {
+    return [];
+  }
+
+  const comments: PrComment[] = [];
+  const trustedFilter = '(.author_association == "OWNER" or .author_association == "MEMBER" or .author_association == "COLLABORATOR")';
+  const jq = `[.[] | select(.created_at > "${since}" and ${trustedFilter}) | {body: .body, author: .user.login, authorAssociation: .author_association, createdAt: .created_at}]`;
+
+  // Issue comments (general PR comments)
+  try {
+    const raw = apiGet(repoRoot, `repos/${ownerRepo}/issues/${prNumber}/comments`, jq);
+    if (raw.trim()) {
+      const parsed = JSON.parse(raw) as PrComment[];
+      comments.push(...parsed);
+    }
+  } catch { /* ignore */ }
+
+  // Review comments (inline code comments)
+  try {
+    const raw = apiGet(repoRoot, `repos/${ownerRepo}/pulls/${prNumber}/comments`, jq);
+    if (raw.trim()) {
+      const parsed = JSON.parse(raw) as PrComment[];
+      comments.push(...parsed);
+    }
+  } catch { /* ignore */ }
+
+  return comments.sort((a, b) => a.createdAt.localeCompare(b.createdAt));
+}
+
 /**
  * Apply the resolved GitHub token to process.env.GH_TOKEN.
  * This makes all gh CLI invocations (daemon + workers) use the custom identity.

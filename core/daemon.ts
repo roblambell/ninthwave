@@ -38,6 +38,8 @@ export interface DaemonStateItem {
   exitCode?: number | null;
   /** Last lines of stderr captured from the worker on failure. */
   stderrTail?: string;
+  /** ISO timestamp of the last comment check for this item's PR. */
+  lastCommentCheck?: string;
 }
 
 export interface DaemonState {
@@ -343,6 +345,7 @@ export function serializeOrchestratorState(
       ...(item.endedAt ? { endedAt: item.endedAt } : {}),
       ...(item.exitCode != null ? { exitCode: item.exitCode } : {}),
       ...(item.stderrTail ? { stderrTail: item.stderrTail } : {}),
+      ...(item.lastCommentCheck ? { lastCommentCheck: item.lastCommentCheck } : {}),
     })),
   };
 }
