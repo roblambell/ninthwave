@@ -33,9 +33,11 @@ import { mkdtempSync, mkdirSync, writeFileSync, rmSync } from "fs";
 import { join } from "path";
 import { tmpdir } from "os";
 
-// Strip ANSI escape codes and CSI sequences for content assertions
+// Strip ANSI escape codes, CSI sequences, and OSC 8 hyperlinks for content assertions
 function stripAnsi(s: string): string {
-  return s.replace(/\x1b\[[0-9;]*[A-Za-z]/g, "");
+  return s
+    .replace(/\x1b\]8;[^\x07]*\x07/g, "")   // Strip OSC 8 hyperlink sequences
+    .replace(/\x1b\[[0-9;]*[A-Za-z]/g, "");  // Strip CSI sequences (colors, etc.)
 }
 
 describe("stateColor", () => {
@@ -237,15 +239,15 @@ describe("formatItemRow", () => {
     expect(stripAnsi(row)).toContain("Implementing");
   });
 
-  it("includes the PR number with #", () => {
+  it("includes PR number inline with state", () => {
     const row = formatItemRow(baseItem, 30);
-    expect(stripAnsi(row)).toContain("#42");
+    expect(stripAnsi(row)).toContain("Implementing (#42)");
   });
 
-  it("shows dash when no PR number", () => {
+  it("shows state only when no PR number", () => {
     const item = { ...baseItem, prNumber: null };
     const row = formatItemRow(item, 30);
-    expect(stripAnsi(row)).toContain("-");
+    expect(stripAnsi(row)).toContain("Implementing");
     expect(stripAnsi(row)).not.toContain("#");
   });
 
@@ -362,15 +364,14 @@ describe("formatStatusTable", () => {
     expect(output).toContain("ninthwave status");
     expect(output).toContain("ID");
     expect(output).toContain("STATE");
-    expect(output).toContain("PR");
     expect(output).toContain("DURATION");
     expect(output).toContain("TITLE");
     expect(output).toContain("H-STU-1");
     expect(output).toContain("H-MUX-2");
-    expect(output).toContain("Implementing");
-    expect(output).toContain("Merged");
-    expect(output).toContain("#42");
-    expect(output).toContain("#41");
+    expect(output).toContain("Implementing (#42)");
+    expect(output).toContain("Merged (#41)");
+    // PR column header should not appear (PR is now inline with state)
+    expect(output).not.toMatch(/\bPR\s+DURATION/);
   });
 
   it("shows no active items message when empty", () => {
@@ -869,10 +870,10 @@ describe("formatQueuedItemRow", () => {
     expect(row).toContain("Waiting to start");
   });
 
-  it("uses dash for PR when none", () => {
+  it("shows state only when no PR number", () => {
     const item = makeItem("Q-2", "queued");
     const row = stripAnsi(formatQueuedItemRow(item, 20));
-    expect(row).toContain("-");
+    expect(row).toContain("Queued");
     expect(row).not.toContain("#");
   });
 });

@@ -47,9 +47,11 @@ function makeTodo(id: string, deps: string[] = []): TodoItem {
   };
 }
 
-// Strip ANSI escape codes for content assertions
+// Strip ANSI escape codes, CSI sequences, and OSC 8 hyperlinks for content assertions
 function stripAnsi(s: string): string {
-  return s.replace(/\x1b\[[0-9;]*[A-Za-z]/g, "");
+  return s
+    .replace(/\x1b\]8;[^\x07]*\x07/g, "")   // Strip OSC 8 hyperlink sequences
+    .replace(/\x1b\[[0-9;]*[A-Za-z]/g, "");  // Strip CSI sequences (colors, etc.)
 }
 
 // ── Telemetry capture on state transitions ───────────────────────────

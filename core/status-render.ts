@@ -20,6 +20,8 @@ export interface ViewOptions {
   showBlockerDetail?: boolean;
   showHelp?: boolean;
   sessionStartedAt?: string;
+  /** Base repository URL for PR hyperlinks (e.g., "https://github.com/org/repo"). */
+  repoUrl?: string;
 }
 
 export interface SessionMetrics {
@@ -226,6 +228,70 @@ export function pad(s: string, width: number): string {
 }
 
 /**
+ * Wrap text in an OSC 8 hyperlink escape sequence.
+ * Terminals that support OSC 8 (iTerm2, Kitty, Windows Terminal, GNOME Terminal)
+ * render the text as a clickable link. Unsupported terminals show plain text.
+ */
+export function osc8Link(url: string, text: string): string {
+  return `\x1b]8;;${url}\x07${text}\x1b]8;;\x07`;
+}
+
+/**
+ * Strip ANSI CSI sequences and OSC 8 hyperlink sequences from a string.
+ * Returns the plain display text. Useful for width calculations.
+ */
+export function stripAnsiForWidth(s: string): string {
+  return s
+    .replace(/\x1b\]8;[^\x07]*\x07/g, "")   // Strip OSC 8 hyperlink sequences
+    .replace(/\x1b\[[0-9;]*[A-Za-z]/g, "");  // Strip CSI sequences (colors, etc.)
+}
+
+/**
+ * Compute dynamic state column width based on current items.
+ * Returns 14 when no items have PRs (enough for "Bootstrapping").
+ * Expands up to 24 when PR numbers are present.
+ */
+export function computeStateColWidth(items: StatusItem[]): number {
+  const BASE_WIDTH = 14;
+  const MAX_WIDTH = 24;
+  let maxWidth = BASE_WIDTH;
+  for (const item of items) {
+    if (item.prNumber) {
+      const displayLen = stateLabel(item.state).length + ` (#${item.prNumber})`.length;
+      if (displayLen > maxWidth) maxWidth = displayLen;
+    }
+  }
+  return Math.min(maxWidth, MAX_WIDTH);
+}
+
+/**
+ * Format the state label with an optional inline PR suffix.
+ * When repoUrl is provided, the PR number is wrapped in an OSC 8 hyperlink.
+ * Returns a string padded to stateColWidth based on display width.
+ */
+export function formatStateLabelWithPr(
+  state: ItemState,
+  prNumber: number | null,
+  stateColWidth: number,
+  repoUrl?: string,
+): string {
+  const label = stateLabel(state);
+  if (!prNumber) {
+    return pad(label, stateColWidth);
+  }
+
+  const prText = `(#${prNumber})`;
+  const displayLen = label.length + 1 + prText.length; // "Label (#NNN)"
+  const paddingNeeded = Math.max(0, stateColWidth - displayLen);
+
+  if (repoUrl) {
+    const prUrl = `${repoUrl}/pull/${prNumber}`;
+    return `${label} ${osc8Link(prUrl, prText)}${" ".repeat(paddingNeeded)}`;
+  }
+  return `${label} ${prText}${" ".repeat(paddingNeeded)}`;
+}
+
+/**
  * Format elapsed duration from startedAt to now (for active workers) or to endedAt (for completed workers).
  * Returns a human-readable string like "2h 15m" or empty string when no startedAt is available.
  */
@@ -281,13 +347,20 @@ export function formatTelemetrySuffix(item: StatusItem): string {
  * Format a single item row for the status table.
  * Returns a string with ANSI color codes.
  * When depsStr is provided, it's displayed as the DEPS column.
+ * stateColWidth controls the state+PR column width (default 14).
+ * repoUrl enables OSC 8 hyperlinks on PR numbers.
  */
-export function formatItemRow(item: StatusItem, titleWidth: number, depsStr?: string): string {
+export function formatItemRow(
+  item: StatusItem,
+  titleWidth: number,
+  depsStr?: string,
+  stateColWidth: number = 14,
+  repoUrl?: string,
+): string {
   const icon = stateIcon(item.state);
   const id = pad(item.id, 12);
   const color = stateColor(item.state);
-  const label = pad(stateLabel(item.state), 14);
-  const pr = item.prNumber ? pad(`#${item.prNumber}`, 7) : pad("-", 7);
+  const stateCell = formatStateLabelWithPr(item.state, item.prNumber, stateColWidth, repoUrl);
   const duration = pad(formatDuration(item), 8);
   const depsCol = depsStr ?? "";
   const title = truncateTitle(item.title || item.id, titleWidth);
@@ -295,7 +368,7 @@ export function formatItemRow(item: StatusItem, titleWidth: number, depsStr?: st
   const reason = item.failureReason ? ` ${DIM}(${item.failureReason})${RESET}` : "";
   const telemetry = formatTelemetrySuffix(item);
 
-  return `  ${color}${icon}${RESET} ${id}${color}${label}${RESET} ${pr} ${duration} ${depsCol}${title}${repo}${reason}${telemetry}`;
+  return `  ${color}${icon}${RESET} ${id}${color}${stateCell}${RESET} ${duration} ${depsCol}${title}${repo}${reason}${telemetry}`;
 }
 
 /**
@@ -357,18 +430,23 @@ export function formatSummary(items: StatusItem[]): string {
 /**
  * Format a fully dimmed item row for the queue section.
  * Returns a string with DIM applied to the entire row.
+ * stateColWidth controls the state column width (default 14).
  */
-export function formatQueuedItemRow(item: StatusItem, titleWidth: number, depsStr?: string): string {
+export function formatQueuedItemRow(
+  item: StatusItem,
+  titleWidth: number,
+  depsStr?: string,
+  stateColWidth: number = 14,
+): string {
   const icon = stateIcon(item.state);
   const id = pad(item.id, 12);
-  const label = pad(stateLabel(item.state), 14);
-  const pr = item.prNumber ? pad(`#${item.prNumber}`, 7) : pad("-", 7);
+  const stateCell = formatStateLabelWithPr(item.state, item.prNumber, stateColWidth);
   const duration = pad(formatDuration(item), 8);
   const depsCol = depsStr ?? "";
   const title = truncateTitle(item.title || item.id, titleWidth);
   const repo = item.repoLabel ? ` [${item.repoLabel}]` : "";
 
-  return `  ${DIM}${icon} ${id}${label} ${pr} ${duration} ${depsCol}${title}${repo}${RESET}`;
+  return `  ${DIM}${icon} ${id}${stateCell} ${duration} ${depsCol}${title}${repo}${RESET}`;
 }
 
 // ─── Dependency tree building ─────────────────────────────────────────────────
@@ -425,6 +503,8 @@ export function buildDependencyTree(items: StatusItem[]): {
 /**
  * Format a single tree item row with tree-drawing prefix.
  * depth=0 items have no prefix (roots). depth>0 items get connector characters.
+ * stateColWidth controls the state+PR column width (default 14).
+ * repoUrl enables OSC 8 hyperlinks on PR numbers.
  */
 export function formatTreeItemRow(
   item: StatusItem,
@@ -432,8 +512,10 @@ export function formatTreeItemRow(
   ancestorIsLast: boolean[],
   isLast: boolean,
   termWidth: number,
+  stateColWidth: number = 14,
+  repoUrl?: string,
 ): string {
-  const fixedWidth = 48;
+  const fixedWidth = 26 + stateColWidth;
   const prefixWidth = depth > 0 ? depth * 4 : 0;
   const titleWidth = Math.max(6, termWidth - fixedWidth - prefixWidth);
 
@@ -449,25 +531,27 @@ export function formatTreeItemRow(
   const icon = stateIcon(item.state);
   const id = pad(item.id, 12);
   const color = stateColor(item.state);
-  const label = pad(stateLabel(item.state), 14);
-  const pr = item.prNumber ? pad(`#${item.prNumber}`, 7) : pad("-", 7);
+  const stateCell = formatStateLabelWithPr(item.state, item.prNumber, stateColWidth, repoUrl);
   const duration = pad(formatDuration(item), 8);
   const title = truncateTitle(item.title || item.id, titleWidth);
   const repo = item.repoLabel ? ` ${DIM}[${item.repoLabel}]${RESET}` : "";
 
   if (item.state === "queued") {
-    return `  ${DIM}${prefix}${icon} ${id}${label} ${pr} ${duration} ${title}${repo}${RESET}`;
+    return `  ${DIM}${prefix}${icon} ${id}${stateCell} ${duration} ${title}${repo}${RESET}`;
   }
-  return `  ${prefix ? `${DIM}${prefix}${RESET}` : ""}${color}${icon}${RESET} ${id}${color}${label}${RESET} ${pr} ${duration} ${title}${repo}`;
+  return `  ${prefix ? `${DIM}${prefix}${RESET}` : ""}${color}${icon}${RESET} ${id}${color}${stateCell}${RESET} ${duration} ${title}${repo}`;
 }
 
 /**
  * Render dependency trees as formatted rows with tree-drawing characters.
  * Uses ├──, └──, │ for visual structure.
+ * stateColWidth and repoUrl are passed through to formatTreeItemRow.
  */
 export function formatTreeRows(
   trees: TreeNode[],
   termWidth: number,
+  stateColWidth: number = 14,
+  repoUrl?: string,
 ): string[] {
   const lines: string[] = [];
 
@@ -477,7 +561,7 @@ export function formatTreeRows(
     ancestorIsLast: boolean[],
     isLast: boolean,
   ): void {
-    lines.push(formatTreeItemRow(node.item, depth, ancestorIsLast, isLast, termWidth));
+    lines.push(formatTreeItemRow(node.item, depth, ancestorIsLast, isLast, termWidth, stateColWidth, repoUrl));
 
     for (let i = 0; i < node.children.length; i++) {
       const childIsLast = i === node.children.length - 1;
@@ -653,6 +737,7 @@ export function formatStatusTable(
   }
 
   const opts = viewOptions ?? {};
+  const repoUrl = opts.repoUrl;
 
   // Check if any items have dependency relationships
   const hasDeps = !flat && items.some((i) => (i.dependencies ?? []).length > 0);
@@ -676,14 +761,17 @@ export function formatStatusTable(
     }
   }
 
+  // Dynamic state column width: 14ch when no items have PRs, up to ~24ch with PRs
+  const stateColWidth = computeStateColWidth(items);
+
   // Column widths
-  // Base: 2 indent + 2 icon+space + 12 ID + 14 state + 1 + 7 PR + 1 + 8 duration + 1 = 48
-  const fixedWidth = 48 + depsColWidth;
+  // Base: 2 indent + 2 icon+space + 12 ID + stateColWidth state + 1 space + 8 duration + 1 space = 26 + stateColWidth
+  const fixedWidth = 26 + stateColWidth + depsColWidth;
   const titleWidth = Math.max(10, termWidth - fixedWidth);
 
   // Header
   const depsHeader = hasDeps ? `${pad("DEPS", depsColWidth)}` : "";
-  const header = `  ${DIM}  ${pad("ID", 12)}${pad("STATE", 14)} ${pad("PR", 7)} ${pad("DURATION", 8)} ${depsHeader}TITLE${RESET}`;
+  const header = `  ${DIM}  ${pad("ID", 12)}${pad("STATE", stateColWidth)} ${pad("DURATION", 8)} ${depsHeader}TITLE${RESET}`;
   lines.push(header);
 
   // Separator
@@ -709,10 +797,10 @@ export function formatStatusTable(
     const queuedItems = sorted.filter((i) => i.state === "queued");
 
     for (const item of activeItems) {
-      lines.push(formatItemRow(item, titleWidth, pad(depsStr(item.id), depsColWidth)));
+      lines.push(formatItemRow(item, titleWidth, pad(depsStr(item.id), depsColWidth), stateColWidth, repoUrl));
     }
     for (const item of mergedItems) {
-      lines.push(formatItemRow(item, titleWidth, pad(depsStr(item.id), depsColWidth)));
+      lines.push(formatItemRow(item, titleWidth, pad(depsStr(item.id), depsColWidth), stateColWidth, repoUrl));
     }
 
     // Queue section
@@ -731,7 +819,7 @@ export function formatStatusTable(
       lines.push(sep);
 
       for (const item of queuedItems) {
-        lines.push(formatQueuedItemRow(item, titleWidth, pad(depsStr(item.id), depsColWidth)));
+        lines.push(formatQueuedItemRow(item, titleWidth, pad(depsStr(item.id), depsColWidth), stateColWidth));
       }
     }
   } else {
@@ -741,10 +829,10 @@ export function formatStatusTable(
     const mergedItems = items.filter((i) => i.state === "merged");
 
     for (const item of activeItems) {
-      lines.push(formatItemRow(item, titleWidth));
+      lines.push(formatItemRow(item, titleWidth, undefined, stateColWidth, repoUrl));
     }
     for (const item of mergedItems) {
-      lines.push(formatItemRow(item, titleWidth));
+      lines.push(formatItemRow(item, titleWidth, undefined, stateColWidth, repoUrl));
     }
 
     // Queue section with header
@@ -761,7 +849,7 @@ export function formatStatusTable(
       lines.push(sep);
 
       for (const item of queuedItems) {
-        lines.push(formatQueuedItemRow(item, titleWidth));
+        lines.push(formatQueuedItemRow(item, titleWidth, undefined, stateColWidth));
       }
     }
   }

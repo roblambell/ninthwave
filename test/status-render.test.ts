@@ -11,6 +11,10 @@ import {
   formatDuration,
   formatTelemetrySuffix,
   pad,
+  osc8Link,
+  stripAnsiForWidth,
+  computeStateColWidth,
+  formatStateLabelWithPr,
   formatItemRow,
   formatQueuedItemRow,
   formatBatchProgress,
@@ -41,7 +45,9 @@ import type { TodoItem } from "../core/types.ts";
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
 function stripAnsi(s: string): string {
-  return s.replace(/\x1b\[[0-9;]*[A-Za-z]/g, "");
+  return s
+    .replace(/\x1b\]8;[^\x07]*\x07/g, "")   // Strip OSC 8 hyperlink sequences
+    .replace(/\x1b\[[0-9;]*[A-Za-z]/g, "");  // Strip CSI sequences (colors, etc.)
 }
 
 function makeStatusItem(overrides: Partial<StatusItem> = {}): StatusItem {
@@ -314,15 +320,17 @@ describe("formatItemRow", () => {
     const row = stripAnsi(formatItemRow(item, 30));
     expect(row).toContain("My great feature");
   });
-  it("includes PR number when present", () => {
+  it("includes PR number inline with state when present", () => {
     const item = makeStatusItem({ prNumber: 42 });
     const row = stripAnsi(formatItemRow(item, 20));
-    expect(row).toContain("#42");
+    expect(row).toContain("(#42)");
+    expect(row).toContain("Implementing (#42)");
   });
-  it("shows dash when no PR number", () => {
+  it("shows state only when no PR number", () => {
     const item = makeStatusItem({ prNumber: null });
     const row = stripAnsi(formatItemRow(item, 20));
-    expect(row).toContain("-");
+    expect(row).toContain("Implementing");
+    expect(row).not.toContain("#");
   });
   it("includes failure reason when present", () => {
     const item = makeStatusItem({ state: "ci-failed", failureReason: "test timeout" });
@@ -341,6 +349,195 @@ describe("formatQueuedItemRow", () => {
     const item = makeStatusItem({ state: "queued", id: "C-1-2" });
     const row = stripAnsi(formatQueuedItemRow(item, 20));
     expect(row).toContain("C-1-2");
+  });
+});
+
+// ── Inline PR suffix and OSC 8 hyperlink tests (H-TUI-4) ─────────────────────
+
+describe("osc8Link", () => {
+  it("wraps text in OSC 8 escape sequences", () => {
+    const link = osc8Link("https://github.com/org/repo/pull/265", "(#265)");
+    expect(link).toBe("\x1b]8;;https://github.com/org/repo/pull/265\x07(#265)\x1b]8;;\x07");
+  });
+
+  it("produces plain text when stripped", () => {
+    const link = osc8Link("https://github.com/org/repo/pull/265", "(#265)");
+    expect(stripAnsi(link)).toBe("(#265)");
+  });
+});
+
+describe("stripAnsiForWidth", () => {
+  it("strips CSI sequences", () => {
+    expect(stripAnsiForWidth("\x1b[33mhello\x1b[0m")).toBe("hello");
+  });
+
+  it("strips OSC 8 hyperlink sequences", () => {
+    const withLink = "\x1b]8;;https://example.com\x07text\x1b]8;;\x07";
+    expect(stripAnsiForWidth(withLink)).toBe("text");
+  });
+
+  it("strips both CSI and OSC 8 combined", () => {
+    const mixed = "\x1b[33m\x1b]8;;url\x07click\x1b]8;;\x07\x1b[0m";
+    expect(stripAnsiForWidth(mixed)).toBe("click");
+  });
+});
+
+describe("computeStateColWidth", () => {
+  it("returns 14 when no items have PRs", () => {
+    const items = [
+      makeStatusItem({ state: "implementing", prNumber: null }),
+      makeStatusItem({ state: "queued", prNumber: null }),
+    ];
+    expect(computeStateColWidth(items)).toBe(14);
+  });
+
+  it("expands width when items have PRs", () => {
+    const items = [
+      makeStatusItem({ state: "ci-pending", prNumber: 265 }),
+      makeStatusItem({ state: "implementing", prNumber: null }),
+    ];
+    // "CI Pending (#265)" = 17 chars
+    expect(computeStateColWidth(items)).toBe(17);
+  });
+
+  it("caps at 24 even with very large PR numbers", () => {
+    const items = [
+      makeStatusItem({ state: "bootstrapping", prNumber: 999999 }),
+    ];
+    // "Bootstrapping (#999999)" = 23 chars, within cap
+    expect(computeStateColWidth(items)).toBeLessThanOrEqual(24);
+  });
+
+  it("returns 14 for empty items list", () => {
+    expect(computeStateColWidth([])).toBe(14);
+  });
+});
+
+describe("formatStateLabelWithPr", () => {
+  it("returns padded state label when no PR", () => {
+    const result = formatStateLabelWithPr("implementing", null, 14);
+    expect(result).toBe("Implementing  ");
+    expect(result.length).toBe(14);
+  });
+
+  it("includes PR number inline when present", () => {
+    const result = formatStateLabelWithPr("ci-pending", 265, 20);
+    expect(stripAnsi(result)).toContain("CI Pending (#265)");
+  });
+
+  it("pads to stateColWidth based on display width", () => {
+    const result = formatStateLabelWithPr("merged", 42, 20);
+    const display = stripAnsi(result);
+    // "Merged (#42)" = 12 chars, padded to 20
+    expect(display.length).toBe(20);
+  });
+
+  it("generates OSC 8 hyperlink when repoUrl is provided", () => {
+    const result = formatStateLabelWithPr("ci-pending", 265, 20, "https://github.com/org/repo");
+    // Should contain OSC 8 escape sequences
+    expect(result).toContain("\x1b]8;;");
+    expect(result).toContain("https://github.com/org/repo/pull/265");
+    expect(result).toContain("\x1b]8;;\x07");
+    // But display text should still be correct
+    expect(stripAnsi(result).trimEnd()).toBe("CI Pending (#265)");
+  });
+
+  it("does not generate OSC 8 when repoUrl is not provided", () => {
+    const result = formatStateLabelWithPr("ci-pending", 265, 20);
+    expect(result).not.toContain("\x1b]8;;");
+    expect(result).toContain("CI Pending (#265)");
+  });
+});
+
+describe("formatItemRow with inline PR", () => {
+  it("shows state only with no extra padding when no PR", () => {
+    const item = makeStatusItem({ state: "implementing", prNumber: null });
+    const row = stripAnsi(formatItemRow(item, 30));
+    expect(row).toContain("Implementing");
+    expect(row).not.toContain("(#");
+  });
+
+  it("shows state with PR suffix when PR present", () => {
+    const item = makeStatusItem({ state: "ci-pending", prNumber: 265 });
+    const row = stripAnsi(formatItemRow(item, 30, undefined, 20));
+    expect(row).toContain("CI Pending (#265)");
+  });
+
+  it("includes OSC 8 hyperlink when repoUrl is passed", () => {
+    const item = makeStatusItem({ state: "ci-pending", prNumber: 265 });
+    const row = formatItemRow(item, 30, undefined, 20, "https://github.com/org/repo");
+    // Raw row contains OSC 8 sequences
+    expect(row).toContain("\x1b]8;;https://github.com/org/repo/pull/265\x07");
+    // Stripped row shows clean text
+    expect(stripAnsi(row)).toContain("CI Pending (#265)");
+  });
+
+  it("does not include OSC 8 when repoUrl is omitted", () => {
+    const item = makeStatusItem({ state: "ci-pending", prNumber: 265 });
+    const row = formatItemRow(item, 30, undefined, 20);
+    expect(row).not.toContain("\x1b]8;;");
+  });
+});
+
+describe("formatStatusTable dynamic state column width", () => {
+  it("uses narrow state column when no items have PRs", () => {
+    const items = [
+      makeStatusItem({ id: "A-1", state: "implementing", prNumber: null }),
+      makeStatusItem({ id: "A-2", state: "queued", prNumber: null }),
+    ];
+    const table = stripAnsi(formatStatusTable(items, 100));
+    const lines = table.split("\n");
+    const headerLine = lines.find(l => l.includes("STATE"));
+    const dataLine = lines.find(l => l.includes("A-1"));
+    expect(headerLine).toBeDefined();
+    expect(dataLine).toBeDefined();
+    // STATE header and data should align at same position
+    const headerStatePos = headerLine!.indexOf("STATE");
+    const dataStatePos = dataLine!.indexOf("Implementing");
+    expect(headerStatePos).toBe(dataStatePos);
+  });
+
+  it("expands state column when items have PRs", () => {
+    const items = [
+      makeStatusItem({ id: "A-1", state: "implementing", prNumber: 42 }),
+      makeStatusItem({ id: "A-2", state: "ci-pending", prNumber: 265 }),
+    ];
+    const table = stripAnsi(formatStatusTable(items, 100));
+    expect(table).toContain("Implementing (#42)");
+    expect(table).toContain("CI Pending (#265)");
+  });
+
+  it("header DURATION aligns with row DURATION when PR widths vary", () => {
+    const items = [
+      makeStatusItem({ id: "A-1", state: "implementing", prNumber: 42, ageMs: 60_000 }),
+      makeStatusItem({ id: "A-2", state: "ci-pending", prNumber: 9999, ageMs: 120_000 }),
+    ];
+    const table = stripAnsi(formatStatusTable(items, 120));
+    const lines = table.split("\n");
+    const headerLine = lines.find(l => l.includes("DURATION"));
+    const a1Line = lines.find(l => l.includes("A-1"));
+    const a2Line = lines.find(l => l.includes("A-2"));
+    expect(headerLine).toBeDefined();
+    expect(a1Line).toBeDefined();
+    expect(a2Line).toBeDefined();
+    // DURATION header position should match data duration positions
+    const headerDurPos = headerLine!.indexOf("DURATION");
+    // Both rows should have their duration at the same horizontal position
+    const a1DurPos = a1Line!.indexOf("1m");
+    const a2DurPos = a2Line!.indexOf("2m");
+    expect(a1DurPos).toBe(a2DurPos);
+    // Duration should be to the right of the state column
+    expect(a1DurPos).toBeGreaterThan(headerLine!.indexOf("STATE"));
+  });
+
+  it("PR column header is not present", () => {
+    const items = [makeStatusItem({ prNumber: 42 })];
+    const table = stripAnsi(formatStatusTable(items, 80));
+    const lines = table.split("\n");
+    const headerLine = lines.find(l => l.includes("STATE"));
+    expect(headerLine).toBeDefined();
+    // Should not have a standalone PR header column
+    expect(headerLine).not.toMatch(/\bPR\s+DURATION/);
   });
 });
 
@@ -455,9 +652,9 @@ describe("formatStatusTable", () => {
 
   it("separator width matches data row content width across terminal widths", () => {
     const items = [makeStatusItem({ id: "TEST-1", title: "A title" })];
-    // No deps: fixedWidth=48, titleWidth=max(10, termWidth-48)
+    // No deps, no PRs: stateColWidth=14, fixedWidth=26+14=40, titleWidth=max(10, termWidth-40)
     // Separator visible width = 2 + min(termWidth-2, fixedWidth+titleWidth)
-    const fixedWidth = 48;
+    const fixedWidth = 40;
     for (const termWidth of [40, 80, 120, 200]) {
       const table = stripAnsi(formatStatusTable(items, termWidth));
       const lines = table.split("\n");
