@@ -85,8 +85,8 @@ function attemptDirectSend(
   runner: Runner,
   sleep: Sleeper,
 ): boolean {
-  // cmux send interprets \n as Enter, so append it to submit
-  const text = message.endsWith("\n") ? message : message + "\n";
+  // Send the message text (without trailing newline — we submit separately)
+  const text = message.replace(/\n+$/, "");
   const result = runner("cmux", [
     "send",
     "--workspace",
@@ -94,6 +94,18 @@ function attemptDirectSend(
     text,
   ]);
   if (result.exitCode !== 0) return false;
+
+  // Brief wait for text to arrive
+  sleep(50);
+
+  // Submit with send-key Return (same pattern as the paste-buffer path)
+  const key = runner("cmux", [
+    "send-key",
+    "--workspace",
+    workspaceRef,
+    "Return",
+  ]);
+  if (key.exitCode !== 0) return false;
 
   // Brief wait then verify
   sleep(100);

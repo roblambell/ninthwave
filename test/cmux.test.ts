@@ -195,12 +195,17 @@ describe("sendMessageImpl", () => {
 
     // Should succeed via direct send fallback
     expect(result).toBe(true);
-    // Verify cmux send was called with \n appended
+    // Verify cmux send was called with text (no trailing newline)
     const sendCall = runner.mock.calls.find(
       ([, args]) => args[0] === "send",
     );
     expect(sendCall).toBeTruthy();
-    expect(sendCall![1]).toEqual(["send", "--workspace", "workspace:1", "msg\n"]);
+    expect(sendCall![1]).toEqual(["send", "--workspace", "workspace:1", "msg"]);
+    // Verify send-key Return was called to submit
+    const keyCall = runner.mock.calls.find(
+      ([, args]) => args[0] === "send-key" && args[args.length - 1] === "Return",
+    );
+    expect(keyCall).toBeTruthy();
   });
 
   it("returns false when both paste-buffer and cmux send fail", () => {
