@@ -575,16 +575,23 @@ export class Orchestrator {
         break;
     }
 
-    // Stuck dep pause: notify stacked dependents when this item goes stuck
+    // Stuck dep handling: roll back or pause stacked dependents when this item goes stuck
     if (this.config.enableStacking && item.state === "stuck" && prevState !== "stuck") {
+      const PRE_WIP_STATES = new Set(["ready", "bootstrapping", "launching"]);
       for (const other of this.getAllItems()) {
         if (other.baseBranch !== `todo/${item.id}`) continue;
-        if (!other.workspaceRef) continue;
-        actions.push({
-          type: "rebase",
-          itemId: other.id,
-          message: `[ORCHESTRATOR] Pause: dependency ${item.id} is stuck. Your stacked branch cannot proceed until it is resolved. Please wait.`,
-        });
+        if (PRE_WIP_STATES.has(other.state)) {
+          // Pre-WIP: roll back to queued and clear baseBranch to prevent launch on stale base
+          this.transition(other, "queued");
+          other.baseBranch = undefined;
+        } else if (other.workspaceRef) {
+          // WIP with active worker: send pause message
+          actions.push({
+            type: "rebase",
+            itemId: other.id,
+            message: `[ORCHESTRATOR] Pause: dependency ${item.id} is stuck. Your stacked branch cannot proceed until it is resolved. Please wait.`,
+          });
+        }
       }
     }
 

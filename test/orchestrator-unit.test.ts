@@ -848,6 +848,116 @@ describe("stuck dep notification for stacked items", () => {
     expect(rebaseAction).toBeDefined();
     expect(rebaseAction!.message).toContain("Pause");
   });
+
+  it("reverts stacked dependent in ready state to queued when dep goes stuck", () => {
+    const orch = new Orchestrator({ maxRetries: 0, enableStacking: true });
+    orch.addItem(makeTodo("H-1-1"));
+    orch.addItem(makeTodo("H-1-2", ["H-1-1"]));
+
+    orch.setState("H-1-1", "ci-failed");
+    orch.getItem("H-1-1")!.ciFailCount = 5;
+    orch.getItem("H-1-1")!.prNumber = 10;
+
+    // H-1-2 is stacked and in ready state (no worker yet)
+    orch.setState("H-1-2", "ready");
+    orch.getItem("H-1-2")!.baseBranch = "todo/H-1-1";
+
+    const actions = orch.processTransitions(
+      snapshotWith([
+        { id: "H-1-1", ciStatus: "fail", prState: "open" },
+      ]),
+    );
+
+    // H-1-1 goes stuck, and H-1-2 should revert to queued with baseBranch cleared
+    expect(orch.getItem("H-1-1")!.state).toBe("stuck");
+    expect(orch.getItem("H-1-2")!.state).toBe("queued");
+    expect(orch.getItem("H-1-2")!.baseBranch).toBeUndefined();
+    // No rebase action for pre-WIP dependent
+    const rebaseAction = actions.find((a) => a.type === "rebase" && a.itemId === "H-1-2");
+    expect(rebaseAction).toBeUndefined();
+  });
+
+  it("reverts stacked dependent in launching state to queued when dep goes stuck", () => {
+    const orch = new Orchestrator({ maxRetries: 0, enableStacking: true });
+    orch.addItem(makeTodo("H-1-1"));
+    orch.addItem(makeTodo("H-1-2", ["H-1-1"]));
+
+    orch.setState("H-1-1", "ci-failed");
+    orch.getItem("H-1-1")!.ciFailCount = 5;
+    orch.getItem("H-1-1")!.prNumber = 10;
+
+    // H-1-2 is stacked and in launching state (no worker yet)
+    orch.setState("H-1-2", "launching");
+    orch.getItem("H-1-2")!.baseBranch = "todo/H-1-1";
+
+    const actions = orch.processTransitions(
+      snapshotWith([
+        { id: "H-1-1", ciStatus: "fail", prState: "open" },
+      ]),
+    );
+
+    expect(orch.getItem("H-1-1")!.state).toBe("stuck");
+    expect(orch.getItem("H-1-2")!.state).toBe("queued");
+    expect(orch.getItem("H-1-2")!.baseBranch).toBeUndefined();
+  });
+
+  it("sends pause message to stacked dependent in implementing state (existing behavior)", () => {
+    const orch = new Orchestrator({ maxRetries: 0, enableStacking: true });
+    orch.addItem(makeTodo("H-1-1"));
+    orch.addItem(makeTodo("H-1-2", ["H-1-1"]));
+
+    orch.setState("H-1-1", "ci-failed");
+    orch.getItem("H-1-1")!.ciFailCount = 5;
+    orch.getItem("H-1-1")!.prNumber = 10;
+
+    // H-1-2 is stacked and implementing with active worker
+    orch.setState("H-1-2", "implementing");
+    orch.getItem("H-1-2")!.baseBranch = "todo/H-1-1";
+    orch.getItem("H-1-2")!.workspaceRef = "workspace:2";
+
+    const actions = orch.processTransitions(
+      snapshotWith([
+        { id: "H-1-1", ciStatus: "fail", prState: "open" },
+        { id: "H-1-2", workerAlive: true },
+      ]),
+    );
+
+    expect(orch.getItem("H-1-1")!.state).toBe("stuck");
+    // Implementing dependent should NOT revert to queued
+    expect(orch.getItem("H-1-2")!.state).toBe("implementing");
+    expect(orch.getItem("H-1-2")!.baseBranch).toBe("todo/H-1-1");
+    // Should get a pause message
+    const rebaseAction = actions.find((a) => a.type === "rebase" && a.itemId === "H-1-2");
+    expect(rebaseAction).toBeDefined();
+    expect(rebaseAction!.message).toContain("Pause");
+  });
+
+  it("does not affect non-stacked dependents when dep goes stuck", () => {
+    const orch = new Orchestrator({ maxRetries: 0, enableStacking: true });
+    orch.addItem(makeTodo("H-1-1"));
+    orch.addItem(makeTodo("H-1-2", ["H-1-1"]));
+
+    orch.setState("H-1-1", "ci-failed");
+    orch.getItem("H-1-1")!.ciFailCount = 5;
+    orch.getItem("H-1-1")!.prNumber = 10;
+
+    // H-1-2 depends on H-1-1 but has no baseBranch (not stacked)
+    orch.setState("H-1-2", "ready");
+    // No baseBranch set — not stacked
+
+    const actions = orch.processTransitions(
+      snapshotWith([
+        { id: "H-1-1", ciStatus: "fail", prState: "open" },
+      ]),
+    );
+
+    expect(orch.getItem("H-1-1")!.state).toBe("stuck");
+    // Non-stacked dependent should NOT be reverted to queued (no baseBranch = not stacked)
+    expect(orch.getItem("H-1-2")!.state).not.toBe("queued");
+    // No pause message for non-stacked items
+    const rebaseAction = actions.find((a) => a.type === "rebase" && a.itemId === "H-1-2");
+    expect(rebaseAction).toBeUndefined();
+  });
 });
 
 // ── Merging state ────────────────────────────────────────────────────
