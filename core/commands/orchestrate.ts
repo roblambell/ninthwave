@@ -25,8 +25,8 @@ import {
 import { parseTodos } from "../parser.ts";
 import { resolveRepo, getWorktreeInfo, bootstrapRepo } from "../cross-repo.ts";
 import { checkPrStatus, scanExternalPRs } from "./watch.ts";
-import { launchSingleItem, launchReviewWorker, detectAiTool } from "./start.ts";
-import { getWorkerHealthStatus, computeScreenHealth, type ScreenHealthStatus } from "../worker-health.ts";
+import { launchSingleItem, launchReviewWorker, detectAiTool, launchSupervisorSession } from "./start.ts";
+import { getWorkerHealthStatus, computeScreenHealth } from "../worker-health.ts";
 import { cleanSingleWorktree } from "./clean.ts";
 import { prMerge, prComment, checkPrMergeable, getRepoOwner, applyGithubToken } from "../gh.ts";
 import { fetchOrigin, ffMerge, hasChanges, getStagedFiles, gitAdd, gitCommit, gitReset, daemonRebase } from "../git.ts";
@@ -38,16 +38,9 @@ import type { TodoItem } from "../types.ts";
 import { prTitleMatchesTodo } from "../todo-utils.ts";
 import { loadConfig } from "../config.ts";
 import {
-  supervisorTick,
-  applySupervisorActions,
-  writeFrictionLog,
   shouldActivateSupervisor,
-  createSupervisorDeps,
-  getEffectiveInterval,
   DEFAULT_SUPERVISOR_CONFIG,
   type SupervisorConfig,
-  type SupervisorDeps,
-  type SupervisorState,
 } from "../supervisor.ts";
 import {
   collectRunMetrics,
@@ -1079,8 +1072,6 @@ export interface OrchestrateLoopDeps {
   getFreeMem?: () => number;
   /** Reconcile todo files with GitHub state after merge actions. */
   reconcile?: (todosDir: string, worktreeDir: string, projectRoot: string) => void;
-  /** Supervisor dependencies (injected when supervisor is active). */
-  supervisorDeps?: SupervisorDeps;
   /** File I/O for analytics metrics (injectable for testing). When absent, analytics is skipped. */
   analyticsIO?: AnalyticsIO;
   /** Git operations for auto-committing analytics files. When absent, commit is skipped. */
@@ -1098,8 +1089,10 @@ export interface OrchestrateLoopDeps {
 export interface OrchestrateLoopConfig {
   /** Override adaptive poll interval (milliseconds). */
   pollIntervalMs?: number;
-  /** Supervisor configuration (present when supervisor is active). */
-  supervisor?: SupervisorConfig;
+  /** Supervisor session workspace reference (present when supervisor is active). */
+  supervisorSessionRef?: string;
+  /** Interval between supervisor heartbeat messages in milliseconds. Default: 300000 (5 minutes). */
+  supervisorHeartbeatMs?: number;
   /** GitHub repo URL (e.g., "https://github.com/owner/repo") for constructing PR URLs. */
   repoUrl?: string;
   /** Directory to write analytics metrics files. When set, metrics are emitted on run completion. */
@@ -1123,8 +1116,55 @@ export interface OrchestrateLoopConfig {
 }
 
 /**
+ * Send a fire-and-forget event message to the supervisor session.
+ * Logs a warning if delivery fails but never blocks the orchestrate loop.
+ */
+export function sendSupervisorEvent(
+  supervisorRef: string | undefined,
+  sendMessage: (ref: string, msg: string) => boolean,
+  event: Record<string, unknown>,
+  log: (entry: LogEntry) => void,
+): void {
+  if (!supervisorRef) return;
+  const message = `[ORCHESTRATOR] ${JSON.stringify(event)}`;
+  try {
+    const sent = sendMessage(supervisorRef, message);
+    if (!sent) {
+      log({
+        ts: new Date().toISOString(),
+        level: "warn",
+        event: "supervisor_send_failed",
+        supervisorEvent: event.type as string,
+      });
+    }
+  } catch {
+    // Fire-and-forget — supervisor message failure never blocks the loop
+  }
+}
+
+/**
+ * Build a full state summary for supervisor heartbeat messages.
+ */
+export function buildSupervisorHeartbeat(items: OrchestratorItem[]): Record<string, unknown> {
+  return {
+    type: "heartbeat",
+    items: items.map((item) => ({
+      id: item.id,
+      state: item.state,
+      title: item.todo.title,
+      prNumber: item.prNumber ?? null,
+      workspaceRef: item.workspaceRef ?? null,
+      ciFailCount: item.ciFailCount,
+      elapsedMs: Date.now() - new Date(item.lastTransition).getTime(),
+      lastCommitTime: item.lastCommitTime ?? null,
+    })),
+    timestamp: new Date().toISOString(),
+  };
+}
+
+/**
  * Main event loop. Polls, detects transitions, executes actions, sleeps.
- * Optionally runs LLM supervisor ticks on a configurable interval.
+ * Sends event messages to the supervisor session on state transitions and periodic heartbeats.
  * Exits when all items reach terminal state or signal is aborted.
  */
 export async function orchestrateLoop(
@@ -1136,29 +1176,9 @@ export async function orchestrateLoop(
 ): Promise<void> {
   const { log } = deps;
 
-  // Initialize supervisor state if supervisor is active
-  let supervisorState: SupervisorState | undefined;
-  if (config.supervisor && deps.supervisorDeps) {
-    supervisorState = {
-      lastTickTime: deps.supervisorDeps.now(),
-      logsSinceLastTick: [],
-      consecutiveFailures: 0,
-      disabled: false,
-    };
-  }
-
-  // Wrap log to capture entries for supervisor
-  const wrappedLog = (entry: LogEntry): void => {
-    log(entry);
-    if (supervisorState) {
-      supervisorState.logsSinceLastTick.push(entry);
-      // Cap log buffer to prevent unbounded growth
-      const maxEntries = config.supervisor?.maxLogEntries ?? DEFAULT_SUPERVISOR_CONFIG.maxLogEntries;
-      if (supervisorState.logsSinceLastTick.length > maxEntries) {
-        supervisorState.logsSinceLastTick = supervisorState.logsSinceLastTick.slice(-maxEntries);
-      }
-    }
-  };
+  // Supervisor heartbeat tracking
+  let lastSupervisorHeartbeat = Date.now();
+  const supervisorHeartbeatMs = config.supervisorHeartbeatMs ?? DEFAULT_SUPERVISOR_CONFIG.intervalMs;
 
   // Initialize external review state from persisted file
   let externalReviews: ExternalReviewItem[] = [];
@@ -1177,25 +1197,26 @@ export async function orchestrateLoop(
   const runStartTime = new Date().toISOString();
   const costData = new Map<string, CostSummary>();
 
-  wrappedLog({
+  log({
     ts: runStartTime,
     level: "info",
     event: "orchestrate_start",
     items: orch.getAllItems().map((i) => i.id),
     wipLimit: orch.config.wipLimit,
     mergeStrategy: orch.config.mergeStrategy,
-    supervisorActive: !!supervisorState,
+    supervisorActive: !!config.supervisorSessionRef,
   });
 
   let __iterations = 0;
   let __lastSnapshot: PollSnapshot | undefined;
   let __lastActions: import("../orchestrator.ts").Action[] = [];
   let __lastTransitionIter = 0;
+  const prevScreenHealth = new Map<string, string>();
   while (true) {
     __iterations++;
     if (config.maxIterations != null && __iterations > config.maxIterations) {
       const items = orch.getAllItems();
-      wrappedLog({
+      log({
         ts: new Date().toISOString(),
         level: "error",
         event: "max_iterations_exceeded",
@@ -1219,7 +1240,7 @@ export async function orchestrateLoop(
     }
 
     if (signal?.aborted) {
-      wrappedLog({ ts: new Date().toISOString(), level: "info", event: "shutdown", reason: "SIGINT" });
+      log({ ts: new Date().toISOString(), level: "info", event: "shutdown", reason: "SIGINT" });
       break;
     }
 
@@ -1227,12 +1248,12 @@ export async function orchestrateLoop(
     const allItems = orch.getAllItems();
     const allTerminal = allItems.every((i) => i.state === "done" || i.state === "stuck");
     if (allTerminal) {
-      handleRunComplete(allItems, orch, ctx, deps, config, wrappedLog, runStartTime, costData);
+      handleRunComplete(allItems, orch, ctx, deps, config, log, runStartTime, costData);
 
       // Watch mode: instead of exiting, poll for new TODO files
       if (config.watch && deps.scanTodos) {
         const watchInterval = config.watchIntervalMs ?? 30_000;
-        wrappedLog({
+        log({
           ts: new Date().toISOString(),
           level: "info",
           event: "watch_mode_waiting",
@@ -1248,12 +1269,12 @@ export async function orchestrateLoop(
             break;
           }
           if (signal?.aborted) {
-            wrappedLog({ ts: new Date().toISOString(), level: "info", event: "shutdown", reason: "watch_aborted" });
+            log({ ts: new Date().toISOString(), level: "info", event: "shutdown", reason: "watch_aborted" });
             return;
           }
           await deps.sleep(watchInterval);
           if (signal?.aborted) {
-            wrappedLog({ ts: new Date().toISOString(), level: "info", event: "shutdown", reason: "watch_aborted" });
+            log({ ts: new Date().toISOString(), level: "info", event: "shutdown", reason: "watch_aborted" });
             return;
           }
 
@@ -1266,7 +1287,7 @@ export async function orchestrateLoop(
             for (const todo of newTodos) {
               orch.addItem(todo);
             }
-            wrappedLog({
+            log({
               ts: new Date().toISOString(),
               level: "info",
               event: "watch_new_items",
@@ -1299,7 +1320,7 @@ export async function orchestrateLoop(
     orch.setEffectiveWipLimit(memoryWip);
 
     if (memoryWip < orch.config.wipLimit) {
-      wrappedLog({
+      log({
         ts: new Date().toISOString(),
         level: "info",
         event: "wip_reduced_memory",
@@ -1313,11 +1334,29 @@ export async function orchestrateLoop(
     const snapshot = deps.buildSnapshot(orch, ctx.projectRoot, ctx.worktreeDir);
     __lastSnapshot = snapshot;
 
+    // Detect and report worker health changes to supervisor
+    if (config.supervisorSessionRef && snapshot) {
+      for (const snapItem of snapshot.items) {
+        if (snapItem.screenHealth) {
+          const prev = prevScreenHealth.get(snapItem.id);
+          if (prev && prev !== snapItem.screenHealth) {
+            sendSupervisorEvent(config.supervisorSessionRef, deps.actionDeps.sendMessage, {
+              type: "worker-health-change",
+              itemId: snapItem.id,
+              from: prev,
+              to: snapItem.screenHealth,
+            }, log);
+          }
+          prevScreenHealth.set(snapItem.id, snapItem.screenHealth);
+        }
+      }
+    }
+
     // Process transitions (pure state machine)
     const actions = orch.processTransitions(snapshot);
     __lastActions = actions;
 
-    // Log state transitions and sync status labels with external tracker
+    // Log state transitions and send supervisor events
     let __hadTransition = false;
     for (const item of orch.getAllItems()) {
       const prev = prevStates.get(item.id);
@@ -1339,15 +1378,48 @@ export async function orchestrateLoop(
           transitionLog.stacked = true;
           transitionLog.baseBranch = item.baseBranch;
         }
-        wrappedLog(transitionLog);
+        log(transitionLog);
+
+        // Send supervisor event for key transitions
+        if (item.state === "ci-failed") {
+          sendSupervisorEvent(config.supervisorSessionRef, deps.actionDeps.sendMessage, {
+            type: "ci-failed",
+            itemId: item.id,
+            prNumber: item.prNumber,
+            ciFailCount: item.ciFailCount,
+            failureReason: item.failureReason,
+          }, log);
+        } else if (item.state === "merged" || item.state === "done") {
+          sendSupervisorEvent(config.supervisorSessionRef, deps.actionDeps.sendMessage, {
+            type: "item-merged",
+            itemId: item.id,
+            prNumber: item.prNumber,
+          }, log);
+        } else if (item.state === "stuck") {
+          sendSupervisorEvent(config.supervisorSessionRef, deps.actionDeps.sendMessage, {
+            type: "item-stuck",
+            itemId: item.id,
+            reason: item.failureReason ?? "unknown",
+          }, log);
+        }
       }
     }
 
     if (__hadTransition) __lastTransitionIter = __iterations;
 
-    // Execute actions
+    // Execute actions and notify supervisor of launches
     for (const action of actions) {
-      handleActionExecution(action, orch, ctx, deps, wrappedLog, costData);
+      handleActionExecution(action, orch, ctx, deps, log, costData);
+
+      if (action.type === "launch") {
+        const orchItem = orch.getItem(action.itemId);
+        sendSupervisorEvent(config.supervisorSessionRef, deps.actionDeps.sendMessage, {
+          type: "item-launched",
+          itemId: action.itemId,
+          workspaceRef: orchItem?.workspaceRef ?? null,
+          baseBranch: action.baseBranch ?? null,
+        }, log);
+      }
     }
 
     // Log state summary
@@ -1356,62 +1428,19 @@ export async function orchestrateLoop(
       if (!states[item.state]) states[item.state] = [];
       states[item.state]!.push(item.id);
     }
-    wrappedLog({ ts: new Date().toISOString(), level: "debug", event: "state_summary", states });
+    log({ ts: new Date().toISOString(), level: "debug", event: "state_summary", states });
 
-    // ── Supervisor tick ──────────────────────────────────────────
-    if (supervisorState && !supervisorState.disabled && config.supervisor && deps.supervisorDeps) {
-      const now = deps.supervisorDeps.now();
-      const elapsed = now.getTime() - supervisorState.lastTickTime.getTime();
-      const effectiveInterval = getEffectiveInterval(
-        config.supervisor.intervalMs,
-        supervisorState.consecutiveFailures,
-      );
-
-      if (elapsed >= effectiveInterval) {
-        try {
-          // Extract screen health from latest snapshot for supervisor context
-          const screenHealthByItem = new Map<string, ScreenHealthStatus>();
-          if (snapshot) {
-            for (const snapItem of snapshot.items) {
-              if (snapItem.screenHealth) {
-                screenHealthByItem.set(snapItem.id, snapItem.screenHealth);
-              }
-            }
-          }
-
-          const observation = supervisorTick(
-            supervisorState,
-            orch.getAllItems(),
-            deps.supervisorDeps,
-            screenHealthByItem.size > 0 ? screenHealthByItem : undefined,
-          );
-
-          // Apply suggested actions (send messages to workers)
-          applySupervisorActions(
-            observation,
-            orch.getAllItems(),
-            deps.actionDeps.sendMessage,
-            wrappedLog,
-          );
-
-          // Write friction log if configured
-          if (config.supervisor.frictionDir) {
-            writeFrictionLog(
-              observation,
-              config.supervisor.frictionDir,
-              deps.supervisorDeps,
-            );
-          }
-        } catch (e: unknown) {
-          // Supervisor failure is non-fatal — daemon continues
-          const msg = e instanceof Error ? e.message : String(e);
-          wrappedLog({
-            ts: new Date().toISOString(),
-            level: "warn",
-            event: "supervisor_error",
-            error: msg,
-          });
-        }
+    // ── Supervisor heartbeat ─────────────────────────────────────
+    if (config.supervisorSessionRef) {
+      const now = Date.now();
+      if (now - lastSupervisorHeartbeat >= supervisorHeartbeatMs) {
+        sendSupervisorEvent(
+          config.supervisorSessionRef,
+          deps.actionDeps.sendMessage,
+          buildSupervisorHeartbeat(orch.getAllItems()),
+          log,
+        );
+        lastSupervisorHeartbeat = now;
       }
     }
 
@@ -1430,7 +1459,7 @@ export async function orchestrateLoop(
       } catch (e: unknown) {
         // Non-fatal — external review failure shouldn't block TODO processing
         const msg = e instanceof Error ? e.message : String(e);
-        wrappedLog({
+        log({
           ts: new Date().toISOString(),
           level: "warn",
           event: "external_review_error",
@@ -1904,22 +1933,61 @@ export async function cmdOrchestrate(
 
   // Resolve supervisor configuration
   const supervisorActive = shouldActivateSupervisor(supervisorFlag, projectRoot);
-  const supervisorConfig: SupervisorConfig | undefined = supervisorActive
-    ? {
-        intervalMs: supervisorIntervalSecs
-          ? supervisorIntervalSecs * 1000
-          : DEFAULT_SUPERVISOR_CONFIG.intervalMs,
-        frictionDir,
-        maxLogEntries: DEFAULT_SUPERVISOR_CONFIG.maxLogEntries,
-      }
-    : undefined;
+  const supervisorHeartbeatMs = supervisorIntervalSecs
+    ? supervisorIntervalSecs * 1000
+    : DEFAULT_SUPERVISOR_CONFIG.intervalMs;
 
-  if (supervisorActive) {
+  // Launch or recover supervisor session
+  let supervisorSessionRef: string | undefined;
+  if (supervisorActive && !isDaemonChild) {
+    // Crash recovery: check saved state for existing supervisor session
+    if (savedDaemonState?.supervisorSessionRef) {
+      const workspaceList = mux.listWorkspaces();
+      if (workspaceList.includes(savedDaemonState.supervisorSessionRef)) {
+        supervisorSessionRef = savedDaemonState.supervisorSessionRef;
+        log({
+          ts: new Date().toISOString(),
+          level: "info",
+          event: "supervisor_session_recovered",
+          ref: supervisorSessionRef,
+        });
+      }
+    }
+
+    // Launch new supervisor session if no existing one was recovered
+    if (!supervisorSessionRef) {
+      try {
+        const items = orch.getAllItems().map((i) => ({
+          id: i.id,
+          state: i.state,
+          workspaceRef: i.workspaceRef,
+          prNumber: i.prNumber,
+          title: i.todo.title,
+        }));
+        supervisorSessionRef = launchSupervisorSession(projectRoot, mux, aiTool, {
+          items,
+          mergeStrategy: orch.config.mergeStrategy,
+          wipLimit: orch.config.wipLimit,
+          frictionDir,
+        }) ?? undefined;
+      } catch (e: unknown) {
+        // Graceful degradation: supervisor launch failure is non-fatal
+        const msg = e instanceof Error ? e.message : String(e);
+        log({
+          ts: new Date().toISOString(),
+          level: "warn",
+          event: "supervisor_launch_failed",
+          error: msg,
+        });
+      }
+    }
+
     log({
       ts: new Date().toISOString(),
       level: "info",
       event: "supervisor_enabled",
-      intervalMs: supervisorConfig!.intervalMs,
+      sessionRef: supervisorSessionRef ?? null,
+      heartbeatMs: supervisorHeartbeatMs,
       frictionDir: frictionDir ?? null,
       autoActivated: !supervisorFlag,
     });
@@ -1951,6 +2019,7 @@ export async function cmdOrchestrate(
     });
   }
   const initialState = serializeOrchestratorState(orch.getAllItems(), process.pid, daemonStartedAt, {
+    supervisorSessionRef: supervisorSessionRef ?? null,
     wipLimit,
   });
   writeStateFile(projectRoot, initialState);
@@ -1959,6 +2028,7 @@ export async function cmdOrchestrate(
     try {
       const state = serializeOrchestratorState(items, process.pid, daemonStartedAt, {
         statusPaneRef: null,
+        supervisorSessionRef: supervisorSessionRef ?? null,
         wipLimit,
       });
       writeStateFile(projectRoot, state);
@@ -2020,7 +2090,6 @@ export async function cmdOrchestrate(
     actionDeps,
     getFreeMem: getAvailableMemory,
     reconcile,
-    supervisorDeps: supervisorActive ? createSupervisorDeps(log) : undefined,
     analyticsIO: { mkdirSync, writeFileSync },
     analyticsCommit: { hasChanges, gitAdd, getStagedFiles, gitCommit, gitReset },
     readScreen: (ref, lines) => mux.readScreen(ref, lines),
@@ -2040,7 +2109,7 @@ export async function cmdOrchestrate(
 
   const loopConfig: OrchestrateLoopConfig = {
     ...(pollIntervalOverride ? { pollIntervalMs: pollIntervalOverride } : {}),
-    ...(supervisorConfig ? { supervisor: supervisorConfig } : {}),
+    ...(supervisorSessionRef ? { supervisorSessionRef, supervisorHeartbeatMs } : {}),
     ...(repoUrl ? { repoUrl } : {}),
     analyticsDir,
     aiTool,
@@ -2069,6 +2138,21 @@ export async function cmdOrchestrate(
       abortController.signal,
     );
   } finally {
+    // Close supervisor session
+    if (supervisorSessionRef) {
+      try {
+        mux.closeWorkspace(supervisorSessionRef);
+        log({
+          ts: new Date().toISOString(),
+          level: "info",
+          event: "supervisor_session_closed",
+          ref: supervisorSessionRef,
+        });
+      } catch {
+        // Non-fatal — best-effort cleanup
+      }
+    }
+
     // Close workspaces for terminal items only (done, stuck, merged).
     // In-flight workers (implementing, ci-pending, etc.) may still be actively
     // running — leave their workspaces open so they survive orchestrator restarts.
