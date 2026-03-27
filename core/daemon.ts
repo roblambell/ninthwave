@@ -271,6 +271,66 @@ export function archiveStateFile(
   }
 }
 
+// ── Worker heartbeat I/O ─────────────────────────────────────────────
+
+export interface WorkerProgress {
+  id: string;
+  progress: number;
+  label: string;
+  ts: string;
+}
+
+/** Directory for heartbeat files: ~/.ninthwave/projects/{slug}/heartbeats/ */
+export function heartbeatDir(projectRoot: string): string {
+  return join(userStateDir(projectRoot), "heartbeats");
+}
+
+/** Path to a single heartbeat file: ~/.ninthwave/projects/{slug}/heartbeats/{id}.json */
+export function heartbeatFilePath(projectRoot: string, itemId: string): string {
+  return join(heartbeatDir(projectRoot), `${itemId}.json`);
+}
+
+/** Read a heartbeat file. Returns null if the file doesn't exist or is invalid. */
+export function readHeartbeat(
+  projectRoot: string,
+  itemId: string,
+  io: DaemonIO = defaultIO,
+): WorkerProgress | null {
+  const filePath = heartbeatFilePath(projectRoot, itemId);
+  if (!io.existsSync(filePath)) return null;
+  try {
+    const content = io.readFileSync(filePath, "utf-8");
+    return JSON.parse(content) as WorkerProgress;
+  } catch {
+    return null;
+  }
+}
+
+/** Write a heartbeat file atomically. Creates the directory if needed. */
+export function writeHeartbeat(
+  projectRoot: string,
+  id: string,
+  progress: number,
+  label: string,
+  io: DaemonIO = defaultIO,
+): void {
+  const dir = heartbeatDir(projectRoot);
+  if (!io.existsSync(dir)) {
+    io.mkdirSync(dir, { recursive: true });
+  }
+  const data: WorkerProgress = {
+    id,
+    progress,
+    label,
+    ts: new Date().toISOString(),
+  };
+  io.writeFileSync(
+    heartbeatFilePath(projectRoot, id),
+    JSON.stringify(data, null, 2),
+    "utf-8",
+  );
+}
+
 // ── External review state ────────────────────────────────────────────
 
 export type ExternalReviewState = "detected" | "reviewing" | "reviewed" | "done";
