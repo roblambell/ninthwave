@@ -237,7 +237,7 @@ If in dogfooding mode:
    - B) Skip — continue with existing ready items only
    - C) Show entries — display the friction entries before deciding
 
-   If the user chooses A, use the `/decompose` skill (or `ninthwave decompose`) to break friction entries into TODOs. The newly created items will appear in the next `list --ready` call.
+   If the user chooses A, use the `/decompose` skill to break friction entries into TODOs. Pass the friction file contents as context. The newly created items will appear in the next `list --ready` call.
 
 4. **Mark processed friction entries:** After reviewing and decomposing friction entries (whether the user chose A or B), move all reviewed friction files to `.ninthwave/friction/processed/`. This prevents re-reviewing the same entries in the next loop iteration. The original files are preserved in `processed/` for audit trail purposes.
 

@@ -37,7 +37,6 @@ import { cmdStop } from "./commands/stop.ts";
 import { cmdRetry } from "./commands/retry.ts";
 import { shouldOnboard, cmdOnboard } from "./commands/onboard.ts";
 import { cmdDoctor } from "./commands/doctor.ts";
-import { cmdDecomposeFriction } from "./commands/decompose-friction.ts";
 
 // ── Help definitions ─────────────────────────────────────────────────
 
@@ -90,7 +89,7 @@ export const COMMANDS: ReadonlyArray<[string, string]> = [
   ["repos", "List discovered repos"],
   ["reconcile", "Sync todo files with merged PRs"],
   ["analytics [--all]", "Show orchestration performance trends"],
-  ["decompose-friction", "Decompose friction files into TODO items"],
+
 ];
 
 const HELP_PAD = 48;
@@ -241,7 +240,7 @@ const needsTodos = ![
   "pr-activity",
   "version-bump",
   "analytics",
-  "decompose-friction",
+
 ].includes(command);
 
 if (needsTodos && !existsSync(todosDir)) {
@@ -333,9 +332,7 @@ switch (command) {
   case "analytics":
     cmdAnalytics(args, projectRoot);
     break;
-  case "decompose-friction":
-    cmdDecomposeFriction(projectRoot);
-    break;
+
   default:
     die(`Unknown command: ${command}`);
 }
