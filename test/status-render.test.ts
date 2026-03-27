@@ -663,8 +663,20 @@ describe("getTerminalWidth", () => {
     const width = getTerminalWidth();
     expect(width).toBeGreaterThan(0);
   });
-  it("returns 80 in non-TTY test environment", () => {
-    // Tests run with stdout redirected, so columns is undefined → defaults to 80
-    expect(getTerminalWidth()).toBe(80);
+  it("falls back to 80 when columns is unavailable", () => {
+    const original = Object.getOwnPropertyDescriptor(process.stdout, "columns");
+    Object.defineProperty(process.stdout, "columns", {
+      value: undefined,
+      configurable: true,
+    });
+    try {
+      expect(getTerminalWidth()).toBe(80);
+    } finally {
+      if (original) {
+        Object.defineProperty(process.stdout, "columns", original);
+      } else {
+        delete (process.stdout as Record<string, unknown>)["columns"];
+      }
+    }
   });
 });
