@@ -1448,110 +1448,46 @@ export async function orchestrateLoop(
   }
 }
 
-// ── Status pane management ──────────────────────────────────────────
-
-/** Status pane workspace name used for identification. */
-export const STATUS_PANE_NAME = "nw-status";
-
-/** Environment variable accessor — injectable for testing. */
-export type EnvAccessor = (key: string) => string | undefined;
-
-const defaultEnv: EnvAccessor = (key) => process.env[key];
+// ── Keyboard shortcuts (TUI mode) ────────────────────────────────────
 
 /**
- * Check if we're running inside an existing workspace.
- * Detects cmux via CMUX_WORKSPACE_ID, tmux via TMUX, and zellij via
- * ZELLIJ_SESSION_NAME env vars.
- */
-export function isInsideWorkspace(env: EnvAccessor = defaultEnv): boolean {
-  return !!(env("CMUX_WORKSPACE_ID") || env("TMUX") || env("ZELLIJ_SESSION_NAME"));
-}
-
-/**
- * Close a stale status pane from a previous daemon run.
+ * Set up raw-mode stdin to capture individual keystrokes in TUI mode.
  *
- * Reads the daemon state file to find the `statusPaneRef` from the last run.
- * If present, closes that pane so we don't accumulate duplicates across
- * daemon restarts.
+ * - `q` triggers graceful shutdown via the AbortController
+ * - Ctrl-C (0x03) triggers the same graceful shutdown
+ *
+ * Returns a cleanup function that restores terminal state.
+ * Only call this when tuiMode is true and stdin is a TTY.
  */
-export function closeStaleStatusPane(
-  mux: Multiplexer,
-  projectRoot: string,
-  readState: (projectRoot: string) => DaemonState | null = readStateFile,
-): void {
-  const oldState = readState(projectRoot);
-  if (oldState?.statusPaneRef) {
-    try {
-      mux.closeWorkspace(oldState.statusPaneRef);
-    } catch {
-      // Best effort — pane may already be gone
+export function setupKeyboardShortcuts(
+  abortController: AbortController,
+  log: (entry: LogEntry) => void,
+  stdin: NodeJS.ReadStream = process.stdin,
+): () => void {
+  if (!stdin.isTTY || !stdin.setRawMode) {
+    return () => {};
+  }
+
+  stdin.setRawMode(true);
+  stdin.resume();
+  stdin.setEncoding("utf8");
+
+  const onData = (key: string) => {
+    if (key === "q" || key === "\x03") {
+      log({ ts: new Date().toISOString(), level: "info", event: "keyboard_quit", key: key === "\x03" ? "ctrl-c" : "q" });
+      abortController.abort();
     }
-  }
-}
+  };
 
-/**
- * Launch a dedicated status pane that runs `ninthwave status --watch`.
- *
- * On startup, checks if a status pane from a previous daemon run is still
- * alive (via the state file's `statusPaneRef` + `readScreen` probe). If the
- * existing pane is responsive, reuses it instead of creating a new one. If
- * the pane is stale/unresponsive, closes it first, then creates a new one.
- *
- * When running inside an existing workspace (detected via CMUX_WORKSPACE_ID,
- * TMUX, or ZELLIJ_SESSION_NAME env vars), opens the status pane as a split
- * in the current workspace. Falls back to creating a new workspace when not
- * inside one.
- *
- * Returns the workspace/pane ref or null if mux is not available.
- */
-export function launchStatusPane(
-  mux: Multiplexer,
-  projectRoot: string,
-  env: EnvAccessor = defaultEnv,
-  readState: (projectRoot: string) => DaemonState | null = readStateFile,
-): string | null {
-  if (!mux.isAvailable()) return null;
+  stdin.on("data", onData);
 
-  // Try to reuse existing status pane from previous daemon run
-  const oldState = readState(projectRoot);
-  if (oldState?.statusPaneRef) {
-    try {
-      const screen = mux.readScreen(oldState.statusPaneRef);
-      if (screen !== "") {
-        // Pane is alive and responsive — reuse it
-        return oldState.statusPaneRef;
-      }
-    } catch {
-      // readScreen threw — pane is stale
+  return () => {
+    stdin.removeListener("data", onData);
+    if (stdin.isTTY && stdin.setRawMode) {
+      stdin.setRawMode(false);
     }
-    // Pane is stale/unresponsive — close it before creating a new one
-    try {
-      mux.closeWorkspace(oldState.statusPaneRef);
-    } catch {
-      // Best effort — pane may already be gone
-    }
-  }
-
-  // When inside an existing workspace, split a pane instead of creating a new workspace
-  if (isInsideWorkspace(env)) {
-    const paneRef = mux.splitPane("ninthwave status --watch");
-    if (paneRef) return paneRef;
-    // Fall through to launchWorkspace if splitPane fails
-  }
-
-  return mux.launchWorkspace(projectRoot, "ninthwave status --watch");
-}
-
-/**
- * Close the status pane opened by launchStatusPane.
- */
-export function closeStatusPane(
-  mux: Multiplexer,
-  ref: string | null,
-): void {
-  if (ref) {
-    mux.closeWorkspace(ref);
-  }
+    stdin.pause();
+  };
 }
 
 // ── Memory-aware WIP default ────────────────────────────────────────
@@ -2019,11 +1955,10 @@ export async function cmdOrchestrate(
   });
   writeStateFile(projectRoot, initialState);
 
-  let statusPaneRef: string | null = null;
   const onPollComplete = (items: OrchestratorItem[]) => {
     try {
       const state = serializeOrchestratorState(items, process.pid, daemonStartedAt, {
-        statusPaneRef,
+        statusPaneRef: null,
         wipLimit,
       });
       writeStateFile(projectRoot, state);
@@ -2114,18 +2049,10 @@ export async function cmdOrchestrate(
     ...(watchIntervalSecs !== undefined ? { watchIntervalMs: watchIntervalSecs * 1000 } : {}),
   };
 
-  // Launch status pane if running inside a multiplexer (skip for daemon child — no terminal).
-  // launchStatusPane checks the state file for an existing pane and reuses it if responsive,
-  // or closes it and creates a new one if stale. No separate closeStaleStatusPane call needed.
-  statusPaneRef = isDaemonChild ? null : launchStatusPane(mux, projectRoot);
-  if (statusPaneRef) {
-    log({
-      ts: new Date().toISOString(),
-      level: "info",
-      event: "status_pane_opened",
-      ref: statusPaneRef,
-      name: STATUS_PANE_NAME,
-    });
+  // Set up keyboard shortcuts in TUI mode (q and Ctrl-C for graceful shutdown)
+  let cleanupKeyboard = () => {};
+  if (tuiMode) {
+    cleanupKeyboard = setupKeyboardShortcuts(abortController, log);
   }
 
   // Write PID file for foreground mode too (prevents duplicate instances)
@@ -2168,16 +2095,8 @@ export async function cmdOrchestrate(
       });
     }
 
-    // Close status pane on completion (or SIGINT)
-    if (statusPaneRef) {
-      closeStatusPane(mux, statusPaneRef);
-      log({
-        ts: new Date().toISOString(),
-        level: "info",
-        event: "status_pane_closed",
-        ref: statusPaneRef,
-      });
-    }
+    // Restore terminal state (disable raw mode)
+    cleanupKeyboard();
 
     // Always clean up state file on exit (written in both daemon and interactive mode)
     cleanStateFile(projectRoot);
