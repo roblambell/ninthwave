@@ -281,6 +281,37 @@ describe("formatStatusTable", () => {
     expect(() => formatStatusTable(items, 200)).not.toThrow();
   });
 
+  it("separator width matches data row content width across terminal widths", () => {
+    const items = [makeStatusItem({ id: "TEST-1", title: "A title" })];
+    // No deps: fixedWidth=48, titleWidth=max(10, termWidth-48)
+    // Separator visible width = 2 + min(termWidth-2, fixedWidth+titleWidth)
+    const fixedWidth = 48;
+    for (const termWidth of [40, 80, 120, 200]) {
+      const table = stripAnsi(formatStatusTable(items, termWidth));
+      const lines = table.split("\n");
+      // Find separator lines (consist of ─ chars after leading spaces)
+      const sepLines = lines.filter(l => /^\s+─+$/.test(l));
+      expect(sepLines.length).toBeGreaterThan(0);
+      const sepWidth = sepLines[0]!.length;
+      const titleWidth = Math.max(10, termWidth - fixedWidth);
+      const expectedSepWidth = 2 + Math.min(termWidth - 2, fixedWidth + titleWidth);
+      expect(sepWidth, `separator at termWidth=${termWidth}`).toBe(expectedSepWidth);
+    }
+  });
+
+  it("separator width with BLOCKED BY column active (hasDeps=true) exceeds 78", () => {
+    const items = [
+      makeStatusItem({ id: "A-1", state: "implementing", dependencies: [] }),
+      makeStatusItem({ id: "B-2", state: "queued", dependencies: ["A-1"], title: "A longer title for testing width" }),
+    ];
+    const table = stripAnsi(formatStatusTable(items, 120));
+    const lines = table.split("\n");
+    const sepLines = lines.filter(l => /^\s+─+$/.test(l));
+    expect(sepLines.length).toBeGreaterThan(0);
+    // With a 120-char terminal and BLOCKED BY column, separator should be wider than 80 (2 + 78)
+    expect(sepLines[0]!.length).toBeGreaterThan(80);
+  });
+
   it("shows BLOCKED BY header when items have dependencies", () => {
     const items = [
       makeStatusItem({ id: "A", state: "merged", dependencies: [] }),

@@ -512,7 +512,7 @@ export function formatStatusTable(
   lines.push(header);
 
   // Separator
-  const sep = `  ${DIM}${"─".repeat(Math.min(termWidth - 2, 78))}${RESET}`;
+  const sep = `  ${DIM}${"─".repeat(Math.min(termWidth - 2, fixedWidth + titleWidth))}${RESET}`;
   lines.push(sep);
 
   if (hasDeps) {
