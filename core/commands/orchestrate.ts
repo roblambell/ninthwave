@@ -718,7 +718,7 @@ export function reconstructState(
  * Try to recover the workspaceRef for an implementing item by matching
  * its TODO ID in the cmux workspace listing.
  *
- * Workspace names follow the pattern: "workspace:N  ✳ TODO <ID>: <title>"
+ * Workspace names follow the pattern: "workspace:N  ✳ <ID> <title>"
  * so we scan for lines containing the item ID.
  */
 function recoverWorkspaceRef(
