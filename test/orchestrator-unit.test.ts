@@ -1165,3 +1165,166 @@ describe("executeLaunch stale branch cleanup", () => {
     expect(orch.getItem("H-1-1")!.workspaceRef).toBe("workspace:1");
   });
 });
+
+describe("executeMerge conflict-aware rebase", () => {
+  function makeMinimalDeps(overrides: Partial<OrchestratorDeps> = {}): OrchestratorDeps {
+    return {
+      launchSingleItem: () => ({ worktreePath: "/tmp/wt", workspaceRef: "workspace:1" }),
+      cleanSingleWorktree: () => true,
+      prMerge: () => true,
+      prComment: () => true,
+      sendMessage: () => true,
+      closeWorkspace: () => true,
+      fetchOrigin: () => {},
+      ffMerge: () => {},
+      ...overrides,
+    };
+  }
+
+  const ctx: ExecutionContext = {
+    projectRoot: "/tmp/proj",
+    worktreeDir: "/tmp/proj/.worktrees",
+    todosDir: "/tmp/proj/.ninthwave/todos",
+    aiTool: "claude",
+  };
+
+  it("rebases and transitions to ci-pending when merge fails due to conflicts", () => {
+    const orch = new Orchestrator({ mergeStrategy: "asap" });
+    orch.addItem(makeTodo("H-1-1"));
+    orch.setState("H-1-1", "ci-passed");
+    const item = orch.getItem("H-1-1")!;
+    item.prNumber = 42;
+
+    let daemonRebaseCalled = false;
+    const deps = makeMinimalDeps({
+      prMerge: () => false, // merge fails
+      checkPrMergeable: () => false, // PR is CONFLICTING
+      daemonRebase: () => {
+        daemonRebaseCalled = true;
+        return true; // rebase succeeds
+      },
+    });
+
+    const result = orch.executeAction({ type: "merge", itemId: "H-1-1", prNumber: 42 }, ctx, deps);
+
+    expect(result.success).toBe(false);
+    expect(result.error).toContain("conflicts");
+    expect(result.error).toContain("rebased");
+    expect(daemonRebaseCalled).toBe(true);
+    expect(item.state).toBe("ci-pending");
+    // mergeFailCount should NOT be incremented for conflict-caused failures
+    expect(item.mergeFailCount ?? 0).toBe(0);
+  });
+
+  it("retries normally when merge fails but PR is not conflicting", () => {
+    const orch = new Orchestrator({ mergeStrategy: "asap", maxMergeRetries: 3 });
+    orch.addItem(makeTodo("H-1-1"));
+    orch.setState("H-1-1", "ci-passed");
+    const item = orch.getItem("H-1-1")!;
+    item.prNumber = 42;
+
+    const deps = makeMinimalDeps({
+      prMerge: () => false, // merge fails
+      checkPrMergeable: () => true, // PR is NOT conflicting
+    });
+
+    const result = orch.executeAction({ type: "merge", itemId: "H-1-1", prNumber: 42 }, ctx, deps);
+
+    expect(result.success).toBe(false);
+    expect(item.state).toBe("ci-passed");
+    expect(item.mergeFailCount).toBe(1);
+  });
+
+  it("falls back to worker rebase message when daemonRebase fails on conflicting PR", () => {
+    const orch = new Orchestrator({ mergeStrategy: "asap" });
+    orch.addItem(makeTodo("H-1-1"));
+    orch.setState("H-1-1", "ci-passed");
+    const item = orch.getItem("H-1-1")!;
+    item.prNumber = 42;
+    item.workspaceRef = "workspace:1";
+
+    const sentMessages: string[] = [];
+    const deps = makeMinimalDeps({
+      prMerge: () => false,
+      checkPrMergeable: () => false, // CONFLICTING
+      daemonRebase: () => false, // rebase fails
+      sendMessage: (_ref, msg) => {
+        sentMessages.push(msg);
+        return true;
+      },
+    });
+
+    const result = orch.executeAction({ type: "merge", itemId: "H-1-1", prNumber: 42 }, ctx, deps);
+
+    expect(result.success).toBe(false);
+    expect(result.error).toContain("conflicts");
+    expect(item.state).toBe("ci-pending");
+    // mergeFailCount should NOT be incremented
+    expect(item.mergeFailCount ?? 0).toBe(0);
+    // Worker should have received a rebase message
+    expect(sentMessages.some((m) => m.includes("Rebase Required"))).toBe(true);
+  });
+
+  it("falls back to worker rebase when daemonRebase throws on conflicting PR", () => {
+    const orch = new Orchestrator({ mergeStrategy: "asap" });
+    orch.addItem(makeTodo("H-1-1"));
+    orch.setState("H-1-1", "ci-passed");
+    const item = orch.getItem("H-1-1")!;
+    item.prNumber = 42;
+    item.workspaceRef = "workspace:1";
+
+    const sentMessages: string[] = [];
+    const deps = makeMinimalDeps({
+      prMerge: () => false,
+      checkPrMergeable: () => false,
+      daemonRebase: () => { throw new Error("rebase exploded"); },
+      sendMessage: (_ref, msg) => {
+        sentMessages.push(msg);
+        return true;
+      },
+    });
+
+    const result = orch.executeAction({ type: "merge", itemId: "H-1-1", prNumber: 42 }, ctx, deps);
+
+    expect(item.state).toBe("ci-pending");
+    expect(item.mergeFailCount ?? 0).toBe(0);
+    expect(sentMessages.some((m) => m.includes("Rebase Required"))).toBe(true);
+  });
+
+  it("resets rebaseRequested when conflict detected", () => {
+    const orch = new Orchestrator({ mergeStrategy: "asap" });
+    orch.addItem(makeTodo("H-1-1"));
+    orch.setState("H-1-1", "ci-passed");
+    const item = orch.getItem("H-1-1")!;
+    item.prNumber = 42;
+    item.rebaseRequested = true; // previously requested
+
+    const deps = makeMinimalDeps({
+      prMerge: () => false,
+      checkPrMergeable: () => false,
+      daemonRebase: () => true,
+    });
+
+    orch.executeAction({ type: "merge", itemId: "H-1-1", prNumber: 42 }, ctx, deps);
+
+    expect(item.rebaseRequested).toBe(false);
+  });
+
+  it("handles merge failure without checkPrMergeable (treats as non-conflict)", () => {
+    const orch = new Orchestrator({ mergeStrategy: "asap", maxMergeRetries: 3 });
+    orch.addItem(makeTodo("H-1-1"));
+    orch.setState("H-1-1", "ci-passed");
+    const item = orch.getItem("H-1-1")!;
+    item.prNumber = 42;
+
+    const deps = makeMinimalDeps({
+      prMerge: () => false,
+      // checkPrMergeable intentionally omitted — should default to non-conflict
+    });
+
+    const result = orch.executeAction({ type: "merge", itemId: "H-1-1", prNumber: 42 }, ctx, deps);
+
+    expect(item.state).toBe("ci-passed");
+    expect(item.mergeFailCount).toBe(1);
+  });
+});
