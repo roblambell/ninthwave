@@ -1,0 +1,130 @@
+# Copilot CLI Integration Guide
+
+ninthwave works with GitHub Copilot CLI as a first-class AI tool alongside Claude Code and OpenCode. This guide covers what's different about the Copilot CLI integration.
+
+## Setup
+
+Running `ninthwave setup` (or `nw setup`) automatically configures Copilot CLI support:
+
+1. **Agent files** are symlinked into `.github/agents/` with the `.agent.md` suffix:
+   - `.github/agents/todo-worker.agent.md` — worker agent for TODO implementation
+   - `.github/agents/review-worker.agent.md` — worker agent for PR reviews
+
+2. **`.gitignore`** is updated to exclude the `.github/agents/` directory (these are developer-local symlinks, re-created by `nw setup`).
+
+3. **Auto-detection** — `ninthwave init` detects Copilot CLI if `.github/copilot-instructions.md` exists in the project root, and records it in `.ninthwave/config` under `AI_TOOLS`.
+
+No additional configuration is required. If you have `copilot` in your `PATH`, ninthwave will find and use it.
+
+### Verifying the setup
+
+```bash
+nw doctor
+```
+
+The doctor command checks that at least one AI tool (`claude`, `opencode`, or `copilot`) is available in your PATH.
+
+## How It Works
+
+### Tool detection
+
+ninthwave detects which AI tool to use via a 5-step chain:
+
+1. `NINTHWAVE_AI_TOOL` environment variable (explicit override)
+2. `OPENCODE=1` env var → OpenCode
+3. `CLAUDE_CODE_SESSION` / `CLAUDE_SESSION_ID` env vars → Claude Code
+4. Process tree walk (checks parent processes for `copilot`)
+5. Binary fallback (`which copilot`)
+
+To force Copilot CLI, set the environment variable:
+
+```bash
+export NINTHWAVE_AI_TOOL=copilot
+```
+
+### Prompt delivery
+
+Copilot CLI receives its initial prompt differently from Claude Code and OpenCode. Because multiline prompts can break when piped through terminal multiplexers, ninthwave uses a **launcher script** approach:
+
+1. The full prompt is written to a temporary file at `/tmp/nw-prompt-{id}-{timestamp}`
+2. A launcher script is created at `/tmp/nw-launch-{id}-{timestamp}.sh`
+3. The launcher script reads the prompt, cleans up both temp files, and launches Copilot CLI:
+   ```bash
+   #!/bin/bash
+   PROMPT=$(cat '/tmp/nw-prompt-{id}-{timestamp}')
+   rm -f '/tmp/nw-prompt-{id}-{timestamp}' '/tmp/nw-launch-{id}-{timestamp}.sh'
+   exec copilot --agent=todo-worker --allow-all -i "$PROMPT"
+   ```
+4. The `-i` flag passes the prompt as initial input to Copilot CLI
+
+Both temp files are deleted by the launcher script before the session starts — they don't persist on disk.
+
+### Session lifecycle
+
+| Phase | What happens |
+|-------|-------------|
+| **Launch** | Launcher script runs inside a cmux/tmux workspace |
+| **Prompt delivery** | Embedded in the launch command via `-i` (no post-launch send) |
+| **Working** | Copilot CLI operates normally — reads/writes files, runs commands |
+| **Idle** | Worker waits for orchestrator messages via `cmux send` |
+| **Cleanup** | `ninthwave clean-single` tears down the workspace |
+
+## Differences from Claude Code
+
+| Aspect | Claude Code | Copilot CLI |
+|--------|-------------|-------------|
+| **Prompt delivery** | `--append-system-prompt "$(cat file)"` | Launcher script with `-i` flag |
+| **Permissions** | `--permission-mode bypassPermissions` | `--allow-all` |
+| **Agent flag** | `--agent todo-worker` (space) | `--agent=todo-worker` (equals) |
+| **Agent directory** | `.claude/agents/*.md` | `.github/agents/*.agent.md` |
+| **Session detection** | `CLAUDE_CODE_SESSION` env var | Process tree walk (no env var) |
+| **Post-launch send** | Not needed (prompt embedded) | Not needed (prompt embedded via `-i`) |
+| **Supervisor sessions** | Same `--agent supervisor` pattern | Same launcher script approach |
+
+### What's the same
+
+- Workers follow the same agent prompt (`todo-worker.md` / `review-worker.md`)
+- The orchestrator daemon treats all tools identically after launch
+- PR lifecycle, CI monitoring, and merge behavior are tool-agnostic
+- Skills (`/work`, `/decompose`, etc.) work across all tools
+
+## Troubleshooting
+
+### Copilot CLI not detected
+
+**Symptom:** `nw doctor` reports no AI tool found, or ninthwave launches Claude Code instead.
+
+**Fix:**
+1. Verify `copilot` is in your PATH: `which copilot`
+2. If installed but not detected, set the override: `export NINTHWAVE_AI_TOOL=copilot`
+3. Run `nw doctor` to confirm
+
+### Agent files missing
+
+**Symptom:** Copilot CLI doesn't know about the todo-worker or review-worker agents.
+
+**Fix:** Run `nw setup` to re-create the agent symlinks in `.github/agents/`.
+
+### Prompt delivery failures
+
+**Symptom:** Worker session launches but doesn't start implementing the TODO.
+
+**Possible causes:**
+- **`/tmp` permissions** — The launcher script and prompt file are written to `/tmp`. On shared systems, verify your user can write to `/tmp`.
+- **Copilot CLI not installed** — The launcher script calls `exec copilot ...`. If the binary isn't available, the session will exit silently.
+- **Multiplexer issues** — Verify cmux or tmux is running: `nw doctor`
+
+### Session exits immediately
+
+**Symptom:** The cmux/tmux workspace opens and closes right away.
+
+**Fix:**
+1. Check that `copilot` is installed and authenticated
+2. Try running the command manually: `copilot --agent=todo-worker --allow-all -i "hello"`
+3. Check cmux/tmux logs for error output
+
+### Init doesn't detect Copilot
+
+**Symptom:** `nw init` doesn't list Copilot under detected AI tools.
+
+**Fix:** `nw init` looks for `.github/copilot-instructions.md` in the project root. Create this file if it doesn't exist — it's Copilot CLI's project instruction file (equivalent to `CLAUDE.md` for Claude Code).
