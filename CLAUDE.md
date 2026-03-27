@@ -2,6 +2,8 @@
 
 Parallel AI coding orchestration. TypeScript + Bun CLI.
 
+**Required reading:** [ETHOS.md](ETHOS.md) — core principles and hard boundaries.
+
 ## Development
 
 ```bash
