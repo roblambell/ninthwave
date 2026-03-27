@@ -25,7 +25,7 @@ import {
 import { parseTodos } from "../parser.ts";
 import { resolveRepo, getWorktreeInfo, bootstrapRepo } from "../cross-repo.ts";
 import { checkPrStatus, scanExternalPRs } from "./watch.ts";
-import { launchSingleItem, launchReviewWorker, detectAiTool, cleanStaleBranchForReuse } from "./start.ts";
+import { launchSingleItem, launchReviewWorker, launchRepairWorker, detectAiTool, cleanStaleBranchForReuse } from "./start.ts";
 import { cleanSingleWorktree } from "./clean.ts";
 import { prMerge, prComment, checkPrMergeable, getRepoOwner, applyGithubToken, fetchTrustedPrComments, upsertOrchestratorComment } from "../gh.ts";
 import { fetchOrigin, ffMerge, hasChanges, getStagedFiles, gitAdd, gitCommit, gitReset, daemonRebase } from "../git.ts";
@@ -295,6 +295,14 @@ export function buildSnapshot(
     if (orchItem.state === "reviewing" && orchItem.reviewWorkspaceRef) {
       snap.workerAlive = isWorkerAlive(
         { ...orchItem, workspaceRef: orchItem.reviewWorkspaceRef } as OrchestratorItem,
+        mux,
+      );
+    }
+
+    // Check repair worker health for items in repairing state
+    if (orchItem.state === "repairing" && orchItem.repairWorkspaceRef) {
+      snap.workerAlive = isWorkerAlive(
+        { ...orchItem, workspaceRef: orchItem.repairWorkspaceRef } as OrchestratorItem,
         mux,
       );
     }
@@ -613,7 +621,7 @@ export function reconstructState(
   daemonState?: DaemonState | null,
 ): void {
   // Build a lookup map from saved daemon state for restoring persisted counters and review fields
-  const savedItems = new Map<string, { ciFailCount: number; retryCount: number; reviewWorkspaceRef?: string; reviewCompleted?: boolean; lastCommentCheck?: string; rebaseRequested?: boolean; ciFailureNotified?: boolean; ciFailureNotifiedAt?: string | null }>();
+  const savedItems = new Map<string, { ciFailCount: number; retryCount: number; reviewWorkspaceRef?: string; reviewCompleted?: boolean; lastCommentCheck?: string; rebaseRequested?: boolean; ciFailureNotified?: boolean; ciFailureNotifiedAt?: string | null; repairWorkspaceRef?: string }>();
   if (daemonState?.items) {
     for (const si of daemonState.items) {
       savedItems.set(si.id, {
@@ -625,6 +633,7 @@ export function reconstructState(
         rebaseRequested: si.rebaseRequested,
         ciFailureNotified: si.ciFailureNotified,
         ciFailureNotifiedAt: si.ciFailureNotifiedAt,
+        repairWorkspaceRef: si.repairWorkspaceRef,
       });
     }
   }
@@ -647,6 +656,7 @@ export function reconstructState(
       if (saved.rebaseRequested) item.rebaseRequested = saved.rebaseRequested;
       if (saved.ciFailureNotified) item.ciFailureNotified = saved.ciFailureNotified;
       if (saved.ciFailureNotifiedAt) item.ciFailureNotifiedAt = saved.ciFailureNotifiedAt;
+      if (saved.repairWorkspaceRef) item.repairWorkspaceRef = saved.repairWorkspaceRef;
     }
 
     // Check for worktree: cross-repo index first, then hub-local fallback
@@ -1947,6 +1957,15 @@ export async function cmdOrchestrate(
       try {
         cleanSingleWorktree(`review-${itemId}`, join(projectRoot, ".worktrees"), projectRoot);
       } catch { /* best-effort — review worktree may not exist for off mode */ }
+      return true;
+    },
+    launchRepair: (itemId, prNumber, repoRoot) => {
+      const result = launchRepairWorker(prNumber, itemId, repoRoot, aiTool, mux);
+      if (!result) return null;
+      return { workspaceRef: result.workspaceRef };
+    },
+    cleanRepair: (itemId, repairWorkspaceRef) => {
+      try { mux.closeWorkspace(repairWorkspaceRef); } catch { /* best-effort */ }
       return true;
     },
   };

@@ -29,6 +29,7 @@ export type OrchestratorItemState =
   | "ci-pending"
   | "ci-passed"
   | "ci-failed"
+  | "repairing"
   | "review-pending"
   | "reviewing"
   | "merging"
@@ -72,6 +73,8 @@ export interface OrchestratorItem {
   resolvedRepoRoot?: string;
   /** cmux workspace reference for the review worker session. */
   reviewWorkspaceRef?: string;
+  /** cmux workspace reference for the repair worker session (rebase-only). */
+  repairWorkspaceRef?: string;
   /** Whether this item's review has been completed (approved). Resets on CI regression. */
   reviewCompleted?: boolean;
 /** Descriptive reason for why this item failed (e.g., "launch-failed: repo not found", "ci-failed: test timeout"). Set on ci-failed/stuck states, cleared on recovery. */
@@ -167,6 +170,8 @@ export type ActionType =
   | "clean"
   | "rebase"
   | "daemon-rebase"
+  | "launch-repair"
+  | "clean-repair"
   | "retry"
   | "sync-stack-comments"
   | "launch-review"
@@ -203,7 +208,7 @@ export interface OrchestratorDeps {
     projectRoot: string,
     aiTool: string,
     baseBranch?: string,
-  ) => { worktreePath: string; workspaceRef: string } | null;
+  ) => { worktreePath: string; workspaceRef: string; existingPrNumber?: number } | null;
   cleanSingleWorktree: (
     id: string,
     worktreeDir: string,
@@ -275,6 +280,17 @@ export interface OrchestratorDeps {
     itemId: string,
     eventLine: string,
   ) => boolean;
+  /**
+   * Launch a repair worker for rebase-only conflict resolution.
+   * Called when daemon-rebase fails (conflicts). The repair worker gets
+   * a focused prompt to resolve conflicts and push, not re-implement.
+   * Returns a workspace reference on success.
+   */
+  launchRepair?: (itemId: string, prNumber: number, repoRoot: string) => { workspaceRef: string } | null;
+  /**
+   * Clean up a repair worker session and workspace.
+   */
+  cleanRepair?: (itemId: string, repairWorkspaceRef: string) => boolean;
 }
 
 /** Result of executing a single action. */
@@ -337,6 +353,7 @@ const WIP_STATES: Set<OrchestratorItemState> = new Set([
   "ci-pending",
   "ci-passed",
   "ci-failed",
+  "repairing",
   "review-pending",
   "merging",
 ]);
@@ -615,6 +632,10 @@ export class Orchestrator {
       case "ci-passed":
       case "ci-failed":
         actions = this.handlePrLifecycle(item, snap);
+        break;
+
+      case "repairing":
+        actions = this.handleRepairing(item, snap);
         break;
 
       case "reviewing":
@@ -968,6 +989,38 @@ export class Orchestrator {
   }
 
   /** Handle merging state. */
+  /**
+   * Handle "repairing" state: a repair worker is resolving rebase conflicts.
+   * When CI restarts (worker pushed), transition back to ci-pending.
+   * If the repair worker dies or can't resolve conflicts, mark stuck.
+   */
+  private handleRepairing(
+    item: OrchestratorItem,
+    snap: ItemSnapshot | undefined,
+  ): Action[] {
+    const actions: Action[] = [];
+
+    // Repair worker pushed — CI re-triggered
+    if (snap?.ciStatus === "pending" || snap?.ciStatus === "pass" || snap?.ciStatus === "fail") {
+      this.transition(item, "ci-pending");
+      item.rebaseRequested = false;
+      actions.push({ type: "clean-repair", itemId: item.id });
+      return actions;
+    }
+
+    // Repair worker died without pushing
+    if (snap?.workerAlive === false && item.repairWorkspaceRef) {
+      item.notAliveCount = (item.notAliveCount ?? 0) + 1;
+      if (item.notAliveCount >= 3) {
+        this.transition(item, "stuck");
+        item.failureReason = "repair-failed: repair worker could not resolve rebase conflicts";
+        actions.push({ type: "clean-repair", itemId: item.id });
+      }
+    }
+
+    return actions;
+  }
+
   private handleMerging(
     item: OrchestratorItem,
     snap: ItemSnapshot | undefined,
@@ -1169,6 +1222,10 @@ export class Orchestrator {
         return this.executeRetry(item, ctx, deps);
       case "sync-stack-comments":
         return this.executeSyncStackComments(item, deps);
+      case "launch-repair":
+        return this.executeLaunchRepair(item, ctx, deps);
+      case "clean-repair":
+        return this.executeCleanRepair(item, deps);
       case "launch-review":
         return this.executeLaunchReview(item, action, ctx, deps);
       case "clean-review":
@@ -1262,6 +1319,15 @@ export class Orchestrator {
         item.failureReason = `launch-failed: worker launch returned no result for ${item.id}`;
         return { success: false, error: `Launch failed for ${item.id}` };
       }
+
+      // Existing PR detected — skip worker launch, transition to ci-pending.
+      // The daemon will handle rebase and CI tracking from here.
+      if (result.existingPrNumber) {
+        item.prNumber = result.existingPrNumber;
+        this.transition(item, "ci-pending");
+        return { success: true };
+      }
+
       item.workspaceRef = result.workspaceRef;
       return { success: true };
     } catch (e: unknown) {
@@ -1680,7 +1746,24 @@ export class Orchestrator {
       }
     }
 
-    // Daemon rebase not available or failed — fall back to worker rebase message
+    // Daemon rebase failed — try repair worker if available (focused rebase-only prompt)
+    if (deps.launchRepair && item.prNumber) {
+      const repoRoot = deps.daemonRebase
+        ? (getWorktreeInfo(item.id, join(ctx.worktreeDir, ".cross-repo-index"), ctx.worktreeDir)?.repoRoot ?? item.resolvedRepoRoot ?? ctx.projectRoot)
+        : (item.resolvedRepoRoot ?? ctx.projectRoot);
+      try {
+        const result = deps.launchRepair(item.id, item.prNumber, repoRoot);
+        if (result) {
+          item.repairWorkspaceRef = result.workspaceRef;
+          this.transition(item, "repairing");
+          return { success: true };
+        }
+      } catch (e: unknown) {
+        deps.warn?.(`[Orchestrator] Repair worker launch failed for ${item.id}: ${e instanceof Error ? e.message : e}`);
+      }
+    }
+
+    // Repair unavailable — fall back to worker rebase message
     const message = action.message || "Please rebase onto latest main.";
     if (item.workspaceRef) {
       const sent = deps.sendMessage(item.workspaceRef, message);
@@ -1690,7 +1773,7 @@ export class Orchestrator {
       return { success: true };
     }
 
-    // No daemon rebase and no worker — log warning
+    // No daemon rebase, no repair, no worker — log warning
     deps.warn?.(
       `[Orchestrator] PR for ${item.id} (branch ${branch}) has merge conflicts but daemon rebase failed and worker has no workspace. Manual rebase needed.`,
     );
@@ -1758,6 +1841,55 @@ export class Orchestrator {
   }
 
   /** Launch a review worker for a PR. Stores reviewWorkspaceRef on success. */
+  /** Launch a repair worker for rebase-only conflict resolution. */
+  private executeLaunchRepair(
+    item: OrchestratorItem,
+    ctx: ExecutionContext,
+    deps: OrchestratorDeps,
+  ): ActionResult {
+    if (!deps.launchRepair) {
+      return { success: false, error: `Repair worker not available for ${item.id}` };
+    }
+
+    const prNum = item.prNumber;
+    if (!prNum) {
+      return { success: false, error: `No PR number for repair launch of ${item.id}` };
+    }
+
+    const repoRoot = item.resolvedRepoRoot ?? ctx.projectRoot;
+    try {
+      const result = deps.launchRepair(item.id, prNum, repoRoot);
+      if (result) {
+        item.repairWorkspaceRef = result.workspaceRef;
+      }
+      return { success: true };
+    } catch (e: unknown) {
+      const msg = e instanceof Error ? e.message : String(e);
+      return { success: false, error: `Repair launch failed for ${item.id}: ${msg}` };
+    }
+  }
+
+  /** Clean up a repair worker session. */
+  private executeCleanRepair(
+    item: OrchestratorItem,
+    deps: OrchestratorDeps,
+  ): ActionResult {
+    if (!deps.cleanRepair || !item.repairWorkspaceRef) {
+      item.repairWorkspaceRef = undefined;
+      return { success: true };
+    }
+
+    try {
+      deps.cleanRepair(item.id, item.repairWorkspaceRef);
+      item.repairWorkspaceRef = undefined;
+      return { success: true };
+    } catch (e: unknown) {
+      const msg = e instanceof Error ? e.message : String(e);
+      item.repairWorkspaceRef = undefined;
+      return { success: false, error: `Repair cleanup failed for ${item.id}: ${msg}` };
+    }
+  }
+
   private executeLaunchReview(
     item: OrchestratorItem,
     action: Action,

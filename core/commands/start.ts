@@ -66,6 +66,10 @@ export function sanitizeForShellQuoting(text: string): string {
 export interface LaunchResult {
   worktreePath: string;
   workspaceRef: string;
+  /** If set, an existing open PR was found. The orchestrator should transition
+   *  to ci-pending and let the daemon handle rebase/CI instead of launching
+   *  a full implementation worker. */
+  existingPrNumber?: number;
 }
 
 /** Agent files to seed into worktrees (matches setup.ts AGENT_SOURCES). */
@@ -465,10 +469,20 @@ export function launchSingleItem(
       // already did the work. Reuse the branch to preserve the PR and its commits.
       const openPrs = prList(targetRepo, branchName, "open");
       if (openPrs.length > 0) {
+        const existingPr = openPrs[0]!;
         info(
-          `Open PR #${openPrs[0]!.number} found for ${branchName}. Reusing existing branch to preserve prior work.`,
+          `Open PR #${existingPr.number} found for ${branchName}. Reusing existing branch — skipping worker launch, daemon will handle rebase/CI.`,
         );
-        reuseExistingBranch = true;
+
+        // Attach worktree for daemon to use for rebase operations
+        const externalWt2 = findWorktreeForBranch(targetRepo, branchName);
+        if (!externalWt2) {
+          attachWorktree(targetRepo, worktreePath, branchName);
+        }
+
+        // Return with existingPrNumber signal — orchestrator transitions to
+        // ci-pending instead of launching a full implementation worker.
+        return { worktreePath, workspaceRef: "", existingPrNumber: existingPr.number };
       } else {
         try {
           deleteBranch(targetRepo, branchName);
@@ -670,6 +684,67 @@ ${baseBranchLine}${securityLine}`;
     );
     if (!workspaceRef) return null;
     return { worktreePath, workspaceRef };
+  } finally {
+    try {
+      unlinkSync(promptFile);
+    } catch {
+      // ignore
+    }
+  }
+}
+
+/** Result of launching a repair worker session. */
+export interface RepairLaunchResult {
+  workspaceRef: string;
+}
+
+/**
+ * Launch a repair worker session for rebase-only conflict resolution.
+ *
+ * The repair worker runs in the item's existing worktree (where the PR branch
+ * is checked out). It gets a focused prompt to rebase and resolve conflicts,
+ * not re-implement the feature.
+ *
+ * No partition allocation — repair workers don't need isolated ports/DBs.
+ */
+export function launchRepairWorker(
+  prNumber: number,
+  itemId: string,
+  repoRoot: string,
+  aiTool: string,
+  mux: Multiplexer = getMux(),
+): RepairLaunchResult | null {
+  // The repair worker runs in the existing worktree for this item
+  const worktreePath = join(repoRoot, ".worktrees", `todo-${itemId}`);
+  if (!existsSync(worktreePath)) {
+    warn(`No worktree found for repair of ${itemId} at ${worktreePath}`);
+    return null;
+  }
+
+  const systemPrompt = `YOUR_REPAIR_ITEM_ID: ${itemId}
+YOUR_REPAIR_PR: ${prNumber}
+PROJECT_ROOT: ${repoRoot}`;
+
+  const safeTitle = sanitizeTitle(`Repair rebase for PR #${prNumber}`);
+  info(
+    `Launching ${aiTool} repair session for ${itemId}: PR #${prNumber}`,
+  );
+
+  const promptFile = join(tmpdir(), `nw-repair-prompt-${itemId}-${Date.now()}`);
+  writeFileSync(promptFile, systemPrompt);
+
+  try {
+    const workspaceRef = launchAiSession(
+      aiTool,
+      worktreePath,
+      itemId,
+      safeTitle,
+      promptFile,
+      mux,
+      { projectRoot: repoRoot, agentName: "repair-worker" },
+    );
+    if (!workspaceRef) return null;
+    return { workspaceRef };
   } finally {
     try {
       unlinkSync(promptFile);

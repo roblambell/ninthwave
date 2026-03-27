@@ -2259,3 +2259,165 @@ describe("syncWorkerDisplay", () => {
     });
   });
 });
+
+// ── Repair worker state transitions ──────────────────────────────────
+
+describe("repair worker state transitions", () => {
+  function makeMinimalDeps(overrides: Partial<OrchestratorDeps> = {}): OrchestratorDeps {
+    return {
+      launchSingleItem: () => ({ worktreePath: "/tmp/wt", workspaceRef: "workspace:1" }),
+      cleanSingleWorktree: () => true,
+      prMerge: () => true,
+      prComment: () => true,
+      sendMessage: () => true,
+      closeWorkspace: () => true,
+      fetchOrigin: () => {},
+      ffMerge: () => {},
+      ...overrides,
+    };
+  }
+
+  const ctx: ExecutionContext = {
+    projectRoot: "/tmp/proj",
+    worktreeDir: "/tmp/proj/.worktrees",
+    todosDir: "/tmp/proj/.ninthwave/todos",
+    aiTool: "claude",
+  };
+
+  it("daemon-rebase failure launches repair worker and transitions to repairing", () => {
+    const orch = new Orchestrator({ wipLimit: 1 });
+    orch.addItem(makeTodo("H-1-1"));
+    orch.setState("H-1-1", "ci-pending");
+    const item = orch.getItem("H-1-1")!;
+    item.prNumber = 42;
+
+    const deps = makeMinimalDeps({
+      daemonRebase: () => false, // daemon rebase fails
+      launchRepair: () => ({ workspaceRef: "repair:1" }),
+    });
+
+    const result = orch.executeAction({ type: "daemon-rebase", itemId: "H-1-1" }, ctx, deps);
+
+    expect(result.success).toBe(true);
+    expect(item.state).toBe("repairing");
+    expect(item.repairWorkspaceRef).toBe("repair:1");
+  });
+
+  it("daemon-rebase success transitions to ci-pending without repair worker", () => {
+    const orch = new Orchestrator({ wipLimit: 1 });
+    orch.addItem(makeTodo("H-1-1"));
+    orch.setState("H-1-1", "ci-pending");
+    const item = orch.getItem("H-1-1")!;
+    item.prNumber = 42;
+
+    const launchRepairCalled = { value: false };
+    const deps = makeMinimalDeps({
+      daemonRebase: () => true, // daemon rebase succeeds
+      launchRepair: () => { launchRepairCalled.value = true; return null; },
+    });
+
+    const result = orch.executeAction({ type: "daemon-rebase", itemId: "H-1-1" }, ctx, deps);
+
+    expect(result.success).toBe(true);
+    expect(item.state).toBe("ci-pending");
+    expect(launchRepairCalled.value).toBe(false);
+  });
+
+  it("repairing transitions to ci-pending when CI restarts after push", () => {
+    const orch = new Orchestrator({ wipLimit: 1 });
+    orch.addItem(makeTodo("H-1-1"));
+    orch.setState("H-1-1", "repairing");
+    const item = orch.getItem("H-1-1")!;
+    item.repairWorkspaceRef = "repair:1";
+    item.rebaseRequested = true;
+
+    const snapshot: PollSnapshot = {
+      items: [{ id: "H-1-1", ciStatus: "pending", workerAlive: true }],
+      readyIds: [],
+    };
+
+    const actions = orch.processTransitions(snapshot);
+
+    expect(item.state).toBe("ci-pending");
+    expect(item.rebaseRequested).toBe(false);
+    expect(actions.some(a => a.type === "clean-repair")).toBe(true);
+  });
+
+  it("repairing transitions to stuck when repair worker dies", () => {
+    const orch = new Orchestrator({ wipLimit: 1 });
+    orch.addItem(makeTodo("H-1-1"));
+    orch.setState("H-1-1", "repairing");
+    const item = orch.getItem("H-1-1")!;
+    item.repairWorkspaceRef = "repair:1";
+
+    // Simulate 3 consecutive not-alive polls (debounce)
+    for (let i = 0; i < 3; i++) {
+      const snapshot: PollSnapshot = {
+        items: [{ id: "H-1-1", workerAlive: false }],
+        readyIds: [],
+      };
+      orch.processTransitions(snapshot);
+    }
+
+    expect(item.state).toBe("stuck");
+    expect(item.failureReason).toContain("repair-failed");
+  });
+
+  it("executeCleanRepair cleans up the repair workspace", () => {
+    const orch = new Orchestrator({ wipLimit: 1 });
+    orch.addItem(makeTodo("H-1-1"));
+    orch.setState("H-1-1", "ci-pending");
+    const item = orch.getItem("H-1-1")!;
+    item.repairWorkspaceRef = "repair:1";
+
+    const cleaned: string[] = [];
+    const deps = makeMinimalDeps({
+      cleanRepair: (_id, ref) => { cleaned.push(ref); return true; },
+    });
+
+    orch.executeAction({ type: "clean-repair", itemId: "H-1-1" }, ctx, deps);
+
+    expect(cleaned).toEqual(["repair:1"]);
+    expect(item.repairWorkspaceRef).toBeUndefined();
+  });
+
+  it("executeLaunch transitions to ci-pending when existingPrNumber is returned", () => {
+    const orch = new Orchestrator({ wipLimit: 1 });
+    orch.addItem(makeTodo("H-1-1"));
+    orch.setState("H-1-1", "launching");
+
+    const deps = makeMinimalDeps({
+      launchSingleItem: () => ({ worktreePath: "/tmp/wt", workspaceRef: "", existingPrNumber: 271 }),
+    });
+
+    const result = orch.executeAction({ type: "launch", itemId: "H-1-1" }, ctx, deps);
+
+    expect(result.success).toBe(true);
+    const item = orch.getItem("H-1-1")!;
+    expect(item.state).toBe("ci-pending");
+    expect(item.prNumber).toBe(271);
+    expect(item.workspaceRef).toBeUndefined();
+  });
+
+  it("falls back to worker message when repair worker not available", () => {
+    const orch = new Orchestrator({ wipLimit: 1 });
+    orch.addItem(makeTodo("H-1-1"));
+    orch.setState("H-1-1", "ci-pending");
+    const item = orch.getItem("H-1-1")!;
+    item.prNumber = 42;
+    item.workspaceRef = "workspace:1";
+
+    const messages: string[] = [];
+    const deps = makeMinimalDeps({
+      daemonRebase: () => false,
+      // launchRepair intentionally omitted
+      sendMessage: (_ref, msg) => { messages.push(msg); return true; },
+    });
+
+    const result = orch.executeAction({ type: "daemon-rebase", itemId: "H-1-1" }, ctx, deps);
+
+    expect(result.success).toBe(true);
+    expect(item.state).toBe("ci-pending"); // still ci-pending, message sent to worker
+    expect(messages.length).toBeGreaterThan(0);
+  });
+});

@@ -46,6 +46,8 @@ export interface DaemonStateItem {
   ciFailureNotified?: boolean;
   /** The lastCommitTime when ciFailureNotified was set. */
   ciFailureNotifiedAt?: string | null;
+  /** cmux workspace reference for the repair worker session (rebase-only). */
+  repairWorkspaceRef?: string;
 }
 
 export interface DaemonState {
@@ -415,6 +417,7 @@ export function serializeOrchestratorState(
       ...(item.rebaseRequested ? { rebaseRequested: item.rebaseRequested } : {}),
       ...(item.ciFailureNotified ? { ciFailureNotified: item.ciFailureNotified } : {}),
       ...(item.ciFailureNotifiedAt ? { ciFailureNotifiedAt: item.ciFailureNotifiedAt } : {}),
+      ...(item.repairWorkspaceRef ? { repairWorkspaceRef: item.repairWorkspaceRef } : {}),
     })),
   };
 }
