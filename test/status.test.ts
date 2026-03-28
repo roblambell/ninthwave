@@ -1560,18 +1560,16 @@ describe("daemonStateToStatusItems with dependencies", () => {
 // ─── renderStatus with ViewOptions ────────────────────────────────────────────
 
 describe("renderStatus with ViewOptions", () => {
-  it("passes ViewOptions through to formatStatusTable (showHelp)", () => {
+  it("passes ViewOptions through to formatStatusTable", () => {
     // renderStatus with no daemon state and nonexistent worktreeDir uses the empty-items path
-    const output = stripAnsi(renderStatus("/nonexistent", "/nonexistent", false, { showHelp: true }));
+    const output = stripAnsi(renderStatus("/nonexistent", "/nonexistent", false, {}));
     // Even with no items, the empty-items formatStatusTable branch should receive viewOptions
-    // The help footer only shows when there are items, so just verify it doesn't throw
     expect(output).toContain("ninthwave status");
   });
 
   it("backward compatible: calling without viewOptions still works", () => {
     const output = stripAnsi(renderStatus("/nonexistent", "/nonexistent"));
     expect(output).toContain("ninthwave status");
-    expect(output).not.toContain("Session Metrics");
   });
 });
 
@@ -1634,10 +1632,8 @@ describe("cmdStatusWatch keyboard handling", () => {
     const allWrites = writeSpy.mock.calls.map((call) => String(call[0]));
     const allOutput = stripAnsi(allWrites.join(""));
 
-    // Default ViewOptions has showMetrics=false, showHelp=false
+    // Metrics panel and help footer were removed — neither should appear
     expect(allOutput).not.toContain("Session Metrics");
-    // Help footer text should not appear by default
-    expect(allOutput).not.toContain("q: quit");
 
     writeSpy.mockRestore();
   });

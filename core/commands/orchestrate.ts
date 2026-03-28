@@ -1639,14 +1639,8 @@ export function setupKeyboardShortcuts(
 
     let handled = true;
     switch (key) {
-      case "m":
-        tuiState.viewOptions.showMetrics = !tuiState.viewOptions.showMetrics;
-        break;
       case "d":
         tuiState.viewOptions.showBlockerDetail = !tuiState.viewOptions.showBlockerDetail;
-        break;
-      case "?":
-        tuiState.viewOptions.showHelp = !tuiState.viewOptions.showHelp;
         break;
       case "\x1b[A": // Up arrow
         tuiState.scrollOffset = Math.max(0, tuiState.scrollOffset - 1);
@@ -2248,9 +2242,7 @@ export async function cmdOrchestrate(
   const tuiState: TuiState = {
     scrollOffset: 0,
     viewOptions: {
-      showMetrics: false,
       showBlockerDetail: false,
-      showHelp: false,
       sessionStartedAt: daemonStartedAt,
     },
     // Immediate re-render on keypress (doesn't wait for poll cycle)

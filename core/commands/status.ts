@@ -280,9 +280,7 @@ export async function cmdStatusWatch(
 ): Promise<void> {
   // Mutable view state — toggled by keyboard shortcuts
   const viewOpts: ViewOptions = {
-    showMetrics: false,
     showBlockerDetail: false,
-    showHelp: false,
   };
 
   const isTTY = process.stdin.isTTY === true;
@@ -336,14 +334,8 @@ export async function cmdStatusWatch(
 
   function handleKey(key: string) {
     switch (key) {
-      case "m":
-        viewOpts.showMetrics = !viewOpts.showMetrics;
-        break;
       case "d":
         viewOpts.showBlockerDetail = !viewOpts.showBlockerDetail;
-        break;
-      case "?":
-        viewOpts.showHelp = !viewOpts.showHelp;
         break;
       case "\x1b[A": // Up arrow
         scrollOffset = Math.max(0, scrollOffset - 1);

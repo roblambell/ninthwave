@@ -26,9 +26,7 @@ export interface CrewStatusInfo {
 }
 
 export interface ViewOptions {
-  showMetrics?: boolean;
   showBlockerDetail?: boolean;
-  showHelp?: boolean;
   sessionStartedAt?: string;
   /** Base repository URL for PR hyperlinks (e.g., "https://github.com/org/repo"). */
   repoUrl?: string;
@@ -701,47 +699,6 @@ export function computeSessionMetrics(
 }
 
 /**
- * Format a DORA-style metrics panel for display below the status table.
- * Returns a multi-line string.
- */
-export function formatMetricsPanel(metrics: SessionMetrics): string {
-  const lines: string[] = [];
-  lines.push("");
-  lines.push(`  ${BOLD}Session Metrics${RESET}`);
-  lines.push(`  ${DIM}${"─".repeat(40)}${RESET}`);
-
-  const lt = metrics.leadTimeMedianMs !== null ? formatAge(metrics.leadTimeMedianMs) : "-";
-  lines.push(`  Lead Time (median):  ${lt}`);
-
-  const p95 = metrics.leadTimeP95Ms !== null ? formatAge(metrics.leadTimeP95Ms) : "-";
-  lines.push(`  Lead Time (P95):     ${p95}`);
-
-  const tp =
-    metrics.throughputPerHour !== null
-      ? `${metrics.throughputPerHour.toFixed(1)}/hr`
-      : "-";
-  lines.push(`  Throughput:          ${tp}`);
-
-  const sr =
-    metrics.successRate !== null
-      ? `${(metrics.successRate * 100).toFixed(0)}%`
-      : "-";
-  lines.push(`  Success Rate:        ${sr}`);
-
-  const dur = metrics.sessionDurationMs !== null ? formatAge(metrics.sessionDurationMs) : "-";
-  lines.push(`  Session Duration:    ${dur}`);
-
-  return lines.join("\n");
-}
-
-/**
- * Format a help footer line showing available key bindings.
- */
-export function formatHelpFooter(): string {
-  return `  ${DIM}q: quit  m: metrics  d: deps detail  ?: help${RESET}`;
-}
-
-/**
  * Format crew status panel line for display above the item table.
  * Shows crew code, daemon count, available/claimed/done counts.
  * When disconnected, shows OFFLINE indicator.
@@ -762,9 +719,7 @@ export function formatCrewStatusPanel(status: CrewStatusInfo): string {
  * (ascending) then ID alphanumeric, with a BLOCKED BY column showing unresolved deps.
  *
  * viewOptions controls optional panels:
- * - showMetrics: render DORA-style metrics panel below the table.
  * - showBlockerDetail: expand DEPS column to show full blocker IDs instead of counts.
- * - showHelp: render a key-bindings footer line.
  * - sessionStartedAt: ISO timestamp for throughput/session duration calculations.
  */
 export function formatStatusTable(
@@ -928,21 +883,9 @@ export function formatStatusTable(
   lines.push(sep);
   lines.push(formatUnifiedProgress(items, termWidth));
 
-  // Metrics panel (DORA-style)
-  if (opts.showMetrics) {
-    const metrics = computeSessionMetrics(items, opts.sessionStartedAt);
-    lines.push(formatMetricsPanel(metrics));
-  }
-
   // Countdown text
   if (opts.countdownText) {
     lines.push(`  ${DIM}${opts.countdownText}${RESET}`);
-  }
-
-  // Help footer
-  if (opts.showHelp) {
-    lines.push("");
-    lines.push(formatHelpFooter());
   }
 
   return lines.join("\n");
@@ -1141,9 +1084,9 @@ export function formatUnifiedProgress(
 }
 
 /**
- * Format the title line with right-aligned Lead/Thru metrics (dimmed).
+ * Format the title line with right-aligned Lead/Thru/Session metrics (dimmed).
  * Falls back to plain title when no metrics available or terminal is too narrow (< 60 chars).
- * E.g., "ninthwave status                              Lead: 7m  Thru: 20.9/hr"
+ * E.g., "ninthwave status                    Lead: 7m  Thru: 20.9/hr  Session: 12m"
  */
 export function formatTitleMetrics(
   items: StatusItem[],
@@ -1161,6 +1104,9 @@ export function formatTitleMetrics(
   }
   if (metrics.throughputPerHour !== null) {
     metricParts.push(`Thru: ${metrics.throughputPerHour.toFixed(1)}/hr`);
+  }
+  if (metrics.sessionDurationMs !== null) {
+    metricParts.push(`Session: ${formatAge(metrics.sessionDurationMs)}`);
   }
 
   // No metrics or terminal too narrow — plain title
@@ -1314,26 +1260,16 @@ export function buildStatusLayout(
     }
   }
 
-  // Footer: separator, unified progress line, optional metrics, shortcuts
+  // Footer: separator, unified progress line, shortcuts
   footerLines.push(sep);
   footerLines.push(formatUnifiedProgress(items, termWidth));
 
-  if (opts.showMetrics) {
-    const metrics = computeSessionMetrics(items, opts.sessionStartedAt);
-    footerLines.push(formatMetricsPanel(metrics));
-  }
-
   // Always show keyboard shortcuts in full-screen mode, with countdown on the right
-  const shortcuts = `q quit  m metrics  d deps  ↑/↓ scroll  ? help`;
+  const shortcuts = `q quit  d deps  ↑/↓ scroll`;
   if (opts.countdownText) {
     footerLines.push(`  ${DIM}${shortcuts}${RESET}    ${DIM}${opts.countdownText}${RESET}`);
   } else {
     footerLines.push(`  ${DIM}${shortcuts}${RESET}`);
-  }
-
-  if (opts.showHelp) {
-    footerLines.push("");
-    footerLines.push(formatHelpFooter());
   }
 
   return { headerLines, itemLines, footerLines };

@@ -25,8 +25,6 @@ import {
   computeBlockedBy,
   sortByBlockedThenId,
   computeSessionMetrics,
-  formatMetricsPanel,
-  formatHelpFooter,
   mapDaemonItemState,
   daemonStateToStatusItems,
   getTerminalWidth,
@@ -1172,7 +1170,7 @@ describe("renderTuiFrame", () => {
     expect(() => renderTuiFrame(items, 5, (s) => written.push(s))).not.toThrow();
   });
 
-  it("threads viewOptions with sessionStartedAt to formatStatusTable", () => {
+  it("threads viewOptions with sessionStartedAt to formatTitleMetrics", () => {
     const written: string[] = [];
     const items = [
       makeOrchestratorItem("A-1", "merged"),
@@ -1181,29 +1179,19 @@ describe("renderTuiFrame", () => {
     ];
     const sessionStart = new Date(Date.now() - 2 * 3_600_000).toISOString(); // 2 hours ago
     renderTuiFrame(items, undefined, (s) => written.push(s), {
-      showMetrics: true,
       sessionStartedAt: sessionStart,
     });
     const full = stripAnsi(written.join(""));
-    // Metrics panel should appear with actual values (not dashes)
-    expect(full).toContain("Session Metrics");
-    expect(full).toContain("Session Duration:");
-    expect(full).toContain("Throughput:");
-    // Session duration should show an actual time, not "-"
-    const durationLine = full.split("\n").find(l => l.includes("Session Duration:"));
-    expect(durationLine).toBeDefined();
-    expect(durationLine).not.toMatch(/Session Duration:\s+-$/);
-    // Throughput should show actual value since there are merged items
-    const throughputLine = full.split("\n").find(l => l.includes("Throughput:"));
-    expect(throughputLine).toBeDefined();
-    expect(throughputLine).toContain("/hr");
+    // Session duration should appear in the title metrics line
+    expect(full).toContain("Session:");
   });
 
-  it("without viewOptions, metrics panel is not shown", () => {
+  it("does not render old metrics panel (removed)", () => {
     const written: string[] = [];
     const items = [makeOrchestratorItem("C-1-1", "merged")];
     renderTuiFrame(items, undefined, (s) => written.push(s));
     const full = stripAnsi(written.join(""));
+    // The DORA-style metrics panel was removed — only title-line metrics remain
     expect(full).not.toContain("Session Metrics");
   });
 });
@@ -1377,100 +1365,6 @@ describe("computeSessionMetrics", () => {
   });
 });
 
-// ── formatMetricsPanel ────────────────────────────────────────────────────────
-
-describe("formatMetricsPanel", () => {
-  it("renders layout structure with all sections", () => {
-    const metrics: SessionMetrics = {
-      leadTimeMedianMs: 1_800_000,  // 30min
-      leadTimeP95Ms: 3_600_000,     // 1h
-      throughputPerHour: 2.5,
-      successRate: 0.85,
-      sessionDurationMs: 7_200_000, // 2h
-    };
-    const panel = stripAnsi(formatMetricsPanel(metrics));
-    expect(panel).toContain("Session Metrics");
-    expect(panel).toContain("─");
-  });
-
-  it("formats lead time values", () => {
-    const metrics: SessionMetrics = {
-      leadTimeMedianMs: 1_800_000,
-      leadTimeP95Ms: 3_600_000,
-      throughputPerHour: null,
-      successRate: null,
-      sessionDurationMs: null,
-    };
-    const panel = stripAnsi(formatMetricsPanel(metrics));
-    expect(panel).toContain("Lead Time (median):  30m");
-    expect(panel).toContain("Lead Time (P95):     1h");
-  });
-
-  it("formats throughput", () => {
-    const metrics: SessionMetrics = {
-      leadTimeMedianMs: null,
-      leadTimeP95Ms: null,
-      throughputPerHour: 2.5,
-      successRate: null,
-      sessionDurationMs: null,
-    };
-    const panel = stripAnsi(formatMetricsPanel(metrics));
-    expect(panel).toContain("Throughput:          2.5/hr");
-  });
-
-  it("formats success rate as percentage", () => {
-    const metrics: SessionMetrics = {
-      leadTimeMedianMs: null,
-      leadTimeP95Ms: null,
-      throughputPerHour: null,
-      successRate: 0.75,
-      sessionDurationMs: null,
-    };
-    const panel = stripAnsi(formatMetricsPanel(metrics));
-    expect(panel).toContain("Success Rate:        75%");
-  });
-
-  it("formats session duration", () => {
-    const metrics: SessionMetrics = {
-      leadTimeMedianMs: null,
-      leadTimeP95Ms: null,
-      throughputPerHour: null,
-      successRate: null,
-      sessionDurationMs: 5_400_000, // 1h 30m
-    };
-    const panel = stripAnsi(formatMetricsPanel(metrics));
-    expect(panel).toContain("Session Duration:    1h 30m");
-  });
-
-  it("shows dashes for null values", () => {
-    const metrics: SessionMetrics = {
-      leadTimeMedianMs: null,
-      leadTimeP95Ms: null,
-      throughputPerHour: null,
-      successRate: null,
-      sessionDurationMs: null,
-    };
-    const panel = stripAnsi(formatMetricsPanel(metrics));
-    const lines = panel.split("\n").filter(l => l.includes(":"));
-    // All metric lines should show "-"
-    for (const line of lines) {
-      expect(line).toMatch(/-$/);
-    }
-  });
-});
-
-// ── formatHelpFooter ──────────────────────────────────────────────────────────
-
-describe("formatHelpFooter", () => {
-  it("renders key bindings", () => {
-    const footer = stripAnsi(formatHelpFooter());
-    expect(footer).toContain("q: quit");
-    expect(footer).toContain("m: metrics");
-    expect(footer).toContain("d: deps detail");
-    expect(footer).toContain("?: help");
-  });
-});
-
 // ── formatStatusTable with ViewOptions ────────────────────────────────────────
 
 describe("formatStatusTable with ViewOptions", () => {
@@ -1479,44 +1373,6 @@ describe("formatStatusTable with ViewOptions", () => {
     const table = stripAnsi(formatStatusTable(items, 80));
     expect(table).toContain("ninthwave status");
     expect(table).toContain("TEST-1");
-    // Should NOT contain metrics or help by default
-    expect(table).not.toContain("Session Metrics");
-    expect(table).not.toContain("q: quit");
-  });
-
-  it("showMetrics=true includes metrics panel", () => {
-    const items = [
-      makeStatusItem({
-        id: "A",
-        state: "merged",
-        startedAt: "2026-01-01T00:00:00Z",
-        endedAt: "2026-01-01T00:30:00Z",
-      }),
-      makeStatusItem({
-        id: "B",
-        state: "merged",
-        startedAt: "2026-01-01T01:00:00Z",
-        endedAt: "2026-01-01T02:00:00Z",
-      }),
-    ];
-    const table = stripAnsi(formatStatusTable(items, 100, undefined, false, {
-      showMetrics: true,
-      sessionStartedAt: "2026-01-01T00:00:00Z",
-    }));
-    expect(table).toContain("Session Metrics");
-    expect(table).toContain("Lead Time (median):");
-    expect(table).toContain("Lead Time (P95):");
-    expect(table).toContain("Throughput:");
-    expect(table).toContain("Success Rate:");
-    expect(table).toContain("Session Duration:");
-  });
-
-  it("showMetrics=false does not include metrics panel", () => {
-    const items = [makeStatusItem({ state: "merged" })];
-    const table = stripAnsi(formatStatusTable(items, 100, undefined, false, {
-      showMetrics: false,
-    }));
-    expect(table).not.toContain("Session Metrics");
   });
 
   it("showBlockerDetail=true shows full blocker IDs in DEPS column", () => {
@@ -1573,24 +1429,6 @@ describe("formatStatusTable with ViewOptions", () => {
     expect(tableDetail).toContain("DEPS");
   });
 
-  it("showHelp=true shows key legend footer", () => {
-    const items = [makeStatusItem()];
-    const table = stripAnsi(formatStatusTable(items, 80, undefined, false, {
-      showHelp: true,
-    }));
-    expect(table).toContain("q: quit");
-    expect(table).toContain("m: metrics");
-    expect(table).toContain("?: help");
-  });
-
-  it("showHelp=false does not show key legend", () => {
-    const items = [makeStatusItem()];
-    const table = stripAnsi(formatStatusTable(items, 80, undefined, false, {
-      showHelp: false,
-    }));
-    expect(table).not.toContain("q: quit");
-  });
-
   it("all options can be combined", () => {
     const items = [
       makeStatusItem({
@@ -1607,13 +1445,9 @@ describe("formatStatusTable with ViewOptions", () => {
       }),
     ];
     const table = stripAnsi(formatStatusTable(items, 120, undefined, false, {
-      showMetrics: true,
       showBlockerDetail: true,
-      showHelp: true,
       sessionStartedAt: "2026-01-01T00:00:00Z",
     }));
-    expect(table).toContain("Session Metrics");
-    expect(table).toContain("q: quit");
     // A-1 is merged, so B-2 has no unresolved blockers → shows "-"
     expect(table).toContain("DEPS");
   });
@@ -1722,7 +1556,10 @@ describe("buildStatusLayout", () => {
     const footerText = layout.footerLines.map(stripAnsi).join("\n");
     expect(footerText).toContain("quit");
     expect(footerText).toContain("scroll");
-    expect(footerText).toContain("metrics");
+    expect(footerText).toContain("deps");
+    // Removed shortcuts should not appear
+    expect(footerText).not.toContain("metrics");
+    expect(footerText).not.toContain("help");
   });
 });
 
@@ -1938,7 +1775,7 @@ describe("formatTitleMetrics", () => {
     expect(text).toBe("ninthwave status");
   });
 
-  it("shows right-aligned Lead/Thru when metrics available", () => {
+  it("shows right-aligned Lead/Thru/Session when metrics available", () => {
     const now = Date.now();
     const items = [
       makeStatusItem({
@@ -1948,10 +1785,11 @@ describe("formatTitleMetrics", () => {
         endedAt: new Date(now - 300_000).toISOString(),
       }),
     ];
-    const text = stripAnsi(formatTitleMetrics(items, 80, new Date(now - 3_600_000).toISOString()));
+    const text = stripAnsi(formatTitleMetrics(items, 120, new Date(now - 3_600_000).toISOString()));
     expect(text).toContain("ninthwave status");
     expect(text).toContain("Lead:");
     expect(text).toContain("Thru:");
+    expect(text).toContain("Session:");
   });
 
   it("falls back to plain title when terminal is too narrow (< 60)", () => {
@@ -1984,7 +1822,7 @@ describe("formatTitleMetrics", () => {
     expect(text60).toContain("ninthwave status");
   });
 
-  it("shows only Lead when throughput is null", () => {
+  it("shows only Lead when throughput is null (no sessionStartedAt)", () => {
     const now = Date.now();
     const items = [
       makeStatusItem({
@@ -1994,11 +1832,43 @@ describe("formatTitleMetrics", () => {
         endedAt: new Date(now - 300_000).toISOString(),
       }),
     ];
-    // No sessionStartedAt → throughput is null, but lead time should be present
+    // No sessionStartedAt → throughput and session duration are null
     const text = stripAnsi(formatTitleMetrics(items, 80));
     expect(text).toContain("ninthwave status");
     expect(text).toContain("Lead:");
     expect(text).not.toContain("Thru:");
+    expect(text).not.toContain("Session:");
+  });
+
+  it("shows Session duration in minutes when session is available", () => {
+    const now = Date.now();
+    const items = [
+      makeStatusItem({
+        id: "A-1",
+        state: "merged",
+        startedAt: new Date(now - 2_700_000).toISOString(), // 45m ago
+        endedAt: new Date(now - 2_400_000).toISOString(),   // 40m ago
+      }),
+    ];
+    // Session started 12 minutes ago
+    const text = stripAnsi(formatTitleMetrics(items, 120, new Date(now - 720_000).toISOString()));
+    expect(text).toContain("Session: 12m");
+  });
+
+  it("shows Session alongside Lead and Thru (e.g., Lead: 45s  Thru: 8.2/hr  Session: 12m)", () => {
+    const now = Date.now();
+    const items = [
+      makeStatusItem({
+        id: "A-1",
+        state: "merged",
+        startedAt: new Date(now - 50_000).toISOString(),
+        endedAt: new Date(now - 5_000).toISOString(),
+      }),
+    ];
+    const sessionStart = new Date(now - 720_000).toISOString(); // 12m ago
+    const text = stripAnsi(formatTitleMetrics(items, 120, sessionStart));
+    // All three metrics should appear on the same line
+    expect(text).toMatch(/Lead:.*Thru:.*Session:/);
   });
 });
 
