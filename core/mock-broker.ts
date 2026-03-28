@@ -56,19 +56,34 @@ export interface CrewEvent {
   metadata: { affinity: "creator" | "pool" } | Record<string, unknown>;
 }
 
+// ── Crew status type (shared with TUI) ─────────────────────────────
+
+export interface CrewStatusUpdate {
+  type: "crew_update";
+  crewCode: string;
+  daemonCount: number;
+  availableCount: number;
+  claimedCount: number;
+  completedCount: number;
+  daemonNames: string[];
+}
+
 // ── Message types ───────────────────────────────────────────────────
+// Aligned with crew.ts ClientMessage / ServerMessage protocol.
 
 type InboundMessage =
-  | { type: "sync"; todos: { path: string; priority: number }[] }
-  | { type: "claim_request" }
-  | { type: "complete"; todoPath: string }
-  | { type: "heartbeat" };
+  | { type: "sync"; daemonId: string; activeTodoIds: string[] }
+  | { type: "claim"; requestId: string; daemonId: string }
+  | { type: "complete"; todoId: string; daemonId: string }
+  | { type: "heartbeat"; daemonId: string; ts: string };
 
 type OutboundMessage =
-  | { type: "claimed"; todoPath: string; affinity: "creator" | "pool" }
-  | { type: "no_work" }
-  | { type: "complete_ack"; todoPath: string }
-  | { type: "reconnect_state"; claimed: string[]; released: string[]; reClaimed: string[] }
+  | { type: "sync_ack"; crewCode: string; todoIds: string[] }
+  | { type: "claim_response"; requestId: string; todoId: string | null }
+  | { type: "complete_ack"; todoId: string }
+  | { type: "heartbeat_ack"; ts: string }
+  | { type: "reconnect_state"; resumed: string[]; released: string[]; reclaimed: string[] }
+  | CrewStatusUpdate
   | { type: "error"; message: string };
 
 // ── Broker ──────────────────────────────────────────────────────────
@@ -116,8 +131,8 @@ export class MockBroker {
           const daemonId = url.searchParams.get("daemonId");
           const name = url.searchParams.get("name");
 
-          if (!daemonId || !name) {
-            return new Response("Missing daemonId or name query params", { status: 400 });
+          if (!daemonId) {
+            return new Response("Missing daemonId query param", { status: 400 });
           }
 
           const crew = broker.crews.get(code);
@@ -126,7 +141,7 @@ export class MockBroker {
           }
 
           const upgraded = server.upgrade(req, {
-            data: { crewCode: code, daemonId, name },
+            data: { crewCode: code, daemonId, name: name ?? daemonId },
           });
 
           if (!upgraded) {
@@ -245,9 +260,9 @@ export class MockBroker {
 
       if (wasDisconnected) {
         // Determine which TODOs are still claimed vs released/re-claimed
-        const stillClaimed: string[] = [];
+        const resumed: string[] = [];
         const released: string[] = [];
-        const reClaimed: string[] = [];
+        const reclaimed: string[] = [];
 
         for (const todoPath of existing.claimedTodos) {
           const todo = crew.todos.get(todoPath);
@@ -256,25 +271,25 @@ export class MockBroker {
             continue;
           }
           if (todo.claimedBy === daemonId) {
-            stillClaimed.push(todoPath);
+            resumed.push(todoPath);
           } else if (todo.claimedBy !== null) {
-            reClaimed.push(todoPath);
+            reclaimed.push(todoPath);
           } else {
             released.push(todoPath);
           }
         }
 
-        // Remove re-claimed and released from this daemon's claimed set
-        for (const p of [...released, ...reClaimed]) {
+        // Remove reclaimed and released from this daemon's claimed set
+        for (const p of [...released, ...reclaimed]) {
           existing.claimedTodos.delete(p);
         }
 
         this.logEvent(crewCode, daemonId, "reconnect", "", {});
         this.send(ws, {
           type: "reconnect_state",
-          claimed: stillClaimed,
+          resumed,
           released,
-          reClaimed,
+          reclaimed,
         });
       }
     } else {
@@ -314,37 +329,43 @@ export class MockBroker {
 
     switch (msg.type) {
       case "sync":
-        this.handleSync(crew, daemonId, msg.todos);
+        this.handleSync(crew, daemonId, msg.activeTodoIds, ws);
         break;
-      case "claim_request":
-        this.handleClaimRequest(crew, daemonId, ws);
+      case "claim":
+        this.handleClaimRequest(crew, daemonId, msg.requestId, ws);
         break;
       case "complete":
-        this.handleComplete(crew, daemonId, msg.todoPath, ws);
+        this.handleComplete(crew, daemonId, msg.todoId, ws);
         break;
       case "heartbeat":
         daemon.lastHeartbeat = Date.now();
+        this.send(ws, { type: "heartbeat_ack", ts: msg.ts });
         break;
     }
   }
 
-  private handleSync(crew: CrewState, daemonId: string, todos: { path: string; priority: number }[]): void {
-    for (const t of todos) {
-      if (!crew.todos.has(t.path)) {
-        crew.todos.set(t.path, {
-          path: t.path,
-          priority: t.priority,
+  private handleSync(crew: CrewState, daemonId: string, activeTodoIds: string[], ws: WebSocket): void {
+    for (const todoId of activeTodoIds) {
+      if (!crew.todos.has(todoId)) {
+        crew.todos.set(todoId, {
+          path: todoId,
+          priority: 1, // Default priority; orchestrator handles real priority
           syncedAt: Date.now(),
           creatorDaemonId: daemonId,
           claimedBy: null,
           completedBy: null,
         });
-        this.logEvent(crew.code, daemonId, "sync", t.path, { affinity: "creator" });
+        this.logEvent(crew.code, daemonId, "sync", todoId, { affinity: "creator" });
       }
     }
+    // Respond with sync_ack containing all known todo IDs
+    const allTodoIds = Array.from(crew.todos.keys());
+    this.send(ws, { type: "sync_ack", crewCode: crew.code, todoIds: allTodoIds });
+    // Broadcast crew status after sync
+    this.broadcastCrewUpdate(crew);
   }
 
-  private handleClaimRequest(crew: CrewState, daemonId: string, ws: WebSocket): void {
+  private handleClaimRequest(crew: CrewState, daemonId: string, requestId: string, ws: WebSocket): void {
     const daemon = crew.daemons.get(daemonId);
     if (!daemon) return;
 
@@ -354,7 +375,7 @@ export class MockBroker {
     );
 
     if (available.length === 0) {
-      this.send(ws, { type: "no_work" });
+      this.send(ws, { type: "claim_response", requestId, todoId: null });
       return;
     }
 
@@ -373,25 +394,29 @@ export class MockBroker {
 
     const affinity: "creator" | "pool" = todo.creatorDaemonId === daemonId ? "creator" : "pool";
     this.logEvent(crew.code, daemonId, "claim", todo.path, { affinity });
-    this.send(ws, { type: "claimed", todoPath: todo.path, affinity });
+    this.send(ws, { type: "claim_response", requestId, todoId: todo.path });
+    // Broadcast crew status after claim
+    this.broadcastCrewUpdate(crew);
   }
 
-  private handleComplete(crew: CrewState, daemonId: string, todoPath: string, ws: WebSocket): void {
-    const todo = crew.todos.get(todoPath);
+  private handleComplete(crew: CrewState, daemonId: string, todoId: string, ws: WebSocket): void {
+    const todo = crew.todos.get(todoId);
     if (!todo || todo.claimedBy !== daemonId) {
-      this.send(ws, { type: "error", message: `Cannot complete: ${todoPath}` });
+      this.send(ws, { type: "error", message: `Cannot complete: ${todoId}` });
       return;
     }
 
     const daemon = crew.daemons.get(daemonId);
     if (daemon) {
-      daemon.claimedTodos.delete(todoPath);
+      daemon.claimedTodos.delete(todoId);
     }
 
     todo.completedBy = daemonId;
     todo.claimedBy = null;
-    this.logEvent(crew.code, daemonId, "complete", todoPath, {});
-    this.send(ws, { type: "complete_ack", todoPath });
+    this.logEvent(crew.code, daemonId, "complete", todoId, {});
+    this.send(ws, { type: "complete_ack", todoId });
+    // Broadcast crew status after completion
+    this.broadcastCrewUpdate(crew);
   }
 
   // ── Heartbeat monitoring ──────────────────────────────────────────
@@ -432,6 +457,34 @@ export class MockBroker {
     }
     // Don't clear claimedTodos here — the reconnect handler needs it
     // to build the reconnect_state message. It will clean up the set.
+  }
+
+  // ── Crew status broadcast ─────────────────────────────────────────
+
+  /** Broadcast crew status update to all connected daemons in the crew. */
+  private broadcastCrewUpdate(crew: CrewState): void {
+    const todos = Array.from(crew.todos.values());
+    const availableCount = todos.filter((t) => t.claimedBy === null && t.completedBy === null).length;
+    const claimedCount = todos.filter((t) => t.claimedBy !== null).length;
+    const completedCount = todos.filter((t) => t.completedBy !== null).length;
+    const connectedDaemons = Array.from(crew.daemons.values()).filter((d) => d.ws !== null);
+    const daemonNames = connectedDaemons.map((d) => d.name);
+
+    const update: CrewStatusUpdate = {
+      type: "crew_update",
+      crewCode: crew.code,
+      daemonCount: connectedDaemons.length,
+      availableCount,
+      claimedCount,
+      completedCount,
+      daemonNames,
+    };
+
+    for (const daemon of connectedDaemons) {
+      if (daemon.ws) {
+        this.send(daemon.ws, update);
+      }
+    }
   }
 
   // ── Event logging ─────────────────────────────────────────────────

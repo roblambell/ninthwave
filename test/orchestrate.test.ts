@@ -29,6 +29,7 @@ import {
 import type { TodoItem } from "../core/types.ts";
 import type { Multiplexer } from "../core/mux.ts";
 import { pidFilePath, logFilePath, type DaemonState } from "../core/daemon.ts";
+import type { CrewBroker } from "../core/crew.ts";
 
 // ── Helpers ──────────────────────────────────────────────────────────
 
@@ -2753,5 +2754,176 @@ describe("orchestrateLoop watch mode", () => {
 
     // Default watch interval should be 30000ms
     expect(sleepDurations.some((d) => d === 30_000)).toBe(true);
+  });
+});
+
+// ── Crew mode integration tests ──────────────────────────────────────
+
+describe("orchestrateLoop crew mode", () => {
+  /** Create a mock CrewBroker for testing. */
+  function mockCrewBroker(opts: {
+    connected?: boolean;
+    claimResults?: (string | null)[];
+    onSync?: (ids: string[]) => void;
+    onComplete?: (todoId: string) => void;
+    onDisconnect?: () => void;
+  } = {}) {
+    const claimResults = [...(opts.claimResults ?? [])];
+    let claimIdx = 0;
+    const completedIds: string[] = [];
+    const syncedIds: string[][] = [];
+    let disconnected = false;
+    return {
+      broker: {
+        connect: vi.fn(async () => {}),
+        sync: vi.fn((ids: string[]) => {
+          syncedIds.push(ids);
+          opts.onSync?.(ids);
+        }),
+        claim: vi.fn(async () => {
+          const result = claimResults[claimIdx] ?? null;
+          claimIdx++;
+          return result;
+        }),
+        complete: vi.fn((todoId: string) => {
+          completedIds.push(todoId);
+          opts.onComplete?.(todoId);
+        }),
+        heartbeat: vi.fn(),
+        disconnect: vi.fn(() => {
+          disconnected = true;
+          opts.onDisconnect?.();
+        }),
+        isConnected: vi.fn(() => opts.connected ?? true),
+        getCrewStatus: vi.fn(() => null),
+      },
+      completedIds,
+      syncedIds,
+      isDisconnected: () => disconnected,
+    };
+  }
+
+  it("filters launch actions through crew broker — only claimed items launch", async () => {
+    const orch = new Orchestrator({ wipLimit: 5, mergeStrategy: "asap" });
+    orch.addItem(makeTodo("T-1"));
+    orch.addItem(makeTodo("T-2"));
+    orch.addItem(makeTodo("T-3"));
+
+    let cycle = 0;
+    const logs: LogEntry[] = [];
+
+    // Broker assigns T-2 on first batch, then keeps returning null for subsequent cycles
+    const { broker, syncedIds } = mockCrewBroker({
+      connected: true,
+      claimResults: [null, "T-2", null, null, null, null, null, null, null],
+    });
+
+    const launchCalls: string[] = [];
+    const actionDepsOverride = mockActionDeps({
+      launchSingleItem: vi.fn((todo) => {
+        launchCalls.push(todo.id);
+        return { worktreePath: "/tmp/test", workspaceRef: `ws:${todo.id}` };
+      }),
+    });
+
+    const deps: OrchestrateLoopDeps = {
+      buildSnapshot: (): PollSnapshot => {
+        cycle++;
+        if (cycle === 1) {
+          return { items: [], readyIds: ["T-1", "T-2", "T-3"] };
+        }
+        // After cycle 1, T-2 should be launched. Report it as alive.
+        return { items: [{ id: "T-2", workerAlive: true }], readyIds: [] };
+      },
+      sleep: () => Promise.resolve(),
+      log: (e) => logs.push(e),
+      actionDeps: actionDepsOverride,
+      crewBroker: broker,
+      getFreeMem: () => 16 * 1024 ** 3, // 16GB — prevent memory-based WIP reduction
+    };
+
+    await orchestrateLoop(orch, defaultCtx, deps, { maxIterations: 2 });
+
+    // Only T-2 should have been launched
+    expect(launchCalls).toEqual(["T-2"]);
+    // T-1 and T-3 should be in ready state (reverted)
+    expect(orch.getItem("T-1")!.state).toBe("ready");
+    expect(orch.getItem("T-3")!.state).toBe("ready");
+    // Broker should have been synced
+    expect(syncedIds.length).toBeGreaterThan(0);
+  });
+
+  it("blocks ALL launches when broker is disconnected", async () => {
+    const orch = new Orchestrator({ wipLimit: 5, mergeStrategy: "asap" });
+    orch.addItem(makeTodo("T-1"));
+    orch.addItem(makeTodo("T-2"));
+
+    let cycle = 0;
+    const logs: LogEntry[] = [];
+
+    const { broker } = mockCrewBroker({ connected: false });
+
+    const deps: OrchestrateLoopDeps = {
+      buildSnapshot: (): PollSnapshot => {
+        cycle++;
+        if (cycle === 1) return { items: [], readyIds: ["T-1", "T-2"] };
+        return { items: [], readyIds: [] };
+      },
+      sleep: () => Promise.resolve(),
+      log: (e) => logs.push(e),
+      actionDeps: mockActionDeps(),
+      crewBroker: broker,
+      getFreeMem: () => 16 * 1024 ** 3,
+    };
+
+    await orchestrateLoop(orch, defaultCtx, deps, { maxIterations: 3 });
+
+    // No items should have been launched
+    expect(deps.actionDeps.launchSingleItem).not.toHaveBeenCalled();
+    // Items should be back in ready state
+    expect(orch.getItem("T-1")!.state).toBe("ready");
+    expect(orch.getItem("T-2")!.state).toBe("ready");
+    // Should have logged the blocking event
+    const blockLogs = logs.filter((l) => l.event === "crew_launches_blocked");
+    expect(blockLogs.length).toBeGreaterThan(0);
+  });
+
+  it("calls broker.complete after merge/done actions", async () => {
+    const orch = new Orchestrator({ wipLimit: 2, mergeStrategy: "asap" });
+    orch.addItem(makeTodo("T-1"));
+
+    let cycle = 0;
+    const { broker, completedIds } = mockCrewBroker({
+      connected: true,
+      claimResults: ["T-1"],
+    });
+
+    const deps: OrchestrateLoopDeps = {
+      buildSnapshot: (): PollSnapshot => {
+        cycle++;
+        switch (cycle) {
+          case 1:
+            return { items: [], readyIds: ["T-1"] };
+          case 2:
+            return { items: [{ id: "T-1", workerAlive: true }], readyIds: [] };
+          case 3:
+            return { items: [{ id: "T-1", prNumber: 1, prState: "open", ciStatus: "pass" }], readyIds: [] };
+          case 4:
+            return { items: [{ id: "T-1", prState: "merged" }], readyIds: [] };
+          default:
+            return { items: [], readyIds: [] };
+        }
+      },
+      sleep: () => Promise.resolve(),
+      log: () => {},
+      actionDeps: mockActionDeps(),
+      crewBroker: broker,
+      getFreeMem: () => 16 * 1024 ** 3,
+    };
+
+    await orchestrateLoop(orch, defaultCtx, deps, { maxIterations: 10 });
+
+    // Broker should have been notified of completion
+    expect(completedIds).toContain("T-1");
   });
 });

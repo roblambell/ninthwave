@@ -6,6 +6,7 @@
 import { existsSync, readFileSync, writeFileSync, mkdirSync } from "fs";
 import { join, dirname } from "path";
 import { randomUUID } from "crypto";
+import { hostname } from "os";
 import { userStateDir } from "./daemon.ts";
 
 // ── Shared message types ────────────────────────────────────────────
@@ -91,6 +92,17 @@ export interface ReconnectState {
   reclaimed: string[];
 }
 
+// ── Crew status (from crew_update messages) ───────────────────────
+
+export interface CrewStatus {
+  crewCode: string;
+  daemonCount: number;
+  availableCount: number;
+  claimedCount: number;
+  completedCount: number;
+  daemonNames: string[];
+}
+
 // ── CrewBroker interface ────────────────────────────────────────────
 
 export interface CrewBroker {
@@ -114,6 +126,9 @@ export interface CrewBroker {
 
   /** Whether the WebSocket is currently connected. */
   isConnected(): boolean;
+
+  /** Get the latest crew status from crew_update messages. Null until first update received. */
+  getCrewStatus(): CrewStatus | null;
 }
 
 // ── DaemonId persistence ────────────────────────────────────────────
@@ -168,6 +183,7 @@ export class WebSocketCrewBroker implements CrewBroker {
   private connected = false;
   private daemonId: string;
   private url: string;
+  private name: string;
   private deps: CrewBrokerDeps;
   private reconnectTimer: ReturnType<typeof setInterval> | null = null;
   private heartbeatTimer: ReturnType<typeof setInterval> | null = null;
@@ -180,14 +196,17 @@ export class WebSocketCrewBroker implements CrewBroker {
     reject: (err: Error) => void;
   } | null = null;
   private disconnectedIntentionally = false;
+  private crewStatus: CrewStatus | null = null;
 
   constructor(
     projectRoot: string,
     port: number,
     crewCode: string,
     deps: CrewBrokerDeps,
+    name?: string,
   ) {
     this.daemonId = getOrCreateDaemonId(projectRoot);
+    this.name = name ?? hostname();
     this.url = `ws://localhost:${port}/api/crews/${crewCode}/ws`;
     this.deps = deps;
   }
@@ -205,7 +224,7 @@ export class WebSocketCrewBroker implements CrewBroker {
   private doConnect(): Promise<void> {
     return new Promise<void>((resolve, reject) => {
       this.connectPromise = { resolve, reject };
-      const wsUrl = `${this.url}?daemonId=${this.daemonId}`;
+      const wsUrl = `${this.url}?daemonId=${this.daemonId}&name=${encodeURIComponent(this.name)}`;
       this.ws = new WebSocket(wsUrl);
 
       this.ws.onopen = () => {
@@ -306,6 +325,10 @@ export class WebSocketCrewBroker implements CrewBroker {
     return this.connected;
   }
 
+  getCrewStatus(): CrewStatus | null {
+    return this.crewStatus;
+  }
+
   // ── Internal helpers ────────────────────────────────────────────
 
   private send(msg: ClientMessage): void {
@@ -363,6 +386,17 @@ export class WebSocketCrewBroker implements CrewBroker {
           this.connectPromise.resolve();
           this.connectPromise = null;
         }
+        break;
+
+      case "crew_update":
+        this.crewStatus = {
+          crewCode: data.crewCode ?? "",
+          daemonCount: data.daemonCount ?? 0,
+          availableCount: data.availableCount ?? 0,
+          claimedCount: data.claimedCount ?? 0,
+          completedCount: data.completedCount ?? 0,
+          daemonNames: data.daemonNames ?? [],
+        };
         break;
 
       case "error":
