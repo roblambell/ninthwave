@@ -96,6 +96,8 @@ export interface OrchestratorItem {
   notAliveCount?: number;
   /** ISO timestamp of the last poll cycle where workerAlive was true. Used as timeout baseline -- timeouts measure from last-known-alive, not from state transition. */
   lastAliveAt?: string;
+  /** Number of review rounds completed (incremented each time a review worker is launched). */
+  reviewRound?: number;
   /** Number of consecutive merge failures for this item. Resets on successful merge. */
   mergeFailCount?: number;
   /** Whether a CI failure notification has already been sent for the current failure. Cleared on recovery (ci-pending/ci-passed) or when a new commit is pushed. */
@@ -143,6 +145,8 @@ export interface OrchestratorConfig {
   maxMergeRetries: number;
   /** Max consecutive repair worker launches before marking stuck. Default: 3. */
   maxRepairAttempts: number;
+  /** Max review rounds before marking stuck. Default: 3. */
+  maxReviewRounds: number;
   /** Whether to verify CI passes on main after merge before transitioning to done. Default: true. */
   verifyMain: boolean;
   /** Max CI verification failures on main before marking stuck. Default: 2. */
@@ -390,6 +394,7 @@ export const DEFAULT_CONFIG: OrchestratorConfig = {
   reviewAutoFix: "off",
   maxMergeRetries: 3,
   maxRepairAttempts: 3,
+  maxReviewRounds: 3,
   verifyMain: true,
   maxVerifyRetries: 2,
 };
@@ -463,7 +468,7 @@ export interface StatusDisplay {
  * When flags.rebaseRequested is true and state is ci-pending or ci-failed,
  * returns a "Rebasing" display instead of the normal state display.
  */
-export function statusDisplayForState(state: OrchestratorItemState, flags?: { rebaseRequested?: boolean }): StatusDisplay {
+export function statusDisplayForState(state: OrchestratorItemState, flags?: { rebaseRequested?: boolean; reviewRound?: number }): StatusDisplay {
   // Composite display state: rebase is a transient operation overlaid on ci-pending/ci-failed
   if (flags?.rebaseRequested && (state === "ci-pending" || state === "ci-failed")) {
     return { text: "Rebasing", icon: "arrow.triangle.branch", color: "#f59e0b" };
@@ -478,6 +483,11 @@ export function statusDisplayForState(state: OrchestratorItemState, flags?: { re
       return { text: "CI Failed", icon: "xmark.circle", color: "#ef4444" };
     case "ci-passed":
       return { text: "CI Passed", icon: "checkmark.circle", color: "#22c55e" };
+    case "reviewing": {
+      const round = flags?.reviewRound ?? 0;
+      const text = round > 1 ? `Reviewing (round ${round})` : "Reviewing";
+      return { text, icon: "eye.fill", color: "#7c3aed" };
+    }
     case "review-pending":
       return { text: "In Review", icon: "eye.fill", color: "#7c3aed" };
     case "merging":
@@ -1226,10 +1236,11 @@ export class Orchestrator {
           statusState: "failure",
           statusDescription: `Changes requested: ${v.blockerCount} blockers found`,
         });
+        const round = item.reviewRound ?? 1;
         actions.push({
           type: "notify-review",
           itemId: item.id,
-          message: "[ORCHESTRATOR] Review Feedback: Review worker requested changes -- please address.",
+          message: `[ORCHESTRATOR] Review Feedback (round ${round}): ${v.blockerCount} blockers, ${v.nitCount} nits.\n\n${v.summary}`,
         });
         return actions;
       }
@@ -1452,7 +1463,16 @@ export class Orchestrator {
     // Transition to reviewing state and launch a review worker.
     if (!item.reviewCompleted) {
       if (item.state !== "reviewing") {
+        // Check max review rounds before launching another review
+        const currentRound = (item.reviewRound ?? 0) + 1;
+        if (currentRound > this.config.maxReviewRounds) {
+          this.transition(item, "stuck", eventTime);
+          item.failureReason = `review-stuck: exceeded max review rounds (${this.config.maxReviewRounds})`;
+          return actions;
+        }
         if (this.reviewWipSlots > 0) {
+          item.reviewRound = currentRound;
+          this.config.onEvent?.(item.id, "review-round", { reviewRound: currentRound });
           this.transition(item, "reviewing", eventTime);
           actions.push({
             type: "launch-review",
@@ -1460,12 +1480,15 @@ export class Orchestrator {
             prNumber: item.prNumber,
           });
           // Set pending commit status when entering review
+          const description = currentRound > 1
+            ? `Re-review in progress (round ${currentRound})`
+            : "Review in progress";
           actions.push({
             type: "set-commit-status",
             itemId: item.id,
             prNumber: item.prNumber,
             statusState: "pending",
-            statusDescription: "Review in progress",
+            statusDescription: description,
           });
         }
         // else: no review slots available, stay in ci-passed until a slot opens

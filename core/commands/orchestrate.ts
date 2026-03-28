@@ -460,7 +460,7 @@ export function syncWorkerDisplay(
     if (!item.workspaceRef) continue;
     if (!activeStates.has(item.state)) continue;
 
-    const display = statusDisplayForState(item.state, { rebaseRequested: item.rebaseRequested });
+    const display = statusDisplayForState(item.state, { rebaseRequested: item.rebaseRequested, reviewRound: item.reviewRound });
     const statusKey = `ninthwave-${item.id}`;
 
     // Set status pill (best-effort)
@@ -670,7 +670,7 @@ export function reconstructState(
   daemonState?: DaemonState | null,
 ): void {
   // Build a lookup map from saved daemon state for restoring persisted counters and review fields
-  const savedItems = new Map<string, { ciFailCount: number; retryCount: number; reviewWorkspaceRef?: string; reviewCompleted?: boolean; lastCommentCheck?: string; rebaseRequested?: boolean; ciFailureNotified?: boolean; ciFailureNotifiedAt?: string | null; repairWorkspaceRef?: string; mergeCommitSha?: string; verifyFailCount?: number; verifyWorkspaceRef?: string }>();
+  const savedItems = new Map<string, { ciFailCount: number; retryCount: number; reviewWorkspaceRef?: string; reviewCompleted?: boolean; reviewRound?: number; lastCommentCheck?: string; rebaseRequested?: boolean; ciFailureNotified?: boolean; ciFailureNotifiedAt?: string | null; repairWorkspaceRef?: string; mergeCommitSha?: string; verifyFailCount?: number; verifyWorkspaceRef?: string }>();
   if (daemonState?.items) {
     for (const si of daemonState.items) {
       savedItems.set(si.id, {
@@ -678,6 +678,7 @@ export function reconstructState(
         retryCount: si.retryCount,
         reviewWorkspaceRef: si.reviewWorkspaceRef,
         reviewCompleted: si.reviewCompleted,
+        reviewRound: si.reviewRound,
         lastCommentCheck: si.lastCommentCheck,
         rebaseRequested: si.rebaseRequested,
         ciFailureNotified: si.ciFailureNotified,
@@ -704,6 +705,7 @@ export function reconstructState(
       item.retryCount = saved.retryCount;
       if (saved.reviewWorkspaceRef) item.reviewWorkspaceRef = saved.reviewWorkspaceRef;
       if (saved.reviewCompleted) item.reviewCompleted = saved.reviewCompleted;
+      if (saved.reviewRound != null) item.reviewRound = saved.reviewRound;
       if (saved.lastCommentCheck) item.lastCommentCheck = saved.lastCommentCheck;
       if (saved.rebaseRequested) item.rebaseRequested = saved.rebaseRequested;
       if (saved.ciFailureNotified) item.ciFailureNotified = saved.ciFailureNotified;
@@ -2724,9 +2726,6 @@ export async function cmdOrchestrate(
   const projectConfig = loadConfig(projectRoot);
   const reviewExternalEnabled = reviewExternal || projectConfig["review_external"] === "true";
   const scheduleEnabled = projectConfig["schedule_enabled"] === "true";
-
-  // Analytics directory -- always enabled, writes to .ninthwave/analytics/
-  const analyticsDir = join(projectRoot, ".ninthwave", "analytics");
 
   // State persistence: serialize state each poll cycle so the status pane can display all items.
   // Written in both daemon and interactive mode -- the status pane reads this file to show

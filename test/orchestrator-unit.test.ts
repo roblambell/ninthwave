@@ -3559,3 +3559,179 @@ describe("onTransition callback", () => {
     expect(lastCall.latencyMs).toBeGreaterThanOrEqual(4000);
   });
 });
+
+// ── Review round counter and max rounds (H-RX-2) ─────────────────────
+
+describe("review round counter", () => {
+  const requestChangesVerdict = {
+    verdict: "request-changes" as const,
+    summary: "Found blockers.",
+    blockerCount: 2,
+    nitCount: 1,
+    preExistingCount: 0,
+  };
+  const approveVerdict = {
+    verdict: "approve" as const,
+    summary: "No issues.",
+    blockerCount: 0,
+    nitCount: 0,
+    preExistingCount: 0,
+  };
+
+  it("increments reviewRound on each launch-review execution", () => {
+    const orch = new Orchestrator({ mergeStrategy: "auto" });
+    orch.addItem(makeWorkItem("H-1-1"));
+    orch.getItem("H-1-1")!.reviewCompleted = false;
+    orch.setState("H-1-1", "ci-passed");
+    orch.getItem("H-1-1")!.prNumber = 42;
+
+    // Round 1: ci-passed → reviewing (launches review)
+    const actions1 = orch.processTransitions(
+      snapshotWith([{ id: "H-1-1", ciStatus: "pass", prState: "open" }]),
+    );
+    expect(orch.getItem("H-1-1")!.state).toBe("reviewing");
+    expect(orch.getItem("H-1-1")!.reviewRound).toBe(1);
+    expect(actions1.some((a) => a.type === "launch-review")).toBe(true);
+
+    // Review requests changes → review-pending
+    orch.processTransitions(
+      snapshotWith([{ id: "H-1-1", ciStatus: "pass", prState: "open", reviewVerdict: requestChangesVerdict }]),
+    );
+    expect(orch.getItem("H-1-1")!.state).toBe("review-pending");
+
+    // Worker pushes fix → ci-pending → ci-passed
+    orch.processTransitions(
+      snapshotWith([{ id: "H-1-1", ciStatus: "pending", prState: "open" }]),
+    );
+    orch.processTransitions(
+      snapshotWith([{ id: "H-1-1", ciStatus: "pass", prState: "open" }]),
+    );
+
+    // Round 2: ci-passed → reviewing (launches review again)
+    expect(orch.getItem("H-1-1")!.state).toBe("reviewing");
+    expect(orch.getItem("H-1-1")!.reviewRound).toBe(2);
+  });
+
+  it("transitions to stuck when reviewRound >= maxReviewRounds", () => {
+    const orch = new Orchestrator({ mergeStrategy: "auto", maxReviewRounds: 2 });
+    orch.addItem(makeWorkItem("H-1-1"));
+    orch.getItem("H-1-1")!.reviewCompleted = false;
+    orch.setState("H-1-1", "ci-passed");
+    orch.getItem("H-1-1")!.prNumber = 42;
+    // Simulate already having completed 2 rounds
+    orch.getItem("H-1-1")!.reviewRound = 2;
+
+    // Next review attempt would be round 3, which exceeds maxReviewRounds=2
+    const actions = orch.processTransitions(
+      snapshotWith([{ id: "H-1-1", ciStatus: "pass", prState: "open" }]),
+    );
+
+    expect(orch.getItem("H-1-1")!.state).toBe("stuck");
+    expect(orch.getItem("H-1-1")!.failureReason).toContain("exceeded max review rounds");
+    expect(actions.some((a) => a.type === "launch-review")).toBe(false);
+  });
+
+  it("includes rich verdict summary in notify-review message", () => {
+    const orch = new Orchestrator({ mergeStrategy: "auto" });
+    orch.addItem(makeWorkItem("H-1-1"));
+    orch.getItem("H-1-1")!.reviewCompleted = false;
+    orch.setState("H-1-1", "reviewing");
+    orch.getItem("H-1-1")!.prNumber = 42;
+    orch.getItem("H-1-1")!.reviewRound = 2;
+
+    const actions = orch.processTransitions(
+      snapshotWith([{ id: "H-1-1", ciStatus: "pass", prState: "open", reviewVerdict: requestChangesVerdict }]),
+    );
+
+    const notifyAction = actions.find((a) => a.type === "notify-review");
+    expect(notifyAction).toBeDefined();
+    expect(notifyAction!.message).toContain("round 2");
+    expect(notifyAction!.message).toContain("2 blockers");
+    expect(notifyAction!.message).toContain("1 nits");
+    expect(notifyAction!.message).toContain("Found blockers.");
+  });
+
+  it("shows round in status description only when reviewRound > 1", () => {
+    const orch = new Orchestrator({ mergeStrategy: "auto" });
+    orch.addItem(makeWorkItem("H-1-1"));
+    orch.getItem("H-1-1")!.reviewCompleted = false;
+    orch.setState("H-1-1", "ci-passed");
+    orch.getItem("H-1-1")!.prNumber = 42;
+
+    // Round 1: status description should NOT include round number
+    const actions1 = orch.processTransitions(
+      snapshotWith([{ id: "H-1-1", ciStatus: "pass", prState: "open" }]),
+    );
+    const statusAction1 = actions1.find((a) => a.type === "set-commit-status" && a.statusState === "pending");
+    expect(statusAction1).toBeDefined();
+    expect(statusAction1!.statusDescription).toBe("Review in progress");
+
+    // Request changes and cycle back to ci-passed
+    orch.processTransitions(
+      snapshotWith([{ id: "H-1-1", ciStatus: "pass", prState: "open", reviewVerdict: requestChangesVerdict }]),
+    );
+    orch.processTransitions(
+      snapshotWith([{ id: "H-1-1", ciStatus: "pending", prState: "open" }]),
+    );
+    const actions2 = orch.processTransitions(
+      snapshotWith([{ id: "H-1-1", ciStatus: "pass", prState: "open" }]),
+    );
+
+    // Round 2: status description SHOULD include round number
+    const statusAction2 = actions2.find((a) => a.type === "set-commit-status" && a.statusState === "pending");
+    expect(statusAction2).toBeDefined();
+    expect(statusAction2!.statusDescription).toBe("Re-review in progress (round 2)");
+  });
+
+  it("treats undefined reviewRound as 0 (first review is round 1)", () => {
+    const orch = new Orchestrator({ mergeStrategy: "auto" });
+    orch.addItem(makeWorkItem("H-1-1"));
+    orch.getItem("H-1-1")!.reviewCompleted = false;
+    orch.setState("H-1-1", "ci-passed");
+    orch.getItem("H-1-1")!.prNumber = 42;
+    // reviewRound is undefined by default
+
+    orch.processTransitions(
+      snapshotWith([{ id: "H-1-1", ciStatus: "pass", prState: "open" }]),
+    );
+
+    expect(orch.getItem("H-1-1")!.reviewRound).toBe(1);
+    expect(orch.getItem("H-1-1")!.state).toBe("reviewing");
+  });
+
+  it("emits review-round analytics event", () => {
+    const events: Array<{ itemId: string; event: string; data?: Record<string, unknown> }> = [];
+    const orch = new Orchestrator({
+      mergeStrategy: "auto",
+      onEvent: (itemId, event, data) => events.push({ itemId, event, data }),
+    });
+    orch.addItem(makeWorkItem("H-1-1"));
+    orch.getItem("H-1-1")!.reviewCompleted = false;
+    orch.setState("H-1-1", "ci-passed");
+    orch.getItem("H-1-1")!.prNumber = 42;
+
+    orch.processTransitions(
+      snapshotWith([{ id: "H-1-1", ciStatus: "pass", prState: "open" }]),
+    );
+
+    const reviewEvent = events.find((e) => e.event === "review-round");
+    expect(reviewEvent).toBeDefined();
+    expect(reviewEvent!.data?.reviewRound).toBe(1);
+  });
+
+  it("statusDisplayForState shows round only when reviewRound > 1", () => {
+    // Default / round 1: no round in display
+    const d1 = statusDisplayForState("reviewing");
+    expect(d1.text).toBe("Reviewing");
+
+    const d1b = statusDisplayForState("reviewing", { reviewRound: 1 });
+    expect(d1b.text).toBe("Reviewing");
+
+    // Round 2+: shows round
+    const d2 = statusDisplayForState("reviewing", { reviewRound: 2 });
+    expect(d2.text).toBe("Reviewing (round 2)");
+
+    const d3 = statusDisplayForState("reviewing", { reviewRound: 3 });
+    expect(d3.text).toBe("Reviewing (round 3)");
+  });
+});

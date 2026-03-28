@@ -44,6 +44,8 @@ export interface DaemonStateItem {
   lastCommentCheck?: string;
   /** Whether a rebase request is in progress for this item. */
   rebaseRequested?: boolean;
+  /** Number of review rounds completed. */
+  reviewRound?: number;
   /** Whether a CI failure notification has been sent for the current failure. */
   ciFailureNotified?: boolean;
   /** The lastCommitTime when ciFailureNotified was set. */
@@ -463,6 +465,7 @@ export function serializeOrchestratorState(
       retryCount: item.retryCount,
       ...(item.reviewWorkspaceRef ? { reviewWorkspaceRef: item.reviewWorkspaceRef } : {}),
       ...(item.reviewCompleted ? { reviewCompleted: item.reviewCompleted } : {}),
+      ...(item.reviewRound ? { reviewRound: item.reviewRound } : {}),
       ...(item.failureReason ? { failureReason: item.failureReason } : {}),
       ...(item.workItem.dependencies.length > 0 ? { dependencies: item.workItem.dependencies } : {}),
       ...(item.startedAt ? { startedAt: item.startedAt } : {}),
