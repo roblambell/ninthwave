@@ -1400,6 +1400,9 @@ export const MIN_FULLSCREEN_ROWS = 10;
 /** Minimum terminal rows for split panel mode. Below this, split degrades to full-screen cycling. */
 export const MIN_SPLIT_ROWS = 35;
 
+/** Fraction of available rows allocated to the status panel in split mode (0.6 = 60%). */
+export const STATUS_SPLIT_RATIO = 0.6;
+
 // ─── Panel layout types ─────────────────────────────────────────────────────
 
 /** Panel display modes for the unified TUI. */
@@ -1556,7 +1559,7 @@ export function buildPanelLayout(
 
   // Available rows = total - footer - separator (1 line)
   const availableRows = Math.max(2, termRows - footerLines.length - 1);
-  const statusRows = Math.max(1, Math.floor(availableRows * 0.6));
+  const statusRows = Math.max(1, Math.floor(availableRows * STATUS_SPLIT_RATIO));
   const logRows = Math.max(1, availableRows - statusRows);
 
   // Build status panel (header + items fit within statusRows)
@@ -1666,16 +1669,23 @@ export function renderPanelFrame(
   if (mode === "logs-only" && logPanel) {
     const output: string[] = [];
 
-    // Log scroll indicators
+    // Calculate scroll indicators first to adjust viewport
     const hiddenAbove = logPanel.scrollOffset;
-    if (hiddenAbove > 0) {
+    const rawLogViewHeight = Math.max(1, termRows - footerLines.length);
+    const hasLogScrollUp = hiddenAbove > 0;
+    const hasLogScrollDown = logPanel.totalEntries > logPanel.scrollOffset + rawLogViewHeight;
+    const logScrollLines = (hasLogScrollUp ? 1 : 0) + (hasLogScrollDown ? 1 : 0);
+    const adjustedLogViewport = Math.max(1, rawLogViewHeight - logScrollLines);
+
+    if (hasLogScrollUp) {
       output.push(`  ${DIM}↑ ${hiddenAbove} more above${RESET}`);
     }
 
-    output.push(...logPanel.lines);
+    // Re-slice log lines to account for scroll indicators
+    const visibleLogLines = logPanel.lines.slice(0, adjustedLogViewport);
+    output.push(...visibleLogLines);
 
-    const logViewHeight = termRows - footerLines.length;
-    const hiddenBelow = Math.max(0, logPanel.totalEntries - logPanel.scrollOffset - logViewHeight);
+    const hiddenBelow = Math.max(0, logPanel.totalEntries - logPanel.scrollOffset - adjustedLogViewport);
     if (hiddenBelow > 0) {
       output.push(`  ${DIM}↓ ${hiddenBelow} more below${RESET}`);
     }
@@ -1699,7 +1709,7 @@ export function renderPanelFrame(
   const footerHeight = actualFooter.length;
   const separatorHeight = 1;
   const availableRows = Math.max(2, termRows - footerHeight - separatorHeight);
-  const statusRows = Math.max(1, Math.floor(availableRows * 0.6));
+  const statusRows = Math.max(1, Math.floor(availableRows * STATUS_SPLIT_RATIO));
   const logRows = Math.max(1, availableRows - statusRows);
 
   const output: string[] = [];

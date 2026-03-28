@@ -2616,6 +2616,27 @@ describe("renderPanelFrame", () => {
     expect(frame).toHaveLength(40);
   });
 
+  it("logs-only frame with scroll offset does not exceed terminal height", () => {
+    // Regression: scroll indicators were added without reducing viewport,
+    // causing output to exceed termRows before padToHeight truncated footer
+    const manyLogs = makeLogEntries(100);
+    const layout = buildPanelLayout("logs-only", items, manyLogs, 80, 40, {
+      logScrollOffset: 5,
+    });
+    const frame = renderPanelFrame(layout, 40, 80);
+    expect(frame).toHaveLength(40);
+    // Footer should not be truncated -- last non-empty lines should contain progress/shortcuts
+    const nonEmpty = frame.filter(l => l.trim() !== "");
+    const lastNonEmpty = stripAnsi(nonEmpty[nonEmpty.length - 1]!);
+    // Footer should contain shortcuts or progress, not a scroll indicator or log line
+    expect(
+      lastNonEmpty.includes("quit") ||
+      lastNonEmpty.includes("scroll") ||
+      lastNonEmpty.includes("items") ||
+      lastNonEmpty.includes("shift+tab"),
+    ).toBe(true);
+  });
+
   it("split frame at exactly MIN_SPLIT_ROWS matches height", () => {
     const layout = buildPanelLayout("split", items, logs, 80, 35);
     const frame = renderPanelFrame(layout, 35, 80);
