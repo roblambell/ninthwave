@@ -125,11 +125,6 @@ If the root cause is clear and fixable:
    gh api --method PUT "repos/{owner}/{repo}/issues/$(gh pr view --json number --jq .number)/lock" -f lock_reason=resolved
    ```
 
-7. Enable auto-merge if the project uses dogfooding mode:
-   ```bash
-   gh pr merge --squash --auto
-   ```
-
 ```bash
 nw heartbeat --progress 1.0 --label "Fix PR created"
 ```

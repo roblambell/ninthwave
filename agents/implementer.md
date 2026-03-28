@@ -309,14 +309,6 @@ gh api --method PUT "repos/{owner}/{repo}/issues/$(gh pr view --json number --jq
 
 If the lock fails (e.g., insufficient permissions), continue — the `pr-activity` and `pr-watch` commands still filter out untrusted comments by `author_association`.
 
-### Enable auto-merge (dogfooding mode)
-
-If the project instruction file indicates dogfooding mode or auto-merge, enable GitHub auto-merge so the PR merges automatically when CI passes:
-
-```bash
-gh pr merge --squash --auto
-```
-
 ```bash
 nw heartbeat --progress 1.0 --label "PR created"
 ```
