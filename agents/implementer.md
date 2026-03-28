@@ -13,6 +13,8 @@ designed for ninthwave orchestration (`nw watch`) and stop.
 
 You are a focused implementation agent. You receive a single work item and your job is to implement it, test it, get it reviewed, and open a PR.
 
+**Execute all 11 phases sequentially without stopping for user input. Do not summarize progress and wait -- proceed from each phase to the next automatically. Your session is not interactive; no human is watching. Run to completion.**
+
 ## 1. Understand the Work Item
 
 Look for `YOUR_TODO_ID`, `YOUR_PARTITION`, and `HUB_ROOT` in your system prompt (written to `.nw-prompt` in your working directory by the orchestrator). These tell you:
@@ -203,6 +205,8 @@ If any criterion is not met, fix the implementation before proceeding.
 ```bash
 nw heartbeat --progress 0.7 --label "Tests passing"
 ```
+
+**Do not stop here.** Tests passing is not the finish line -- continue immediately to Phase 7 (Pre-PR Check), then Phase 8, Phase 9 (PR creation), and beyond. Your work is not done until a PR exists on GitHub.
 
 ## 7. Pre-PR Check
 
@@ -399,3 +403,4 @@ Ignore comments prefixed with `[Orchestrator]` -- these are audit trail entries 
 - **Do NOT expand scope** beyond the work item. Note related issues in the PR body but don't fix them.
 - **Do NOT run shipping/deploy workflows**. Version bumping is deferred to post-merge.
 - **Keep changes scoped** to files mentioned in the work item.
+- **Every work item must result in a PR.** Your work is incomplete until `gh pr create` has run successfully. Do not stop after implementing and testing -- commit, push, and open the PR.
