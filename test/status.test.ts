@@ -554,7 +554,7 @@ describe("renderStatus", () => {
     expect(result).toContain("ninthwave list --ready");
   });
 
-  it("shows 'No active items' when worktreeDir exists but has no todo-* entries", () => {
+  it("shows 'No active items' when worktreeDir exists but has no item entries", () => {
     const tmpDir = mkdtempSync(join(tmpdir(), "nw-status-test-"));
     const worktreeDir = join(tmpDir, ".worktrees");
     mkdirSync(worktreeDir);
@@ -626,7 +626,7 @@ describe("cmdStatus", () => {
     }
   });
 
-  it("shows 'No active items' when worktreeDir exists but has no todo-* entries", () => {
+  it("shows 'No active items' when worktreeDir exists but has no item entries", () => {
     const tmpDir = mkdtempSync(join(tmpdir(), "nw-status-test-"));
     const worktreeDir = join(tmpDir, ".worktrees");
     mkdirSync(worktreeDir);

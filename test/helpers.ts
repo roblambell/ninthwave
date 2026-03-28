@@ -65,10 +65,10 @@ export function setupTempRepoPair(): string {
 }
 
 /**
- * Convert a fixture file into directory-based todo files.
+ * Convert a fixture file into directory-based work item files.
  * Reads the fixture, splits it into individual items, and writes them
  * as separate .md files in repo/.ninthwave/work/.
- * Returns the path to the todos directory.
+ * Returns the path to the work items directory.
  */
 export function useFixtureDir(repo: string, fixtureName: string): string {
   const src = join(TEST_DIR, "fixtures", fixtureName);
@@ -154,7 +154,7 @@ export function useFixtureDir(repo: string, fixtureName: string): string {
 
   // Stage and commit
   git(repo, "add", ".ninthwave");
-  spawnSync("git", ["-C", repo, "commit", "-m", "Add todo files", "--quiet"], {
+  spawnSync("git", ["-C", repo, "commit", "-m", "Add work item files", "--quiet"], {
     stdio: "pipe",
   });
 
@@ -162,18 +162,18 @@ export function useFixtureDir(repo: string, fixtureName: string): string {
 }
 
 /**
- * Write inline todo content as individual directory-based todo files.
- * Parses todo content and writes to repo/.ninthwave/work/.
- * Returns the path to the todos directory.
+ * Write inline work item content as individual directory-based work item files.
+ * Parses content and writes to repo/.ninthwave/work/.
+ * Returns the path to the work items directory.
  *
  * Usage:
- *   const workDir = writeTodoFiles(repo, `## Section\n### Feat: Item (H-FOO-1)\n...`);
+ *   const workDir = writeWorkItemFiles(repo, `## Section\n### Feat: Item (H-FOO-1)\n...`);
  */
-export function writeTodoFiles(repo: string, todosContent: string): string {
+export function writeWorkItemFiles(repo: string, itemsContent: string): string {
   const workDir = join(repo, ".ninthwave", "work");
   mkdirSync(workDir, { recursive: true });
 
-  const lines = todosContent.split("\n");
+  const lines = itemsContent.split("\n");
   let currentSection = "";
   let currentItemLines: string[] = [];
   let currentItemId = "";

@@ -1,4 +1,4 @@
-// Tests for alphabetic suffix support in TODO ID parsing.
+// Tests for alphabetic suffix support in work item ID parsing.
 // Verifies that IDs like H-CP-7a, H-CP-7b are recognized across all patterns.
 
 import { describe, it, expect, afterEach } from "vitest";
@@ -139,7 +139,7 @@ describe("ID_PATTERN_SOURCE for composite regexes", () => {
 // --- parseWorkItemFile with suffixed IDs ---
 
 describe("parseWorkItemFile with suffixed IDs", () => {
-  it("parses a todo file with a single-letter suffix", () => {
+  it("parses a work item file with a single-letter suffix", () => {
     const dir = makeTempDir();
     const content = `# Fix: Support suffixed IDs (H-CP-7a)
 
@@ -287,7 +287,7 @@ describe("normalizeTitleForComparison strips suffixed IDs", () => {
     expect(result).toBe("support suffixes");
   });
 
-  it("strips TODO reference with suffixed ID", () => {
+  it("strips item reference with suffixed ID", () => {
     const result = normalizeTitleForComparison("TODO H-CP-7a: Support suffixes");
     expect(result).toBe(": support suffixes");
   });

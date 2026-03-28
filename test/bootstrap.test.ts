@@ -1,11 +1,11 @@
-// Tests for cross-repo TODO bootstrap support (H-ORC-9).
+// Tests for cross-repo work item bootstrap support (H-ORC-9).
 // Covers: bootstrap field parsing, bootstrapRepo function, orchestrator bootstrap actions,
 // and status display mapping for the bootstrapping state.
 
 import { describe, it, expect, afterEach } from "vitest";
 import { mkdirSync, writeFileSync, existsSync } from "fs";
 import { join, dirname } from "path";
-import { setupTempRepo, setupTempRepoPair, cleanupTempRepos, writeTodoFiles } from "./helpers.ts";
+import { setupTempRepo, setupTempRepoPair, cleanupTempRepos, writeWorkItemFiles } from "./helpers.ts";
 import { parseWorkItemFile } from "../core/work-item-files.ts";
 import { parseWorkItems } from "../core/parser.ts";
 import { bootstrapRepo, detectGhOrg } from "../core/cross-repo.ts";
@@ -23,21 +23,21 @@ import type { WorkItem, Priority } from "../core/types.ts";
 
 afterEach(() => cleanupTempRepos());
 
-function makeTodo(
+function makeWorkItem(
   id: string,
   overrides: Partial<WorkItem> = {},
 ): WorkItem {
   return {
     id,
     priority: "high" as Priority,
-    title: `TODO ${id}`,
+    title: `Item ${id}`,
     domain: "test",
     dependencies: [],
     bundleWith: [],
     status: "open",
     filePath: "",
     repoAlias: "",
-    rawText: `## ${id}\nTest todo`,
+    rawText: `## ${id}\nTest item`,
     filePaths: [],
     testPlan: "",
     bootstrap: false,
@@ -73,7 +73,7 @@ function mockDeps(overrides?: Partial<OrchestratorDeps>): OrchestratorDeps {
 // ── Bootstrap field parsing ──────────────────────────────────────────
 
 describe("bootstrap field parsing", () => {
-  it("parses bootstrap: true from a todo file", () => {
+  it("parses bootstrap: true from a work item file", () => {
     const repo = setupTempRepo();
     const workDir = join(repo, ".ninthwave", "work");
     mkdirSync(workDir, { recursive: true });
@@ -98,14 +98,14 @@ Create a new repo and scaffold it.
     expect(item!.repoAlias).toBe("new-repo");
   });
 
-  it("parses bootstrap: false from a todo file", () => {
+  it("parses bootstrap: false from a work item file", () => {
     const repo = setupTempRepo();
     const workDir = join(repo, ".ninthwave", "work");
     mkdirSync(workDir, { recursive: true });
 
     writeFileSync(
       join(workDir, "1-test--H-BST-2.md"),
-      `# Normal todo (H-BST-2)
+      `# Normal item (H-BST-2)
 
 **Priority:** High
 **Depends on:** None
@@ -129,13 +129,13 @@ Work in existing repo.
 
     writeFileSync(
       join(workDir, "1-test--H-BST-3.md"),
-      `# Normal todo (H-BST-3)
+      `# Normal item (H-BST-3)
 
 **Priority:** High
 **Depends on:** None
 **Domain:** test
 
-A standard todo without bootstrap field.
+A standard item without bootstrap field.
 `,
     );
 
@@ -206,12 +206,12 @@ describe("detectGhOrg", () => {
 describe("orchestrator bootstrap", () => {
   it("emits bootstrap action for cross-repo item with bootstrap: true and no resolvedRepoRoot", () => {
     const orch = new Orchestrator({ reviewEnabled: false, wipLimit: 2 });
-    const todo = makeTodo("H-BST-1", {
+    const wi = makeWorkItem("H-BST-1", {
       repoAlias: "new-repo",
       bootstrap: true,
     });
 
-    orch.addItem(todo);
+    orch.addItem(wi);
     // Mark as ready manually (simulating deps met)
     const item = orch.getItem("H-BST-1")!;
     item.state = "ready" as any;
@@ -229,9 +229,9 @@ describe("orchestrator bootstrap", () => {
 
   it("emits launch action for regular items (no bootstrap)", () => {
     const orch = new Orchestrator({ reviewEnabled: false, wipLimit: 2 });
-    const todo = makeTodo("H-REG-1");
+    const wi = makeWorkItem("H-REG-1");
 
-    orch.addItem(todo);
+    orch.addItem(wi);
     const item = orch.getItem("H-REG-1")!;
     item.state = "ready" as any;
 
@@ -248,12 +248,12 @@ describe("orchestrator bootstrap", () => {
 
   it("emits launch (not bootstrap) when bootstrap: true but resolvedRepoRoot is already set", () => {
     const orch = new Orchestrator({ reviewEnabled: false, wipLimit: 2 });
-    const todo = makeTodo("H-BST-2", {
+    const wi = makeWorkItem("H-BST-2", {
       repoAlias: "existing-repo",
       bootstrap: true,
     });
 
-    orch.addItem(todo);
+    orch.addItem(wi);
     const item = orch.getItem("H-BST-2")!;
     item.state = "ready" as any;
     item.resolvedRepoRoot = "/path/to/existing-repo"; // Already resolved
@@ -268,12 +268,12 @@ describe("orchestrator bootstrap", () => {
 
   it("emits launch (not bootstrap) when bootstrap: true but alias is hub-local", () => {
     const orch = new Orchestrator({ reviewEnabled: false, wipLimit: 2 });
-    const todo = makeTodo("H-BST-3", {
+    const wi = makeWorkItem("H-BST-3", {
       repoAlias: "",
       bootstrap: true,
     });
 
-    orch.addItem(todo);
+    orch.addItem(wi);
     const item = orch.getItem("H-BST-3")!;
     item.state = "ready" as any;
 
@@ -287,14 +287,14 @@ describe("orchestrator bootstrap", () => {
     const orch = new Orchestrator({ reviewEnabled: false, wipLimit: 1 });
 
     // Add bootstrap item
-    const todo1 = makeTodo("H-BST-4", { repoAlias: "new-repo", bootstrap: true });
-    orch.addItem(todo1);
+    const wi1 = makeWorkItem("H-BST-4", { repoAlias: "new-repo", bootstrap: true });
+    orch.addItem(wi1);
     const item1 = orch.getItem("H-BST-4")!;
     item1.state = "ready" as any;
 
     // Add regular item
-    const todo2 = makeTodo("H-REG-2");
-    orch.addItem(todo2);
+    const wi2 = makeWorkItem("H-REG-2");
+    orch.addItem(wi2);
     const item2 = orch.getItem("H-REG-2")!;
     item2.state = "ready" as any;
 
@@ -311,8 +311,8 @@ describe("orchestrator bootstrap", () => {
 describe("executeBootstrap", () => {
   it("transitions to launching on successful bootstrap (cloned)", () => {
     const orch = new Orchestrator({ reviewEnabled: false, wipLimit: 2 });
-    const todo = makeTodo("H-BST-5", { repoAlias: "new-repo", bootstrap: true });
-    orch.addItem(todo);
+    const wi = makeWorkItem("H-BST-5", { repoAlias: "new-repo", bootstrap: true });
+    orch.addItem(wi);
 
     const item = orch.getItem("H-BST-5")!;
     item.state = "bootstrapping" as any;
@@ -331,8 +331,8 @@ describe("executeBootstrap", () => {
 
   it("transitions to launching on successful bootstrap (created)", () => {
     const orch = new Orchestrator({ reviewEnabled: false, wipLimit: 2 });
-    const todo = makeTodo("H-BST-6", { repoAlias: "brand-new-repo", bootstrap: true });
-    orch.addItem(todo);
+    const wi = makeWorkItem("H-BST-6", { repoAlias: "brand-new-repo", bootstrap: true });
+    orch.addItem(wi);
 
     const item = orch.getItem("H-BST-6")!;
     item.state = "bootstrapping" as any;
@@ -351,8 +351,8 @@ describe("executeBootstrap", () => {
 
   it("transitions to stuck on bootstrap failure", () => {
     const orch = new Orchestrator({ reviewEnabled: false, wipLimit: 2 });
-    const todo = makeTodo("H-BST-7", { repoAlias: "new-repo", bootstrap: true });
-    orch.addItem(todo);
+    const wi = makeWorkItem("H-BST-7", { repoAlias: "new-repo", bootstrap: true });
+    orch.addItem(wi);
 
     const item = orch.getItem("H-BST-7")!;
     item.state = "bootstrapping" as any;
@@ -372,8 +372,8 @@ describe("executeBootstrap", () => {
 
   it("transitions to stuck when bootstrapRepo dep is not provided", () => {
     const orch = new Orchestrator({ reviewEnabled: false, wipLimit: 2 });
-    const todo = makeTodo("H-BST-8", { repoAlias: "new-repo", bootstrap: true });
-    orch.addItem(todo);
+    const wi = makeWorkItem("H-BST-8", { repoAlias: "new-repo", bootstrap: true });
+    orch.addItem(wi);
 
     const item = orch.getItem("H-BST-8")!;
     item.state = "bootstrapping" as any;
@@ -390,8 +390,8 @@ describe("executeBootstrap", () => {
 
   it("bootstrap success with status exists does not set resolvedRepoRoot", () => {
     const orch = new Orchestrator({ reviewEnabled: false, wipLimit: 2 });
-    const todo = makeTodo("H-BST-9", { repoAlias: "existing", bootstrap: true });
-    orch.addItem(todo);
+    const wi = makeWorkItem("H-BST-9", { repoAlias: "existing", bootstrap: true });
+    orch.addItem(wi);
 
     const item = orch.getItem("H-BST-9")!;
     item.state = "bootstrapping" as any;
@@ -415,8 +415,8 @@ describe("executeBootstrap", () => {
 describe("existing cross-repo behavior unchanged", () => {
   it("non-bootstrap cross-repo item goes to launch (not bootstrap)", () => {
     const orch = new Orchestrator({ reviewEnabled: false, wipLimit: 2 });
-    const todo = makeTodo("H-XR-1", { repoAlias: "target-repo", bootstrap: false });
-    orch.addItem(todo);
+    const wi = makeWorkItem("H-XR-1", { repoAlias: "target-repo", bootstrap: false });
+    orch.addItem(wi);
 
     const item = orch.getItem("H-XR-1")!;
     item.state = "ready" as any;
@@ -433,14 +433,14 @@ describe("existing cross-repo behavior unchanged", () => {
     const orch = new Orchestrator({ reviewEnabled: false, wipLimit: 3 });
 
     // Bootstrap item
-    const bootstrapTodo = makeTodo("H-BST-10", { repoAlias: "new-repo", bootstrap: true });
-    orch.addItem(bootstrapTodo);
+    const bsWi = makeWorkItem("H-BST-10", { repoAlias: "new-repo", bootstrap: true });
+    orch.addItem(bsWi);
     const bootstrapItem = orch.getItem("H-BST-10")!;
     bootstrapItem.state = "bootstrapping" as any;
 
     // Dependent item
-    const depTodo = makeTodo("H-DEP-1", { dependencies: ["H-BST-10"] });
-    orch.addItem(depTodo);
+    const depWi = makeWorkItem("H-DEP-1", { dependencies: ["H-BST-10"] });
+    orch.addItem(depWi);
 
     // Process — dep should stay queued since bootstrap isn't done
     const actions = orch.processTransitions(emptySnapshot([]));
@@ -476,8 +476,8 @@ describe("bootstrapping status display", () => {
 describe("bootstrapping state in transitionItem", () => {
   it("bootstrapping state emits no actions from transitionItem (handled by executeBootstrap)", () => {
     const orch = new Orchestrator({ reviewEnabled: false, wipLimit: 2 });
-    const todo = makeTodo("H-BST-11", { repoAlias: "new-repo", bootstrap: true });
-    orch.addItem(todo);
+    const wi = makeWorkItem("H-BST-11", { repoAlias: "new-repo", bootstrap: true });
+    orch.addItem(wi);
 
     const item = orch.getItem("H-BST-11")!;
     item.state = "bootstrapping" as any;

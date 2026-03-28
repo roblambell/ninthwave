@@ -43,7 +43,7 @@ describe("deps", () => {
     expect(output).toContain("Dependency chain for H-CI-2");
     expect(output).toContain("Must complete before H-CI-2");
     expect(output).toContain("M-CI-1");
-    // M-CI-1 is still in todos so it should show as pending
+    // M-CI-1 is still in work items so it should show as pending
     expect(output).toContain("[ ]");
   });
 

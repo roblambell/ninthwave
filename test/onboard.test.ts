@@ -431,7 +431,7 @@ describe("onboard", () => {
 
 describe("cmdNoArgs", () => {
   /** Helper to build a fake WorkItem */
-  function fakeTodo(id: string, title: string): WorkItem {
+  function fakeWorkItem(id: string, title: string): WorkItem {
     return {
       id,
       title,
@@ -490,7 +490,7 @@ describe("cmdNoArgs", () => {
     expect(output).toContain("Welcome to ninthwave");
   });
 
-  it("shows guidance when .ninthwave/ exists but no TODOs", async () => {
+  it("shows guidance when .ninthwave/ exists but no work items", async () => {
     const projectDir = setupTempRepo();
     mkdirSync(join(projectDir, ".ninthwave", "work"), { recursive: true });
 
@@ -514,10 +514,10 @@ describe("cmdNoArgs", () => {
     expect(output).toContain(".ninthwave/work/");
   });
 
-  it("shows guidance when .ninthwave/ exists but todos dir missing", async () => {
+  it("shows guidance when .ninthwave/ exists but work dir missing", async () => {
     const projectDir = setupTempRepo();
     mkdirSync(join(projectDir, ".ninthwave"), { recursive: true });
-    // No todos/ subdirectory
+    // No work/ subdirectory
 
     const logs: string[] = [];
     const origLog = console.log;
@@ -548,7 +548,7 @@ describe("cmdNoArgs", () => {
     try {
       await cmdNoArgs(projectDir, {
         isTTY: true,
-        parseWorkItems: () => [fakeTodo("H-1", "Test item")],
+        parseWorkItems: () => [fakeWorkItem("H-1", "Test item")],
         isDaemonRunning: () => 12345,
         runStatusWatch: async () => { statusWatchCalled = true; },
       });
@@ -566,9 +566,9 @@ describe("cmdNoArgs", () => {
     const projectDir = setupTempRepo();
     mkdirSync(join(projectDir, ".ninthwave", "work"), { recursive: true });
 
-    const todos = [
-      fakeTodo("H-FOO-1", "First task"),
-      fakeTodo("H-FOO-2", "Second task"),
+    const items = [
+      fakeWorkItem("H-FOO-1", "First task"),
+      fakeWorkItem("H-FOO-2", "Second task"),
     ];
     let summaryCalled = false;
     let watchArgs: string[] = [];
@@ -576,7 +576,7 @@ describe("cmdNoArgs", () => {
 
     await cmdNoArgs(projectDir, {
       isTTY: true,
-      parseWorkItems: () => todos,
+      parseWorkItems: () => items,
       isDaemonRunning: () => null,
       displayItemsSummary: () => { summaryCalled = true; },
       promptMode: async () => "orchestrate",
@@ -604,9 +604,9 @@ describe("cmdNoArgs", () => {
     const projectDir = setupTempRepo();
     mkdirSync(join(projectDir, ".ninthwave", "work"), { recursive: true });
 
-    const todos = [
-      fakeTodo("H-FOO-1", "First task"),
-      fakeTodo("H-FOO-2", "Second task"),
+    const items = [
+      fakeWorkItem("H-FOO-1", "First task"),
+      fakeWorkItem("H-FOO-2", "Second task"),
     ];
     let promptItemsCalled = false;
     let runSelectedCalled = false;
@@ -614,7 +614,7 @@ describe("cmdNoArgs", () => {
 
     await cmdNoArgs(projectDir, {
       isTTY: true,
-      parseWorkItems: () => todos,
+      parseWorkItems: () => items,
       isDaemonRunning: () => null,
       displayItemsSummary: () => {},
       promptMode: async () => "launch",
@@ -637,13 +637,13 @@ describe("cmdNoArgs", () => {
     const projectDir = setupTempRepo();
     mkdirSync(join(projectDir, ".ninthwave", "work"), { recursive: true });
 
-    const todos = [fakeTodo("H-1", "Task")];
+    const items = [fakeWorkItem("H-1", "Task")];
     let watchCalled = false;
 
     // promptMode returning "orchestrate" simulates the default behavior
     await cmdNoArgs(projectDir, {
       isTTY: true,
-      parseWorkItems: () => todos,
+      parseWorkItems: () => items,
       isDaemonRunning: () => null,
       displayItemsSummary: () => {},
       promptMode: async () => "orchestrate",
@@ -664,7 +664,7 @@ describe("cmdNoArgs", () => {
 
     await cmdNoArgs(projectDir, {
       isTTY: true,
-      parseWorkItems: () => [fakeTodo("H-1", "Task")],
+      parseWorkItems: () => [fakeWorkItem("H-1", "Task")],
       isDaemonRunning: () => null,
       displayItemsSummary: () => {},
       promptMode: async () => "quit",
@@ -684,7 +684,7 @@ describe("cmdNoArgs", () => {
 
     await cmdNoArgs(projectDir, {
       isTTY: true,
-      parseWorkItems: () => [fakeTodo("H-1", "Task")],
+      parseWorkItems: () => [fakeWorkItem("H-1", "Task")],
       isDaemonRunning: () => null,
       displayItemsSummary: () => {},
       promptMode: async () => "launch",
@@ -699,15 +699,15 @@ describe("cmdNoArgs", () => {
     const projectDir = setupTempRepo();
     mkdirSync(join(projectDir, ".ninthwave", "work"), { recursive: true });
 
-    const todos = [
-      fakeTodo("H-FOO-1", "First task"),
-      fakeTodo("H-FOO-2", "Second task"),
+    const items = [
+      fakeWorkItem("H-FOO-1", "First task"),
+      fakeWorkItem("H-FOO-2", "Second task"),
     ];
     let promptItemsCalled = false;
 
     await cmdNoArgs(projectDir, {
       isTTY: true,
-      parseWorkItems: () => todos,
+      parseWorkItems: () => items,
       isDaemonRunning: () => null,
       displayItemsSummary: () => {},
       promptMode: async () => "orchestrate",

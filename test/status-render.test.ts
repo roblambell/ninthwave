@@ -70,11 +70,11 @@ function makeStatusItem(overrides: Partial<StatusItem> = {}): StatusItem {
   };
 }
 
-function makeTodo(id: string, deps: string[] = []): WorkItem {
+function makeWorkItem(id: string, deps: string[] = []): WorkItem {
   return {
     id,
     priority: "high",
-    title: `TODO ${id}`,
+    title: `Item ${id}`,
     domain: "test",
     dependencies: deps,
     bundleWith: [],
@@ -87,7 +87,7 @@ function makeTodo(id: string, deps: string[] = []): WorkItem {
 function makeOrchestratorItem(id: string, state: OrchestratorItem["state"] = "implementing"): OrchestratorItem {
   return {
     id,
-    workItem: makeTodo(id),
+    workItem: makeWorkItem(id),
     state,
     lastTransition: new Date(Date.now() - 10_000).toISOString(),
     ciFailCount: 0,
@@ -1042,7 +1042,7 @@ describe("orchestratorItemsToStatusItems", () => {
     expect(result).toHaveLength(1);
     expect(result[0]!.id).toBe("C-1-1");
     expect(result[0]!.state).toBe("implementing");
-    expect(result[0]!.title).toBe("TODO C-1-1");
+    expect(result[0]!.title).toBe("Item C-1-1");
     expect(result[0]!.prNumber).toBeNull();
   });
 

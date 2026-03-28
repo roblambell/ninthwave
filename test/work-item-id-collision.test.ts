@@ -1,7 +1,7 @@
-// Tests for TODO ID collision detection (H-MID-1).
-// Verifies that reusing a TODO ID that matches an old merged PR does NOT
-// result in the new TODO being auto-completed, and that reconcile does not
-// delete TODO files whose titles don't match the merged PR.
+// Tests for item ID collision detection (H-MID-1).
+// Verifies that reusing an item ID that matches an old merged PR does NOT
+// result in the new item being auto-completed, and that reconcile does not
+// delete work item files whose titles don't match the merged PR.
 
 import { describe, it, expect, afterEach } from "vitest";
 import { mkdirSync, writeFileSync, rmSync, existsSync, readdirSync } from "fs";
@@ -45,7 +45,7 @@ afterEach(() => {
   tmpDirs = [];
 });
 
-function makeTodo(id: string, title: string, deps: string[] = []): WorkItem {
+function makeWorkItem(id: string, title: string, deps: string[] = []): WorkItem {
   return {
     id,
     priority: "high",
@@ -63,7 +63,7 @@ function makeTodo(id: string, title: string, deps: string[] = []): WorkItem {
   };
 }
 
-function setupTodosDir(files: Record<string, string>): {
+function setupWorkItemsDir(files: Record<string, string>): {
   workDir: string;
   worktreeDir: string;
   projectRoot: string;
@@ -138,12 +138,12 @@ describe("normalizeTitleForComparison", () => {
     );
   });
 
-  it("strips TODO ID references", () => {
+  it("strips item ID references", () => {
     expect(normalizeTitleForComparison("fix: handle null (H-MUX-1)")).toBe(
       "handle null",
     );
     expect(
-      normalizeTitleForComparison("feat: new feature (TODO H-MUX-1)"),
+      normalizeTitleForComparison("feat: new feature (H-MUX-1)"),
     ).toBe("new feature");
   });
 
@@ -166,7 +166,7 @@ describe("prTitleMatchesWorkItem", () => {
   it("matches after stripping commit prefix and ID", () => {
     expect(
       prTitleMatchesWorkItem(
-        "refactor: extract Multiplexer interface (TODO H-MUX-1)",
+        "refactor: extract Multiplexer interface (H-MUX-1)",
         "extract Multiplexer interface",
       ),
     ).toBe(true);
@@ -179,13 +179,13 @@ describe("prTitleMatchesWorkItem", () => {
   });
 
   it("rejects substring matches (not exact)", () => {
-    // PR title is a substring of TODO title — should be treated as mismatch
+    // PR title is a substring of item title — should be treated as mismatch
     expect(
       prTitleMatchesWorkItem("old work", "old work extended"),
     ).toBe(false);
   });
 
-  it("rejects when TODO title is a substring of PR title", () => {
+  it("rejects when item title is a substring of PR title", () => {
     expect(
       prTitleMatchesWorkItem("old work extended", "old work"),
     ).toBe(false);
@@ -200,16 +200,16 @@ describe("prTitleMatchesWorkItem", () => {
 
 // ── Reconcile collision tests ────────────────────────────────────────
 
-describe("reconcile: TODO ID collision safety", () => {
-  it("does not delete TODO file when merged PR title doesn't match", () => {
-    // Setup: TODO FOO-1 with title "new work" and a merged PR titled "old work"
-    const { workDir, worktreeDir, projectRoot } = setupTodosDir({
+describe("reconcile: item ID collision safety", () => {
+  it("does not delete work item file when merged PR title doesn't match", () => {
+    // Setup: item FOO-1 with title "new work" and a merged PR titled "old work"
+    const { workDir, worktreeDir, projectRoot } = setupWorkItemsDir({
       "2-test--H-FOO-1.md": `# New work (H-FOO-1)\n\n**Priority:** High\n**Domain:** test\n`,
     });
     let markedIds: string[] = [];
 
     const deps = makeDeps({
-      getMergedTodoIds: () => [{ id: "H-FOO-1", prTitle: "fix: old work (TODO H-FOO-1)" }],
+      getMergedTodoIds: () => [{ id: "H-FOO-1", prTitle: "fix: old work (H-FOO-1)" }],
       markDone: (ids) => {
         markedIds = ids;
       },
@@ -221,14 +221,14 @@ describe("reconcile: TODO ID collision safety", () => {
     expect(output).toContain("H-FOO-1");
   });
 
-  it("deletes TODO file when merged PR title matches", () => {
-    const { workDir, worktreeDir, projectRoot } = setupTodosDir({
+  it("deletes work item file when merged PR title matches", () => {
+    const { workDir, worktreeDir, projectRoot } = setupWorkItemsDir({
       "2-test--H-FOO-1.md": `# Old work (H-FOO-1)\n\n**Priority:** High\n**Domain:** test\n`,
     });
     let markedIds: string[] = [];
 
     const deps = makeDeps({
-      getMergedTodoIds: () => [{ id: "H-FOO-1", prTitle: "fix: old work (TODO H-FOO-1)" }],
+      getMergedTodoIds: () => [{ id: "H-FOO-1", prTitle: "fix: old work (H-FOO-1)" }],
       markDone: (ids) => {
         markedIds = ids;
       },
@@ -239,7 +239,7 @@ describe("reconcile: TODO ID collision safety", () => {
   });
 
   it("handles mixed: some titles match, some don't", () => {
-    const { workDir, worktreeDir, projectRoot } = setupTodosDir({
+    const { workDir, worktreeDir, projectRoot } = setupWorkItemsDir({
       "2-test--H-FOO-1.md": `# New work (H-FOO-1)\n\n**Priority:** High\n**Domain:** test\n`,
       "2-test--H-BAR-1.md": `# Fix a bug (H-BAR-1)\n\n**Priority:** High\n**Domain:** test\n`,
     });
@@ -247,8 +247,8 @@ describe("reconcile: TODO ID collision safety", () => {
 
     const deps = makeDeps({
       getMergedTodoIds: () => [
-        { id: "H-FOO-1", prTitle: "fix: old work (TODO H-FOO-1)" }, // title mismatch
-        { id: "H-BAR-1", prTitle: "fix: fix a bug (TODO H-BAR-1)" }, // title match
+        { id: "H-FOO-1", prTitle: "fix: old work (H-FOO-1)" }, // title mismatch
+        { id: "H-BAR-1", prTitle: "fix: fix a bug (H-BAR-1)" }, // title match
       ],
       markDone: (ids) => {
         markedIds = ids;
@@ -260,7 +260,7 @@ describe("reconcile: TODO ID collision safety", () => {
   });
 
   it("still marks done when merged PR has no title (fallback to legacy behavior)", () => {
-    const { workDir, worktreeDir, projectRoot } = setupTodosDir({
+    const { workDir, worktreeDir, projectRoot } = setupWorkItemsDir({
       "2-test--H-FOO-1.md": `# Some work (H-FOO-1)\n\n**Priority:** High\n**Domain:** test\n`,
     });
     let markedIds: string[] = [];
@@ -278,13 +278,13 @@ describe("reconcile: TODO ID collision safety", () => {
   });
 
   it("does not clean worktrees for collision-skipped items", () => {
-    const { workDir, worktreeDir, projectRoot } = setupTodosDir({
+    const { workDir, worktreeDir, projectRoot } = setupWorkItemsDir({
       "2-test--H-FOO-1.md": `# New work (H-FOO-1)\n\n**Priority:** High\n**Domain:** test\n`,
     });
     const cleanedIds: string[] = [];
 
     const deps = makeDeps({
-      getMergedTodoIds: () => [{ id: "H-FOO-1", prTitle: "fix: old work (TODO H-FOO-1)" }],
+      getMergedTodoIds: () => [{ id: "H-FOO-1", prTitle: "fix: old work (H-FOO-1)" }],
       getWorktreeIds: () => ["H-FOO-1"],
       cleanWorktree: (id) => {
         cleanedIds.push(id);
@@ -300,10 +300,10 @@ describe("reconcile: TODO ID collision safety", () => {
 
 // ── Orchestrator reconstructState collision tests ────────────────────
 
-describe("reconstructState: TODO ID collision safety", () => {
-  it("does not fast-track to merged when PR title doesn't match TODO title", () => {
+describe("reconstructState: item ID collision safety", () => {
+  it("does not fast-track to merged when PR title doesn't match item title", () => {
     const orch = new Orchestrator({ reviewEnabled: false });
-    orch.addItem(makeTodo("H-FOO-1", "new work"));
+    orch.addItem(makeWorkItem("H-FOO-1", "new work"));
 
     const tmpDir = makeTmpDir();
     const wtDir = join(tmpDir, ".worktrees");
@@ -313,7 +313,7 @@ describe("reconstructState: TODO ID collision safety", () => {
     // Format: ID\tPR_NUMBER\tSTATUS\tMERGEABLE\tEVENT_TIME\tPR_TITLE
     const mockCheckPr = (id: string) => {
       if (id === "H-FOO-1") {
-        return "H-FOO-1\t42\tmerged\t\t\tfix: old work (TODO H-FOO-1)";
+        return "H-FOO-1\t42\tmerged\t\t\tfix: old work (H-FOO-1)";
       }
       return null;
     };
@@ -325,9 +325,9 @@ describe("reconstructState: TODO ID collision safety", () => {
     expect(item.state).toBe("implementing");
   });
 
-  it("fast-tracks to merged when PR title matches TODO title", () => {
+  it("fast-tracks to merged when PR title matches item title", () => {
     const orch = new Orchestrator({ reviewEnabled: false });
-    orch.addItem(makeTodo("H-FOO-1", "old work"));
+    orch.addItem(makeWorkItem("H-FOO-1", "old work"));
 
     const tmpDir = makeTmpDir();
     const wtDir = join(tmpDir, ".worktrees");
@@ -335,7 +335,7 @@ describe("reconstructState: TODO ID collision safety", () => {
 
     const mockCheckPr = (id: string) => {
       if (id === "H-FOO-1") {
-        return "H-FOO-1\t42\tmerged\t\t\tfix: old work (TODO H-FOO-1)";
+        return "H-FOO-1\t42\tmerged\t\t\tfix: old work (H-FOO-1)";
       }
       return null;
     };
@@ -349,7 +349,7 @@ describe("reconstructState: TODO ID collision safety", () => {
 
   it("falls back to merged when PR title is empty (no title data available)", () => {
     const orch = new Orchestrator({ reviewEnabled: false });
-    orch.addItem(makeTodo("H-FOO-1", "some work"));
+    orch.addItem(makeWorkItem("H-FOO-1", "some work"));
 
     const tmpDir = makeTmpDir();
     const wtDir = join(tmpDir, ".worktrees");
@@ -373,17 +373,17 @@ describe("reconstructState: TODO ID collision safety", () => {
 
 // ── buildSnapshot collision tests ────────────────────────────────────
 
-describe("buildSnapshot: TODO ID collision safety", () => {
-  it("ignores stale merged PR when title does not match TODO (ID collision)", () => {
-    // When a TODO ID is reused, the old merged PR still shows up for the same
+describe("buildSnapshot: item ID collision safety", () => {
+  it("ignores stale merged PR when title does not match item (ID collision)", () => {
+    // When an item ID is reused, the old merged PR still shows up for the same
     // branch name. buildSnapshot must compare titles and ignore the stale PR.
     const orch = new Orchestrator({ reviewEnabled: false });
-    orch.addItem(makeTodo("H-FOO-1", "new work"));
+    orch.addItem(makeWorkItem("H-FOO-1", "new work"));
     orch.setState("H-FOO-1", "implementing");
 
     const mockCheckPr = (id: string) => {
       if (id === "H-FOO-1") {
-        return "H-FOO-1\t42\tmerged\t\t\tfix: old work (TODO H-FOO-1)";
+        return "H-FOO-1\t42\tmerged\t\t\tfix: old work (H-FOO-1)";
       }
       return null;
     };
@@ -418,9 +418,9 @@ describe("buildSnapshot: TODO ID collision safety", () => {
   it("reports merged when orchestrator already tracks the PR number (skips title check)", () => {
     // This is the key fix: when the orchestrator has already assigned prNumber to an item
     // (because it saw the PR created during this run), a title mismatch should NOT
-    // prevent merge detection. The worker may use a different PR title than the TODO title.
+    // prevent merge detection. The worker may use a different PR title than the item title.
     const orch = new Orchestrator({ reviewEnabled: false });
-    orch.addItem(makeTodo("H-FOO-1", "update decompose skill output format"));
+    orch.addItem(makeWorkItem("H-FOO-1", "update decompose skill output format"));
     orch.setState("H-FOO-1", "ci-passed");
     // Simulate: orchestrator already tracked this PR during the run
     const item = orch.getItem("H-FOO-1")!;
@@ -429,7 +429,7 @@ describe("buildSnapshot: TODO ID collision safety", () => {
     const mockCheckPr = (id: string) => {
       if (id === "H-FOO-1") {
         // Worker used a completely different PR title — should still detect merge
-        return "H-FOO-1\t42\tmerged\t\t\trefactor: remove legacy reference (TODO H-FOO-1)";
+        return "H-FOO-1\t42\tmerged\t\t\trefactor: remove legacy reference (H-FOO-1)";
       }
       return null;
     };
@@ -465,14 +465,14 @@ describe("buildSnapshot: TODO ID collision safety", () => {
     // When the orchestrator tracks prNumber=99 but finds a merged PR #42 with a
     // different title, it should ignore it — this is an old PR from a previous cycle.
     const orch = new Orchestrator({ reviewEnabled: false });
-    orch.addItem(makeTodo("H-FOO-1", "new work"));
+    orch.addItem(makeWorkItem("H-FOO-1", "new work"));
     orch.setState("H-FOO-1", "ci-passed");
     const item = orch.getItem("H-FOO-1")!;
     item.prNumber = 99; // Different PR number — not the one that merged
 
     const mockCheckPr = (id: string) => {
       if (id === "H-FOO-1") {
-        return "H-FOO-1\t42\tmerged\t\t\tfix: old work (TODO H-FOO-1)";
+        return "H-FOO-1\t42\tmerged\t\t\tfix: old work (H-FOO-1)";
       }
       return null;
     };
@@ -504,14 +504,14 @@ describe("buildSnapshot: TODO ID collision safety", () => {
     expect(snap!.prState).toBeUndefined();
   });
 
-  it("reports merged when PR title matches TODO title", () => {
+  it("reports merged when PR title matches item title", () => {
     const orch = new Orchestrator({ reviewEnabled: false });
-    orch.addItem(makeTodo("H-FOO-1", "old work"));
+    orch.addItem(makeWorkItem("H-FOO-1", "old work"));
     orch.setState("H-FOO-1", "implementing");
 
     const mockCheckPr = (id: string) => {
       if (id === "H-FOO-1") {
-        return "H-FOO-1\t42\tmerged\t\t\tfix: old work (TODO H-FOO-1)";
+        return "H-FOO-1\t42\tmerged\t\t\tfix: old work (H-FOO-1)";
       }
       return null;
     };

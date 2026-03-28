@@ -33,15 +33,15 @@ afterEach(() => {
   tmpDirs = [];
 });
 
-/** Sample todo files matching the old SAMPLE_TODOS content. */
-const SAMPLE_TODO_FILES: Record<string, string> = {
+/** Sample work item files. */
+const SAMPLE_WORK_ITEM_FILES: Record<string, string> = {
   "3-cloud-infrastructure--M-CI-1.md": `# Upgrade CI runners (M-CI-1)\n\n**Priority:** Medium\n**Domain:** cloud-infrastructure\n`,
   "2-cloud-infrastructure--H-CI-2.md": `# Flaky connection pool (H-CI-2)\n\n**Priority:** High\n**Domain:** cloud-infrastructure\n`,
   "1-user-onboarding--C-UO-1.md": `# Onboarding wizard (C-UO-1)\n\n**Priority:** Critical\n**Domain:** user-onboarding\n`,
   "2-user-onboarding--H-UO-2.md": `# Welcome email (H-UO-2)\n\n**Priority:** High\n**Domain:** user-onboarding\n`,
 };
 
-function setupTodosDir(files: Record<string, string> = SAMPLE_TODO_FILES): { workDir: string; worktreeDir: string; projectRoot: string } {
+function setupWorkItemsDir(files: Record<string, string> = SAMPLE_WORK_ITEM_FILES): { workDir: string; worktreeDir: string; projectRoot: string } {
   const dir = makeTmpDir();
   const workDir = join(dir, ".ninthwave", "work");
   const worktreeDir = join(dir, ".worktrees");
@@ -97,7 +97,7 @@ function makeDeps(overrides: Partial<ReconcileDeps> = {}): ReconcileDeps {
   };
 }
 
-// Title map for sample todo files (used to construct matching PR titles)
+// Title map for sample work item files (used to construct matching PR titles)
 const SAMPLE_TITLES: Record<string, string> = {
   "M-CI-1": "Upgrade CI runners",
   "H-CI-2": "Flaky connection pool",
@@ -114,7 +114,7 @@ function mergedPr(id: string): { id: string; prTitle: string } {
 
 describe("reconcile", () => {
   it("pulls latest main as first step", () => {
-    const { workDir, worktreeDir, projectRoot } = setupTodosDir();
+    const { workDir, worktreeDir, projectRoot } = setupWorkItemsDir();
     let pullCalled = false;
 
     const deps = makeDeps({
@@ -129,7 +129,7 @@ describe("reconcile", () => {
   });
 
   it("stops and warns on pull failure", () => {
-    const { workDir, worktreeDir, projectRoot } = setupTodosDir();
+    const { workDir, worktreeDir, projectRoot } = setupWorkItemsDir();
     let mergedCalled = false;
 
     const deps = makeDeps({
@@ -147,7 +147,7 @@ describe("reconcile", () => {
   });
 
   it("warns about merge conflict and suggests manual resolution", () => {
-    const { workDir, worktreeDir, projectRoot } = setupTodosDir();
+    const { workDir, worktreeDir, projectRoot } = setupWorkItemsDir();
 
     const deps = makeDeps({
       pullRebase: () => ({ ok: false, conflict: true, error: "CONFLICT in core/foo.ts" }),
@@ -159,7 +159,7 @@ describe("reconcile", () => {
   });
 
   it("queries GitHub for merged ninthwave/* PRs", () => {
-    const { workDir, worktreeDir, projectRoot } = setupTodosDir();
+    const { workDir, worktreeDir, projectRoot } = setupWorkItemsDir();
     let queriedProject: string | undefined;
 
     const deps = makeDeps({
@@ -174,7 +174,7 @@ describe("reconcile", () => {
   });
 
   it("marks merged items as done", () => {
-    const { workDir, worktreeDir, projectRoot } = setupTodosDir();
+    const { workDir, worktreeDir, projectRoot } = setupWorkItemsDir();
     let markedIds: string[] = [];
 
     const deps = makeDeps({
@@ -188,12 +188,12 @@ describe("reconcile", () => {
     expect(markedIds).toEqual(["M-CI-1", "H-CI-2"]);
   });
 
-  it("only marks items that still have todo files", () => {
-    const { workDir, worktreeDir, projectRoot } = setupTodosDir();
+  it("only marks items that still have work item files", () => {
+    const { workDir, worktreeDir, projectRoot } = setupWorkItemsDir();
     let markedIds: string[] = [];
 
     const deps = makeDeps({
-      // GitHub says these are merged, but X-GONE-1 has no todo file
+      // GitHub says these are merged, but X-GONE-1 has no work item file
       getMergedTodoIds: () => [mergedPr("M-CI-1"), mergedPr("X-GONE-1")],
       markDone: (ids) => {
         markedIds = ids;
@@ -201,12 +201,12 @@ describe("reconcile", () => {
     });
 
     reconcile(workDir, worktreeDir, projectRoot, deps);
-    // Should only mark M-CI-1 (which has a todo file), not X-GONE-1
+    // Should only mark M-CI-1 (which has a work item file), not X-GONE-1
     expect(markedIds).toEqual(["M-CI-1"]);
   });
 
   it("cleans worktrees for merged items", () => {
-    const { workDir, worktreeDir, projectRoot } = setupTodosDir();
+    const { workDir, worktreeDir, projectRoot } = setupWorkItemsDir();
     const cleaned: string[] = [];
 
     const deps = makeDeps({
@@ -224,7 +224,7 @@ describe("reconcile", () => {
   });
 
   it("commits and pushes when items were marked done", () => {
-    const { workDir, worktreeDir, projectRoot } = setupTodosDir();
+    const { workDir, worktreeDir, projectRoot } = setupWorkItemsDir();
     let committed = false;
 
     const deps = makeDeps({
@@ -240,7 +240,7 @@ describe("reconcile", () => {
   });
 
   it("is a no-op when everything is in sync (no empty commits)", () => {
-    const { workDir, worktreeDir, projectRoot } = setupTodosDir();
+    const { workDir, worktreeDir, projectRoot } = setupWorkItemsDir();
     let markDoneCalled = false;
     let commitCalled = false;
 
@@ -261,13 +261,13 @@ describe("reconcile", () => {
     expect(output).toContain("no changes needed");
   });
 
-  it("is a no-op when merged IDs have no todo files", () => {
-    const { workDir, worktreeDir, projectRoot } = setupTodosDir();
+  it("is a no-op when merged IDs have no work item files", () => {
+    const { workDir, worktreeDir, projectRoot } = setupWorkItemsDir();
     let markDoneCalled = false;
     let commitCalled = false;
 
     const deps = makeDeps({
-      // These IDs were merged but already have no todo files
+      // These IDs were merged but already have no work item files
       getMergedTodoIds: () => [mergedPr("X-OLD-1"), mergedPr("X-OLD-2")],
       markDone: () => {
         markDoneCalled = true;
@@ -285,7 +285,7 @@ describe("reconcile", () => {
   });
 
   it("reports summary with counts", () => {
-    const { workDir, worktreeDir, projectRoot } = setupTodosDir();
+    const { workDir, worktreeDir, projectRoot } = setupWorkItemsDir();
 
     const deps = makeDeps({
       getMergedTodoIds: () => [mergedPr("M-CI-1"), mergedPr("H-CI-2")],
@@ -300,11 +300,11 @@ describe("reconcile", () => {
   });
 
   it("still cleans worktrees even when no commit needed", () => {
-    const { workDir, worktreeDir, projectRoot } = setupTodosDir();
+    const { workDir, worktreeDir, projectRoot } = setupWorkItemsDir();
     const cleaned: string[] = [];
 
     const deps = makeDeps({
-      // X-OLD-1 is merged but has no todo file (already removed)
+      // X-OLD-1 is merged but has no work item file (already removed)
       getMergedTodoIds: () => [mergedPr("X-OLD-1")],
       getWorktreeIds: () => ["X-OLD-1"],
       cleanWorktree: (id) => {
@@ -318,20 +318,20 @@ describe("reconcile", () => {
     expect(cleaned).toEqual(["X-OLD-1"]);
   });
 
-  it("handles empty todos directory gracefully", () => {
-    const { workDir, worktreeDir, projectRoot } = setupTodosDir({});
+  it("handles empty work items directory gracefully", () => {
+    const { workDir, worktreeDir, projectRoot } = setupWorkItemsDir({});
 
     const deps = makeDeps({
       getMergedTodoIds: () => [mergedPr("M-CI-1")],
     });
 
     const output = captureOutput(() => reconcile(workDir, worktreeDir, projectRoot, deps));
-    // No items to mark done (todos dir is empty)
+    // No items to mark done (work items dir is empty)
     expect(output).toContain("no changes needed");
   });
 
   it("does not attempt commit+push when no items were marked done", () => {
-    const { workDir, worktreeDir, projectRoot } = setupTodosDir();
+    const { workDir, worktreeDir, projectRoot } = setupWorkItemsDir();
     let commitCalled = false;
 
     const deps = makeDeps({
@@ -347,7 +347,7 @@ describe("reconcile", () => {
   });
 
   it("closes stale workspaces for merged items", () => {
-    const { workDir, worktreeDir, projectRoot } = setupTodosDir();
+    const { workDir, worktreeDir, projectRoot } = setupWorkItemsDir();
     let closedIds: string[] = [];
 
     const deps = makeDeps({
@@ -364,7 +364,7 @@ describe("reconcile", () => {
   });
 
   it("includes workspace count in summary output", () => {
-    const { workDir, worktreeDir, projectRoot } = setupTodosDir();
+    const { workDir, worktreeDir, projectRoot } = setupWorkItemsDir();
 
     const deps = makeDeps({
       getMergedTodoIds: () => [mergedPr("M-CI-1")],
@@ -376,13 +376,13 @@ describe("reconcile", () => {
     expect(output).toContain("1 workspace(s)");
   });
 
-  it("cleans orphaned worktrees with no matching todo file", () => {
-    const { workDir, worktreeDir, projectRoot } = setupTodosDir();
+  it("cleans orphaned worktrees with no matching work item file", () => {
+    const { workDir, worktreeDir, projectRoot } = setupWorkItemsDir();
     const cleaned: string[] = [];
 
     const deps = makeDeps({
       getMergedTodoIds: () => [],
-      // Worktree X-OLD-1 exists but has no todo file
+      // Worktree X-OLD-1 exists but has no work item file
       getWorktreeIds: () => ["X-OLD-1", "M-CI-1"],
       cleanWorktree: (id) => {
         cleaned.push(id);
@@ -391,19 +391,19 @@ describe("reconcile", () => {
     });
 
     captureOutput(() => reconcile(workDir, worktreeDir, projectRoot, deps));
-    // X-OLD-1 has no todo file — should be cleaned as orphan
-    // M-CI-1 has a matching todo file — should NOT be cleaned
+    // X-OLD-1 has no work item file — should be cleaned as orphan
+    // M-CI-1 has a matching work item file — should NOT be cleaned
     expect(cleaned).not.toContain("M-CI-1");
     expect(cleaned).toContain("X-OLD-1");
   });
 
-  it("does not clean non-todo worktrees during orphan cleanup", () => {
-    const { workDir, worktreeDir, projectRoot } = setupTodosDir();
+  it("does not clean non-item worktrees during orphan cleanup", () => {
+    const { workDir, worktreeDir, projectRoot } = setupWorkItemsDir();
     const cleaned: string[] = [];
 
     const deps = makeDeps({
       getMergedTodoIds: () => [],
-      // getWorktreeIds only returns todo-* prefixed dirs (non-todo dirs excluded)
+      // getWorktreeIds only returns ninthwave-* prefixed dirs (non-item dirs excluded)
       getWorktreeIds: () => [],
       cleanWorktree: (id) => {
         cleaned.push(id);
@@ -416,7 +416,7 @@ describe("reconcile", () => {
   });
 
   it("reports orphan cleanup count", () => {
-    const { workDir, worktreeDir, projectRoot } = setupTodosDir({});
+    const { workDir, worktreeDir, projectRoot } = setupWorkItemsDir({});
 
     const deps = makeDeps({
       getMergedTodoIds: () => [],
@@ -431,12 +431,12 @@ describe("reconcile", () => {
   // ── Stale worktree cleanup (zero commits, no open PR) ────────────
 
   it("cleans stale worktrees with zero commits and no open PR", () => {
-    const { workDir, worktreeDir, projectRoot } = setupTodosDir();
+    const { workDir, worktreeDir, projectRoot } = setupWorkItemsDir();
     const cleaned: string[] = [];
 
     const deps = makeDeps({
       getMergedTodoIds: () => [],
-      // M-CI-1 has a matching todo file, worktree exists, but zero commits
+      // M-CI-1 has a matching work item file, worktree exists, but zero commits
       getWorktreeIds: () => ["M-CI-1"],
       worktreeHasCommits: () => false,
       branchHasOpenPR: () => false,
@@ -453,7 +453,7 @@ describe("reconcile", () => {
   });
 
   it("preserves worktrees with commits beyond main", () => {
-    const { workDir, worktreeDir, projectRoot } = setupTodosDir();
+    const { workDir, worktreeDir, projectRoot } = setupWorkItemsDir();
     const cleaned: string[] = [];
 
     const deps = makeDeps({
@@ -472,7 +472,7 @@ describe("reconcile", () => {
   });
 
   it("preserves worktrees with zero commits but an open PR", () => {
-    const { workDir, worktreeDir, projectRoot } = setupTodosDir();
+    const { workDir, worktreeDir, projectRoot } = setupWorkItemsDir();
     const cleaned: string[] = [];
 
     const deps = makeDeps({
@@ -491,7 +491,7 @@ describe("reconcile", () => {
   });
 
   it("reports stale worktree cleanup count", () => {
-    const { workDir, worktreeDir, projectRoot } = setupTodosDir();
+    const { workDir, worktreeDir, projectRoot } = setupWorkItemsDir();
 
     const deps = makeDeps({
       getMergedTodoIds: () => [],
@@ -505,9 +505,9 @@ describe("reconcile", () => {
     expect(output).toContain("2 stale worktree(s) with zero commits");
   });
 
-  it("stale cleanup only checks worktrees with matching todo files", () => {
-    // Worktrees without matching todo files are handled by orphan cleanup
-    const { workDir, worktreeDir, projectRoot } = setupTodosDir();
+  it("stale cleanup only checks worktrees with matching work item files", () => {
+    // Worktrees without matching work item files are handled by orphan cleanup
+    const { workDir, worktreeDir, projectRoot } = setupWorkItemsDir();
     const commitCheckedIds: string[] = [];
 
     const deps = makeDeps({
@@ -522,14 +522,14 @@ describe("reconcile", () => {
     });
 
     captureOutput(() => reconcile(workDir, worktreeDir, projectRoot, deps));
-    // Only M-CI-1 (which has a todo file) should be checked for commits
+    // Only M-CI-1 (which has a work item file) should be checked for commits
     // X-ORPHAN-1 is handled by orphan cleanup, not stale cleanup
     expect(commitCheckedIds).toContain("M-CI-1");
     expect(commitCheckedIds).not.toContain("X-ORPHAN-1");
   });
 
   it("does not double-clean merged items in stale step", () => {
-    const { workDir, worktreeDir, projectRoot } = setupTodosDir();
+    const { workDir, worktreeDir, projectRoot } = setupWorkItemsDir();
     let cleanCount = 0;
 
     const deps = makeDeps({
@@ -552,8 +552,8 @@ describe("reconcile", () => {
 // --- Cross-repo reconcile tests ---
 
 describe("reconcile cross-repo", () => {
-  it("passes worktreeDir to getMergedTodoIds", () => {
-    const { workDir, worktreeDir, projectRoot } = setupTodosDir();
+  it("passes worktreeDir to getMergedItemIds", () => {
+    const { workDir, worktreeDir, projectRoot } = setupWorkItemsDir();
     let receivedWorktreeDir: string | undefined;
 
     const deps = makeDeps({
@@ -568,12 +568,12 @@ describe("reconcile cross-repo", () => {
   });
 
   it("cleans cross-repo worktrees for merged items", () => {
-    const { workDir, worktreeDir, projectRoot } = setupTodosDir();
+    const { workDir, worktreeDir, projectRoot } = setupWorkItemsDir();
     const cleaned: Array<{ id: string; wtDir: string; root: string }> = [];
 
     // Write a cross-repo index entry
     const indexPath = join(worktreeDir, ".cross-repo-index");
-    writeFileSync(indexPath, "M-CI-1\t/target-repo\t/target-repo/.worktrees/todo-M-CI-1\n");
+    writeFileSync(indexPath, "M-CI-1\t/target-repo\t/target-repo/.worktrees/ninthwave-M-CI-1\n");
 
     const deps = makeDeps({
       getMergedTodoIds: () => [mergedPr("M-CI-1")],
@@ -593,13 +593,13 @@ describe("reconcile cross-repo", () => {
   });
 
   it("uses target repo root for cross-repo stale worktree checks", () => {
-    const { workDir, worktreeDir, projectRoot } = setupTodosDir();
+    const { workDir, worktreeDir, projectRoot } = setupWorkItemsDir();
     const commitChecks: Array<{ id: string; root: string }> = [];
     const prChecks: Array<{ id: string; root: string }> = [];
 
-    // Cross-repo index with an item that has a matching todo file
+    // Cross-repo index with an item that has a matching work item file
     const indexPath = join(worktreeDir, ".cross-repo-index");
-    writeFileSync(indexPath, "M-CI-1\t/target-repo\t/target-repo/.worktrees/todo-M-CI-1\n");
+    writeFileSync(indexPath, "M-CI-1\t/target-repo\t/target-repo/.worktrees/ninthwave-M-CI-1\n");
 
     const deps = makeDeps({
       getMergedTodoIds: () => [],
@@ -642,7 +642,7 @@ function mockMux(overrides: Partial<Multiplexer> = {}): Multiplexer {
 }
 
 describe("closeWorkspacesForIds", () => {
-  it("closes workspaces matching done TODO IDs", () => {
+  it("closes workspaces matching done item IDs", () => {
     const closedRefs: string[] = [];
     const mux = mockMux({
       listWorkspaces: () => [
@@ -664,7 +664,7 @@ describe("closeWorkspacesForIds", () => {
     expect(closedRefs).not.toContain("workspace:3");
   });
 
-  it("correctly extracts TODO ID from workspace name", () => {
+  it("correctly extracts item ID from workspace name", () => {
     const closedRefs: string[] = [];
     const mux = mockMux({
       listWorkspaces: () => [
@@ -736,7 +736,7 @@ describe("closeWorkspacesForIds", () => {
 
   // ── nw-prefixed session name format (L-WRK-10) ─────────────────────
 
-  it("closes nw-prefixed sessions whose name contains the TODO ID", () => {
+  it("closes nw-prefixed sessions whose name contains the item ID", () => {
     const closedRefs: string[] = [];
     const mux = mockMux({
       listWorkspaces: () => [
@@ -772,7 +772,7 @@ describe("closeWorkspacesForIds", () => {
     // H-WRK-1 is a substring of H-WRK-10 — this is a known limitation
     // since nw-prefixed session names don't have delimiters around the ID.
     // The includes() check will match, which is acceptable since
-    // in practice TODO IDs are unique enough to avoid collisions.
+    // in practice item IDs are unique enough to avoid collisions.
     expect(count).toBe(1);
   });
 

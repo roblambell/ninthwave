@@ -37,18 +37,18 @@ import { shouldEnterInteractive } from "../core/interactive.ts";
 
 // ── Helpers ──────────────────────────────────────────────────────────
 
-function makeTodo(id: string, deps: string[] = []): WorkItem {
+function makeWorkItem(id: string, deps: string[] = []): WorkItem {
   return {
     id,
     priority: "high",
-    title: `TODO ${id}`,
+    title: `Item ${id}`,
     domain: "test",
     dependencies: deps,
     bundleWith: [],
     status: "open",
     filePath: "",
     repoAlias: "",
-    rawText: `## ${id}\nTest todo`,
+    rawText: `## ${id}\nTest item`,
     filePaths: [],
   };
 }
@@ -56,7 +56,7 @@ function makeTodo(id: string, deps: string[] = []): WorkItem {
 function mockActionDeps(overrides?: Partial<OrchestratorDeps>): OrchestratorDeps {
   return {
     launchSingleItem: vi.fn(() => ({
-      worktreePath: "/tmp/test/todo-test",
+      worktreePath: "/tmp/test/item-test",
       workspaceRef: "workspace:1",
     })),
     cleanSingleWorktree: vi.fn(() => true),
@@ -82,7 +82,7 @@ const defaultCtx: ExecutionContext = {
 describe("orchestrateLoop", () => {
   it("processes items through full lifecycle (single item, asap strategy)", async () => {
     const orch = new Orchestrator({ reviewEnabled: false, wipLimit: 2, mergeStrategy: "asap" });
-    orch.addItem(makeTodo("T-1-1"));
+    orch.addItem(makeWorkItem("T-1-1"));
 
     let cycle = 0;
     const logs: LogEntry[] = [];
@@ -141,8 +141,8 @@ describe("orchestrateLoop", () => {
 
   it("processes dependency chain across batches", async () => {
     const orch = new Orchestrator({ reviewEnabled: false, wipLimit: 1, mergeStrategy: "asap" });
-    orch.addItem(makeTodo("A-1-1"));
-    orch.addItem(makeTodo("A-1-2", ["A-1-1"]));
+    orch.addItem(makeWorkItem("A-1-1"));
+    orch.addItem(makeWorkItem("A-1-2", ["A-1-1"]));
 
     let cycle = 0;
     const logs: LogEntry[] = [];
@@ -213,8 +213,8 @@ describe("orchestrateLoop", () => {
 
   it("respects WIP limit during batch processing", async () => {
     const orch = new Orchestrator({ reviewEnabled: false, wipLimit: 1, mergeStrategy: "asap" });
-    orch.addItem(makeTodo("W-1-1"));
-    orch.addItem(makeTodo("W-1-2"));
+    orch.addItem(makeWorkItem("W-1-1"));
+    orch.addItem(makeWorkItem("W-1-2"));
 
     let cycle = 0;
     const launchedItems: string[] = [];
@@ -272,8 +272,8 @@ describe("orchestrateLoop", () => {
 
   it("includes items with prUrl in orchestrate_complete when repoUrl is configured", async () => {
     const orch = new Orchestrator({ reviewEnabled: false, wipLimit: 2, mergeStrategy: "asap" });
-    orch.addItem(makeTodo("U-1-1"));
-    orch.addItem(makeTodo("U-1-2"));
+    orch.addItem(makeWorkItem("U-1-1"));
+    orch.addItem(makeWorkItem("U-1-2"));
 
     let cycle = 0;
     const logs: LogEntry[] = [];
@@ -340,8 +340,8 @@ describe("orchestrateLoop", () => {
 
   it("handles stuck items and completes remaining", async () => {
     const orch = new Orchestrator({ reviewEnabled: false, wipLimit: 2, mergeStrategy: "asap" });
-    orch.addItem(makeTodo("S-1-1"));
-    orch.addItem(makeTodo("S-1-2"));
+    orch.addItem(makeWorkItem("S-1-1"));
+    orch.addItem(makeWorkItem("S-1-2"));
 
     let cycle = 0;
 
@@ -398,8 +398,8 @@ describe("orchestrateLoop", () => {
 
   it("runs worktree cleanup sweep for all managed items before orchestrate_complete", async () => {
     const orch = new Orchestrator({ reviewEnabled: false, wipLimit: 2, mergeStrategy: "asap" });
-    orch.addItem(makeTodo("CL-1-1"));
-    orch.addItem(makeTodo("CL-1-2"));
+    orch.addItem(makeWorkItem("CL-1-1"));
+    orch.addItem(makeWorkItem("CL-1-2"));
 
     let cycle = 0;
     const logs: LogEntry[] = [];
@@ -467,7 +467,7 @@ describe("orchestrateLoop", () => {
 
   it("cleanup sweep is no-op when no stale worktrees exist", async () => {
     const orch = new Orchestrator({ reviewEnabled: false, wipLimit: 2, mergeStrategy: "asap" });
-    orch.addItem(makeTodo("CN-1-1"));
+    orch.addItem(makeWorkItem("CN-1-1"));
 
     let cycle = 0;
     const logs: LogEntry[] = [];
@@ -502,8 +502,8 @@ describe("orchestrateLoop", () => {
 
   it("cleanup sweep handles errors gracefully without blocking exit", async () => {
     const orch = new Orchestrator({ reviewEnabled: false, wipLimit: 2, mergeStrategy: "asap" });
-    orch.addItem(makeTodo("CE-1-1"));
-    orch.addItem(makeTodo("CE-1-2"));
+    orch.addItem(makeWorkItem("CE-1-1"));
+    orch.addItem(makeWorkItem("CE-1-2"));
 
     let cycle = 0;
     const logs: LogEntry[] = [];
@@ -561,8 +561,8 @@ describe("orchestrateLoop", () => {
 
   it("final cleanup sweep closes workspaces for terminal items before worktree cleanup", async () => {
     const orch = new Orchestrator({ reviewEnabled: false, wipLimit: 2, mergeStrategy: "asap" });
-    orch.addItem(makeTodo("WC-1-1"));
-    orch.addItem(makeTodo("WC-1-2"));
+    orch.addItem(makeWorkItem("WC-1-1"));
+    orch.addItem(makeWorkItem("WC-1-2"));
 
     let cycle = 0;
     const logs: LogEntry[] = [];
@@ -646,7 +646,7 @@ describe("orchestrateLoop", () => {
 
   it("final cleanup sweep skips closeWorkspace for items without workspaceRef", async () => {
     const orch = new Orchestrator({ reviewEnabled: false, wipLimit: 2, mergeStrategy: "asap" });
-    orch.addItem(makeTodo("WN-1-1"));
+    orch.addItem(makeWorkItem("WN-1-1"));
 
     let cycle = 0;
     const logs: LogEntry[] = [];
@@ -665,7 +665,7 @@ describe("orchestrateLoop", () => {
       closeWorkspace,
       // Launch doesn't set workspaceRef (simulates case where it wasn't set)
       launchSingleItem: vi.fn(() => ({
-        worktreePath: "/tmp/test/todo-test",
+        worktreePath: "/tmp/test/item-test",
         workspaceRef: null,
       })),
       cleanSingleWorktree: vi.fn(() => true),
@@ -693,8 +693,8 @@ describe("orchestrateLoop", () => {
 
   it("shutdown closes workspaces only for terminal items, not in-flight", async () => {
     const orch = new Orchestrator({ reviewEnabled: false, wipLimit: 2, mergeStrategy: "asap" });
-    orch.addItem(makeTodo("SD-1-1"));
-    orch.addItem(makeTodo("SD-1-2"));
+    orch.addItem(makeWorkItem("SD-1-1"));
+    orch.addItem(makeWorkItem("SD-1-2"));
 
     const abortController = new AbortController();
     const logs: LogEntry[] = [];
@@ -762,7 +762,7 @@ describe("orchestrateLoop", () => {
 
   it("stops on SIGINT and emits shutdown log", async () => {
     const orch = new Orchestrator({ reviewEnabled: false, wipLimit: 2, mergeStrategy: "asap" });
-    orch.addItem(makeTodo("I-1-1"));
+    orch.addItem(makeWorkItem("I-1-1"));
 
     const abortController = new AbortController();
     const logs: LogEntry[] = [];
@@ -787,9 +787,9 @@ describe("orchestrateLoop", () => {
     expect(logs.some((l) => l.event === "orchestrate_complete")).toBe(false);
   });
 
-  it("transitions to done without mark-done action (workers remove their own TODO)", async () => {
+  it("transitions to done without mark-done action (workers remove their own work item)", async () => {
     const orch = new Orchestrator({ reviewEnabled: false, wipLimit: 2, mergeStrategy: "asap" });
-    orch.addItem(makeTodo("D-1-1"));
+    orch.addItem(makeWorkItem("D-1-1"));
 
     let cycle = 0;
     const logs: LogEntry[] = [];
@@ -826,7 +826,7 @@ describe("orchestrateLoop", () => {
     // Item reaches done
     expect(orch.getItem("D-1-1")!.state).toBe("done");
 
-    // No mark-done action — workers remove their own TODO in their PR branch
+    // No mark-done action — workers remove their own work item file in their PR branch
     expect(
       logs.every((l) => !(l.event === "action_execute" && l.action === "mark-done")),
     ).toBe(true);
@@ -834,7 +834,7 @@ describe("orchestrateLoop", () => {
 
   it("emits structured log with state_summary on each cycle", async () => {
     const orch = new Orchestrator({ reviewEnabled: false, wipLimit: 2, mergeStrategy: "asap" });
-    orch.addItem(makeTodo("L-1-1"));
+    orch.addItem(makeWorkItem("L-1-1"));
 
     let cycle = 0;
     const logs: LogEntry[] = [];
@@ -869,7 +869,7 @@ describe("orchestrateLoop", () => {
 describe("adaptivePollInterval", () => {
   it("returns flat 2s regardless of item states", () => {
     const orch = new Orchestrator({ reviewEnabled: false });
-    orch.addItem(makeTodo("A-1-1"));
+    orch.addItem(makeWorkItem("A-1-1"));
     orch.setState("A-1-1", "ready");
     expect(adaptivePollInterval(orch)).toBe(2_000);
 
@@ -887,7 +887,7 @@ describe("adaptivePollInterval", () => {
 describe("reconstructState", () => {
   it("is a no-op when no worktrees exist", () => {
     const orch = new Orchestrator({ reviewEnabled: false });
-    orch.addItem(makeTodo("R-1-1"));
+    orch.addItem(makeWorkItem("R-1-1"));
 
     // Non-existent worktree dir — items stay queued
     reconstructState(orch, "/nonexistent", "/nonexistent/.worktrees");
@@ -897,7 +897,7 @@ describe("reconstructState", () => {
 
   it("recovers workspaceRef from live cmux workspaces during reconstruction", () => {
     const orch = new Orchestrator({ reviewEnabled: false });
-    orch.addItem(makeTodo("H-DF-1"));
+    orch.addItem(makeWorkItem("H-DF-1"));
 
     // Create a temp worktree dir to simulate existing worktree
     const tmpDir = join(require("os").tmpdir(), `nw-reconstruct-test-${Date.now()}`);
@@ -915,7 +915,7 @@ describe("reconstructState", () => {
       sendMessage: () => true,
       readScreen: () => "",
       listWorkspaces: () =>
-        "  workspace:29  ✳ TODO H-DF-1: Workers remove their own TODO item",
+        "  workspace:29  ✳ H-DF-1: Workers remove their own work item",
       closeWorkspace: () => true,
     };
 
@@ -933,7 +933,7 @@ describe("reconstructState", () => {
 
   it("leaves workspaceRef undefined when no matching workspace found", () => {
     const orch = new Orchestrator({ reviewEnabled: false });
-    orch.addItem(makeTodo("H-DF-2"));
+    orch.addItem(makeWorkItem("H-DF-2"));
 
     const tmpDir = join(require("os").tmpdir(), `nw-reconstruct-test2-${Date.now()}`);
     const wtDir = join(tmpDir, ".worktrees");
@@ -965,7 +965,7 @@ describe("reconstructState", () => {
 
   it("restores ciFailCount from daemon state file", () => {
     const orch = new Orchestrator({ reviewEnabled: false });
-    orch.addItem(makeTodo("REC-1"));
+    orch.addItem(makeWorkItem("REC-1"));
 
     const tmpDir = join(require("os").tmpdir(), `nw-reconstruct-cifc-${Date.now()}`);
     const wtDir = join(tmpDir, ".worktrees");
@@ -1001,7 +1001,7 @@ describe("reconstructState", () => {
 
   it("defaults ciFailCount to 0 when no daemon state is available", () => {
     const orch = new Orchestrator({ reviewEnabled: false });
-    orch.addItem(makeTodo("REC-2"));
+    orch.addItem(makeWorkItem("REC-2"));
 
     const tmpDir = join(require("os").tmpdir(), `nw-reconstruct-nostate-${Date.now()}`);
     const wtDir = join(tmpDir, ".worktrees");
@@ -1022,7 +1022,7 @@ describe("reconstructState", () => {
 
   it("defaults ciFailCount to 0 when daemon state is null", () => {
     const orch = new Orchestrator({ reviewEnabled: false });
-    orch.addItem(makeTodo("REC-3"));
+    orch.addItem(makeWorkItem("REC-3"));
 
     // No worktree dir needed — items without worktrees are skipped
     reconstructState(orch, "/nonexistent", "/nonexistent/.worktrees", undefined, () => null, null);
@@ -1035,7 +1035,7 @@ describe("reconstructState", () => {
   it("item with ciFailCount exceeding maxCiRetries goes stuck after recovery", () => {
     // maxCiRetries defaults to 2; set ciFailCount to 3 so it exceeds the threshold
     const orch = new Orchestrator({ reviewEnabled: false });
-    orch.addItem(makeTodo("REC-4"));
+    orch.addItem(makeWorkItem("REC-4"));
 
     const tmpDir = join(require("os").tmpdir(), `nw-reconstruct-stuck-${Date.now()}`);
     const wtDir = join(tmpDir, ".worktrees");
@@ -1092,7 +1092,7 @@ describe("reconstructState", () => {
 
   it("detects existing open PR with pending CI and sets ci-pending (not ready) (H-WR-1)", () => {
     const orch = new Orchestrator({ reviewEnabled: false });
-    orch.addItem(makeTodo("WR-1"));
+    orch.addItem(makeWorkItem("WR-1"));
 
     const tmpDir = join(require("os").tmpdir(), `nw-reconstruct-wr1-${Date.now()}`);
     const wtDir = join(tmpDir, ".worktrees");
@@ -1113,7 +1113,7 @@ describe("reconstructState", () => {
 
   it("detects existing open PR with failing CI and sets ci-failed (H-WR-1)", () => {
     const orch = new Orchestrator({ reviewEnabled: false });
-    orch.addItem(makeTodo("WR-2"));
+    orch.addItem(makeWorkItem("WR-2"));
 
     const tmpDir = join(require("os").tmpdir(), `nw-reconstruct-wr2-${Date.now()}`);
     const wtDir = join(tmpDir, ".worktrees");
@@ -1133,7 +1133,7 @@ describe("reconstructState", () => {
 
   it("detects existing open PR with passing CI and sets ci-passed (H-WR-1)", () => {
     const orch = new Orchestrator({ reviewEnabled: false });
-    orch.addItem(makeTodo("WR-3"));
+    orch.addItem(makeWorkItem("WR-3"));
 
     const tmpDir = join(require("os").tmpdir(), `nw-reconstruct-wr3-${Date.now()}`);
     const wtDir = join(tmpDir, ".worktrees");
@@ -1155,7 +1155,7 @@ describe("reconstructState", () => {
 describe("reconstructState review fields", () => {
   it("restores reviewWorkspaceRef and reviewCompleted from daemon state", () => {
     const orch = new Orchestrator({ reviewEnabled: true });
-    orch.addItem(makeTodo("RVW-1"));
+    orch.addItem(makeWorkItem("RVW-1"));
 
     const tmpDir = join(require("os").tmpdir(), `nw-reconstruct-rvw-${Date.now()}`);
     const wtDir = join(tmpDir, ".worktrees");
@@ -1194,7 +1194,7 @@ describe("reconstructState review fields", () => {
 
   it("restores reviewCompleted: true from daemon state", () => {
     const orch = new Orchestrator({ reviewEnabled: true });
-    orch.addItem(makeTodo("RVW-2"));
+    orch.addItem(makeWorkItem("RVW-2"));
 
     const tmpDir = join(require("os").tmpdir(), `nw-reconstruct-rvwt-${Date.now()}`);
     const wtDir = join(tmpDir, ".worktrees");
@@ -1232,9 +1232,9 @@ describe("reconstructState review fields", () => {
 describe("reconstructState cross-repo", () => {
   it("uses cross-repo index to find worktree paths", () => {
     const orch = new Orchestrator({ reviewEnabled: false });
-    const todo = makeTodo("XR-1-1");
-    todo.repoAlias = "target";
-    orch.addItem(todo);
+    const item = makeWorkItem("XR-1-1");
+    item.repoAlias = "target";
+    orch.addItem(item);
 
     const tmpDir = join(require("os").tmpdir(), `nw-xr-reconstruct-${Date.now()}`);
     const wtDir = join(tmpDir, ".worktrees");
@@ -1257,8 +1257,8 @@ describe("reconstructState cross-repo", () => {
 
   it("uses resolvedRepoRoot for PR query when cross-repo", () => {
     const orch = new Orchestrator({ reviewEnabled: false });
-    const todo = makeTodo("XR-2-1");
-    orch.addItem(todo);
+    const item = makeWorkItem("XR-2-1");
+    orch.addItem(item);
     orch.getItem("XR-2-1")!.resolvedRepoRoot = "/target-repo";
 
     const tmpDir = join(require("os").tmpdir(), `nw-xr-reconstruct2-${Date.now()}`);
@@ -1285,7 +1285,7 @@ describe("reconstructState cross-repo", () => {
 describe("buildSnapshot cross-repo", () => {
   it("uses resolvedRepoRoot for PR checks", () => {
     const orch = new Orchestrator({ reviewEnabled: false });
-    orch.addItem(makeTodo("BS-1-1"));
+    orch.addItem(makeWorkItem("BS-1-1"));
     orch.setState("BS-1-1", "implementing");
     orch.getItem("BS-1-1")!.resolvedRepoRoot = "/target-repo";
 
@@ -1313,7 +1313,7 @@ describe("buildSnapshot cross-repo", () => {
 
   it("uses resolvedRepoRoot for commit time checks", () => {
     const orch = new Orchestrator({ reviewEnabled: false });
-    orch.addItem(makeTodo("BS-2-1"));
+    orch.addItem(makeWorkItem("BS-2-1"));
     orch.setState("BS-2-1", "implementing");
     orch.getItem("BS-2-1")!.resolvedRepoRoot = "/target-repo";
 
@@ -1345,7 +1345,7 @@ describe("serializeOrchestratorState includes ciFailCount", () => {
     const { serializeOrchestratorState } = require("../core/daemon.ts");
     const item: OrchestratorItem = {
       id: "SER-1",
-      workItem: makeTodo("SER-1"),
+      workItem: makeWorkItem("SER-1"),
       state: "ci-failed",
       prNumber: 10,
       lastTransition: "2026-01-01T00:00:00Z",
@@ -1365,7 +1365,7 @@ describe("serializeOrchestratorState includes rebaseRequested", () => {
     const { serializeOrchestratorState } = require("../core/daemon.ts");
     const item: OrchestratorItem = {
       id: "REB-1",
-      workItem: makeTodo("REB-1"),
+      workItem: makeWorkItem("REB-1"),
       state: "ci-pending",
       prNumber: 20,
       lastTransition: "2026-01-01T00:00:00Z",
@@ -1383,7 +1383,7 @@ describe("serializeOrchestratorState includes rebaseRequested", () => {
     const { serializeOrchestratorState } = require("../core/daemon.ts");
     const item: OrchestratorItem = {
       id: "REB-2",
-      workItem: makeTodo("REB-2"),
+      workItem: makeWorkItem("REB-2"),
       state: "ci-pending",
       prNumber: 21,
       lastTransition: "2026-01-01T00:00:00Z",
@@ -1497,7 +1497,7 @@ describe("buildSnapshot lastCommitTime", () => {
 
   it("includes lastCommitTime for implementing items", () => {
     const orch = new Orchestrator({ reviewEnabled: false, wipLimit: 2, mergeStrategy: "asap" });
-    orch.addItem(makeTodo("HC-1-1"));
+    orch.addItem(makeWorkItem("HC-1-1"));
     orch.setState("HC-1-1", "implementing");
     // Set workspace ref so worker appears alive
     const item = orch.getItem("HC-1-1")!;
@@ -1523,7 +1523,7 @@ describe("buildSnapshot lastCommitTime", () => {
 
   it("lastCommitTime is null when worktree has no commits beyond base", () => {
     const orch = new Orchestrator({ reviewEnabled: false, wipLimit: 2, mergeStrategy: "asap" });
-    orch.addItem(makeTodo("HC-2-1"));
+    orch.addItem(makeWorkItem("HC-2-1"));
     orch.setState("HC-2-1", "implementing");
     const item = orch.getItem("HC-2-1")!;
     item.workspaceRef = "workspace:2";
@@ -1543,7 +1543,7 @@ describe("buildSnapshot lastCommitTime", () => {
 
   it("includes lastCommitTime for launching items (branch may not exist yet)", () => {
     const orch = new Orchestrator({ reviewEnabled: false, wipLimit: 2, mergeStrategy: "asap" });
-    orch.addItem(makeTodo("HC-3-1"));
+    orch.addItem(makeWorkItem("HC-3-1"));
     orch.setState("HC-3-1", "launching");
     const item = orch.getItem("HC-3-1")!;
     item.workspaceRef = "workspace:3";
@@ -1561,7 +1561,7 @@ describe("buildSnapshot lastCommitTime", () => {
 
   it("does not query lastCommitTime for non-active states", () => {
     const orch = new Orchestrator({ reviewEnabled: false, wipLimit: 2, mergeStrategy: "asap" });
-    orch.addItem(makeTodo("HC-4-1"));
+    orch.addItem(makeWorkItem("HC-4-1"));
     orch.setState("HC-4-1", "ci-pending");
 
     const getLastCommitTime = vi.fn(() => "2026-03-24T12:00:00+00:00");
@@ -1593,7 +1593,7 @@ describe("buildSnapshot isMergeable", () => {
 
   it("sets isMergeable=true when checkPr returns MERGEABLE in 4th field", () => {
     const orch = new Orchestrator({ reviewEnabled: false, wipLimit: 2 });
-    orch.addItem(makeTodo("M-1-1"));
+    orch.addItem(makeWorkItem("M-1-1"));
     orch.setState("M-1-1", "ci-pending");
 
     // Simulate checkPr returning: ID\tPR\tSTATUS\tMERGEABLE
@@ -1611,7 +1611,7 @@ describe("buildSnapshot isMergeable", () => {
 
   it("sets isMergeable=false when checkPr returns CONFLICTING in 4th field", () => {
     const orch = new Orchestrator({ reviewEnabled: false, wipLimit: 2 });
-    orch.addItem(makeTodo("M-2-1"));
+    orch.addItem(makeWorkItem("M-2-1"));
     orch.setState("M-2-1", "ci-pending");
 
     const checkPr = () => "M-2-1\t10\tfailing\tCONFLICTING";
@@ -1628,7 +1628,7 @@ describe("buildSnapshot isMergeable", () => {
 
   it("does not set isMergeable when 4th field is UNKNOWN", () => {
     const orch = new Orchestrator({ reviewEnabled: false, wipLimit: 2 });
-    orch.addItem(makeTodo("M-3-1"));
+    orch.addItem(makeWorkItem("M-3-1"));
     orch.setState("M-3-1", "ci-pending");
 
     const checkPr = () => "M-3-1\t10\tpending\tUNKNOWN";
@@ -1644,7 +1644,7 @@ describe("buildSnapshot isMergeable", () => {
 
   it("does not set isMergeable when checkPr returns 3-field format (backward compat)", () => {
     const orch = new Orchestrator({ reviewEnabled: false, wipLimit: 2 });
-    orch.addItem(makeTodo("M-4-1"));
+    orch.addItem(makeWorkItem("M-4-1"));
     orch.setState("M-4-1", "ci-pending");
 
     // Old 3-field format without mergeable
@@ -1679,7 +1679,7 @@ describe("buildSnapshot ready status mapping", () => {
 
   it("sets ciStatus pass, reviewDecision APPROVED, and isMergeable true when checkPr returns ready", () => {
     const orch = new Orchestrator({ reviewEnabled: false, wipLimit: 2 });
-    orch.addItem(makeTodo("R-1-1"));
+    orch.addItem(makeWorkItem("R-1-1"));
     orch.setState("R-1-1", "ci-pending");
 
     // checkPr returns "ready" status with MERGEABLE 4th field
@@ -1716,11 +1716,11 @@ describe("buildSnapshot merge detection", () => {
     };
   }
 
-  it("ignores stale merged PR when prNumber is unset and title differs from TODO", () => {
+  it("ignores stale merged PR when prNumber is unset and title differs from item", () => {
     const orch = new Orchestrator({ reviewEnabled: false, wipLimit: 2 });
-    const todo = makeTodo("MRG-1-1");
-    todo.title = "Fix the daemon polling loop";
-    orch.addItem(todo);
+    const item = makeWorkItem("MRG-1-1");
+    item.title = "Fix the daemon polling loop";
+    orch.addItem(item);
     orch.setState("MRG-1-1", "implementing");
     // prNumber is never set — either stale PR or auto-merged before daemon saw it
     expect(orch.getItem("MRG-1-1")!.prNumber).toBeUndefined();
@@ -1743,9 +1743,9 @@ describe("buildSnapshot merge detection", () => {
 describe("reconstructState merge detection", () => {
   it("rejects title-mismatched merged PR from previous cycle (no prNumber tracked)", () => {
     const orch = new Orchestrator({ reviewEnabled: false });
-    const todo = makeTodo("MRG-2-1");
-    todo.title = "New implementation for feature X";
-    orch.addItem(todo);
+    const item = makeWorkItem("MRG-2-1");
+    item.title = "New implementation for feature X";
+    orch.addItem(item);
 
     // Create a temp worktree so reconstructState processes this item
     const tmpDir = join(require("os").tmpdir(), `nw-mrg-test-${Date.now()}`);
@@ -1765,9 +1765,9 @@ describe("reconstructState merge detection", () => {
 
   it("accepts title-mismatched merged PR when prNumber was already tracked", () => {
     const orch = new Orchestrator({ reviewEnabled: false });
-    const todo = makeTodo("MRG-3-1");
-    todo.title = "Improve error handling";
-    orch.addItem(todo);
+    const item = makeWorkItem("MRG-3-1");
+    item.title = "Improve error handling";
+    orch.addItem(item);
     // Simulate daemon state having previously tracked this PR number
     orch.getItem("MRG-3-1")!.prNumber = 77;
 
@@ -1877,7 +1877,7 @@ describe("setupKeyboardShortcuts", () => {
 describe("onPollComplete callback", () => {
   it("is called each poll cycle with current items", async () => {
     const orch = new Orchestrator({ reviewEnabled: false, wipLimit: 2, mergeStrategy: "asap" });
-    orch.addItem(makeTodo("T-1-1"));
+    orch.addItem(makeWorkItem("T-1-1"));
 
     let cycle = 0;
     const pollCompleteCalls: any[] = [];
@@ -1911,7 +1911,7 @@ describe("onPollComplete callback", () => {
 
   it("loop works fine without onPollComplete (undefined)", async () => {
     const orch = new Orchestrator({ reviewEnabled: false, wipLimit: 2, mergeStrategy: "asap" });
-    orch.addItem(makeTodo("T-1-1"));
+    orch.addItem(makeWorkItem("T-1-1"));
 
     let cycle = 0;
 
@@ -1979,9 +1979,9 @@ describe("forkDaemon", () => {
 describe("orchestrateLoop post-merge conflict detection", () => {
   it("checks sibling PRs for conflicts after a merge and sends rebase to conflicting ones", async () => {
     const orch = new Orchestrator({ reviewEnabled: false, wipLimit: 3, mergeStrategy: "asap" });
-    orch.addItem(makeTodo("T-1-1"));
-    orch.addItem(makeTodo("T-1-2"));
-    orch.addItem(makeTodo("T-1-3"));
+    orch.addItem(makeWorkItem("T-1-1"));
+    orch.addItem(makeWorkItem("T-1-2"));
+    orch.addItem(makeWorkItem("T-1-3"));
 
     // T-1-1 is in ci-pending (about to pass CI and get merged by orchestrator)
     // T-1-2 and T-1-3 are also in-flight with PRs
@@ -2042,8 +2042,8 @@ describe("orchestrateLoop post-merge conflict detection", () => {
 
   it("does not check sibling PRs when checkPrMergeable is not provided", async () => {
     const orch = new Orchestrator({ reviewEnabled: false, wipLimit: 3, mergeStrategy: "asap" });
-    orch.addItem(makeTodo("T-1-1"));
-    orch.addItem(makeTodo("T-1-2"));
+    orch.addItem(makeWorkItem("T-1-1"));
+    orch.addItem(makeWorkItem("T-1-2"));
 
     // T-1-1 about to pass CI and get merged; T-1-2 also in-flight
     orch.setState("T-1-1", "ci-pending");
@@ -2114,7 +2114,7 @@ describe("isWorkerAlive", () => {
   function makeItem(id: string, workspaceRef?: string): OrchestratorItem {
     return {
       id,
-      workItem: makeTodo(id),
+      workItem: makeWorkItem(id),
       state: "implementing",
       workspaceRef,
       lastTransition: new Date().toISOString(),
@@ -2124,32 +2124,32 @@ describe("isWorkerAlive", () => {
   }
 
   it("returns true for an exact workspace ref match", () => {
-    const mux = mockMux("  workspace:1  ✳ TODO T-1-1: some task");
+    const mux = mockMux("  workspace:1  ✳ T-1-1: some task");
     const item = makeItem("T-1-1", "workspace:1");
     expect(isWorkerAlive(item, mux)).toBe(true);
   });
 
   it("returns true when matching by item ID", () => {
-    const mux = mockMux("  workspace:5  ✳ TODO T-2-1: another task");
+    const mux = mockMux("  workspace:5  ✳ T-2-1: another task");
     const item = makeItem("T-2-1", "workspace:5");
     expect(isWorkerAlive(item, mux)).toBe(true);
   });
 
   it("does not false-positive: workspace:1 must not match workspace:10", () => {
-    const mux = mockMux("  workspace:10  ✳ TODO T-3-1: unrelated task");
+    const mux = mockMux("  workspace:10  ✳ T-3-1: unrelated task");
     const item = makeItem("T-1-1", "workspace:1");
     expect(isWorkerAlive(item, mux)).toBe(false);
   });
 
   it("does not false-positive: item ID partial match across lines", () => {
     // T-1 should not match a line containing T-10
-    const mux = mockMux("  workspace:5  ✳ TODO T-10-1: unrelated task");
+    const mux = mockMux("  workspace:5  ✳ T-10-1: unrelated task");
     const item = makeItem("T-1", "workspace:99");
     expect(isWorkerAlive(item, mux)).toBe(false);
   });
 
   it("returns false when workspaceRef is undefined", () => {
-    const mux = mockMux("  workspace:1  ✳ TODO T-1-1: some task");
+    const mux = mockMux("  workspace:1  ✳ T-1-1: some task");
     const item = makeItem("T-1-1", undefined);
     expect(isWorkerAlive(item, mux)).toBe(false);
   });
@@ -2162,9 +2162,9 @@ describe("isWorkerAlive", () => {
 
   it("matches correctly in a multi-line listing", () => {
     const listing = [
-      "  workspace:10  ✳ TODO T-10-1: task ten",
-      "  workspace:1  ✳ TODO T-1-1: task one",
-      "  workspace:2  ✳ TODO T-2-1: task two",
+      "  workspace:10  ✳ T-10-1: task ten",
+      "  workspace:1  ✳ T-1-1: task one",
+      "  workspace:2  ✳ T-2-1: task two",
     ].join("\n");
     const mux = mockMux(listing);
 
@@ -2180,7 +2180,7 @@ describe("isWorkerAlive", () => {
 
   // ── nw-prefixed session name format (L-WRK-10) ─────────────────────
 
-  it("returns true when nw-prefixed session name contains the TODO ID", () => {
+  it("returns true when nw-prefixed session name contains the item ID", () => {
     const mux = mockMux("nw-H-WRK-1-1");
     const item = makeItem("H-WRK-1", "nw-H-WRK-1-1");
     expect(isWorkerAlive(item, mux)).toBe(true);
@@ -2192,7 +2192,7 @@ describe("isWorkerAlive", () => {
     expect(isWorkerAlive(item, mux)).toBe(true);
   });
 
-  it("matches session by TODO ID in session name", () => {
+  it("matches session by item ID in session name", () => {
     const mux = mockMux("nw-H-WRK-1-1\nnw-M-CI-2-2");
     const item = makeItem("H-WRK-1", "nw-H-WRK-1-1");
     expect(isWorkerAlive(item, mux)).toBe(true);
@@ -2229,7 +2229,7 @@ describe("cleanOrphanedWorktrees", () => {
       },
     });
 
-    const result = cleanOrphanedWorktrees("/todos", "/worktrees", "/root", deps);
+    const result = cleanOrphanedWorktrees("/items", "/worktrees", "/root", deps);
     expect(result).toEqual(["M-CI-1"]);
     expect(cleaned).toEqual(["M-CI-1"]);
   });
@@ -2245,7 +2245,7 @@ describe("cleanOrphanedWorktrees", () => {
       },
     });
 
-    const result = cleanOrphanedWorktrees("/todos", "/worktrees", "/root", deps);
+    const result = cleanOrphanedWorktrees("/items", "/worktrees", "/root", deps);
     expect(result).toEqual([]);
     expect(cleaned).toEqual([]);
   });
@@ -2256,7 +2256,7 @@ describe("cleanOrphanedWorktrees", () => {
       getOpenItemIds: () => ["M-CI-1"],
     });
 
-    const result = cleanOrphanedWorktrees("/todos", "/worktrees", "/root", deps);
+    const result = cleanOrphanedWorktrees("/items", "/worktrees", "/root", deps);
     expect(result).toEqual([]);
   });
 
@@ -2268,7 +2268,7 @@ describe("cleanOrphanedWorktrees", () => {
       log: (entry) => logs.push(entry),
     });
 
-    cleanOrphanedWorktrees("/todos", "/worktrees", "/root", deps);
+    cleanOrphanedWorktrees("/items", "/worktrees", "/root", deps);
     expect(logs).toHaveLength(1);
     expect(logs[0]!.event).toBe("orphaned_worktrees_cleaned");
     expect(logs[0]!.count).toBe(2);
@@ -2283,7 +2283,7 @@ describe("cleanOrphanedWorktrees", () => {
       log: (entry) => logs.push(entry),
     });
 
-    cleanOrphanedWorktrees("/todos", "/worktrees", "/root", deps);
+    cleanOrphanedWorktrees("/items", "/worktrees", "/root", deps);
     expect(logs).toHaveLength(0);
   });
 });
@@ -2291,7 +2291,7 @@ describe("cleanOrphanedWorktrees", () => {
 describe("executeClean readScreen diagnostics", () => {
   it("does not call readScreen for merged items", async () => {
     const orch = new Orchestrator({ reviewEnabled: false, wipLimit: 1, mergeStrategy: "asap" });
-    orch.addItem(makeTodo("MRG-1"));
+    orch.addItem(makeWorkItem("MRG-1"));
 
     let cycle = 0;
     const buildSnapshot = (): PollSnapshot => {
@@ -2335,7 +2335,7 @@ describe("executeClean readScreen diagnostics", () => {
   it("calls readScreen and warns for stuck items", async () => {
     // maxRetries: 0 so the first worker death goes straight to stuck
     const orch = new Orchestrator({ reviewEnabled: false, wipLimit: 1, mergeStrategy: "asap", maxRetries: 0 });
-    orch.addItem(makeTodo("STK-1"));
+    orch.addItem(makeWorkItem("STK-1"));
 
     let cycle = 0;
     const buildSnapshot = (o: Orchestrator): PollSnapshot => {
@@ -2388,7 +2388,7 @@ describe("executeClean readScreen diagnostics", () => {
     // event loop and macrotask-based timers (setTimeout/setInterval) — including
     // the SIGKILL safety guard — never fire.
     const orch = new Orchestrator({ reviewEnabled: false, wipLimit: 1, mergeStrategy: "asap" });
-    orch.addItem(makeTodo("SPIN-1"));
+    orch.addItem(makeWorkItem("SPIN-1"));
 
     let cycles = 0;
     const logs: LogEntry[] = [];
@@ -2445,7 +2445,7 @@ describe("executeClean readScreen diagnostics", () => {
 describe("orchestrateLoop watch mode", () => {
   it("does not exit when all items are terminal with --watch", async () => {
     const orch = new Orchestrator({ reviewEnabled: false, wipLimit: 2, mergeStrategy: "asap" });
-    orch.addItem(makeTodo("W-1-1"));
+    orch.addItem(makeWorkItem("W-1-1"));
 
     let cycle = 0;
     let scanCallCount = 0;
@@ -2489,9 +2489,9 @@ describe("orchestrateLoop watch mode", () => {
         scanCallCount++;
         // On first scan, return the new item
         if (scanCallCount >= 1) {
-          return [makeTodo("W-1-1"), makeTodo("W-1-2")];
+          return [makeWorkItem("W-1-1"), makeWorkItem("W-1-2")];
         }
-        return [makeTodo("W-1-1")];
+        return [makeWorkItem("W-1-1")];
       },
     };
 
@@ -2517,7 +2517,7 @@ describe("orchestrateLoop watch mode", () => {
 
   it("without --watch, daemon exits normally when all items are terminal", async () => {
     const orch = new Orchestrator({ reviewEnabled: false, wipLimit: 2, mergeStrategy: "asap" });
-    orch.addItem(makeTodo("N-1-1"));
+    orch.addItem(makeWorkItem("N-1-1"));
 
     let cycle = 0;
     const logs: LogEntry[] = [];
@@ -2562,7 +2562,7 @@ describe("orchestrateLoop watch mode", () => {
 
   it("uses custom watch interval from --watch-interval", async () => {
     const orch = new Orchestrator({ reviewEnabled: false, wipLimit: 2, mergeStrategy: "asap" });
-    orch.addItem(makeTodo("I-1-1"));
+    orch.addItem(makeWorkItem("I-1-1"));
 
     let cycle = 0;
     const sleepDurations: number[] = [];
@@ -2592,7 +2592,7 @@ describe("orchestrateLoop watch mode", () => {
       },
       log: () => {},
       actionDeps: mockActionDeps(),
-      scanWorkItems: () => [makeTodo("I-1-1")], // Only return existing item, no new ones
+      scanWorkItems: () => [makeWorkItem("I-1-1")], // Only return existing item, no new ones
     };
 
     // maxIterations will limit the watch loop too
@@ -2610,7 +2610,7 @@ describe("orchestrateLoop watch mode", () => {
 
   it("SIGINT cleanly exits watch mode", async () => {
     const orch = new Orchestrator({ reviewEnabled: false, wipLimit: 2, mergeStrategy: "asap" });
-    orch.addItem(makeTodo("S-1-1"));
+    orch.addItem(makeWorkItem("S-1-1"));
 
     let cycle = 0;
     const logs: LogEntry[] = [];
@@ -2650,7 +2650,7 @@ describe("orchestrateLoop watch mode", () => {
         }
       },
       actionDeps: mockActionDeps(),
-      scanWorkItems: () => [makeTodo("S-1-1")], // No new items
+      scanWorkItems: () => [makeWorkItem("S-1-1")], // No new items
     };
 
     await orchestrateLoop(
@@ -2671,7 +2671,7 @@ describe("orchestrateLoop watch mode", () => {
 
   it("watch mode respects WIP limits for newly discovered items", async () => {
     const orch = new Orchestrator({ reviewEnabled: false, wipLimit: 1, mergeStrategy: "asap" });
-    orch.addItem(makeTodo("L-1-1"));
+    orch.addItem(makeWorkItem("L-1-1"));
 
     let cycle = 0;
     const logs: LogEntry[] = [];
@@ -2724,7 +2724,7 @@ describe("orchestrateLoop watch mode", () => {
       scanWorkItems: () => {
         scanCount++;
         // Return 3 items — but WIP limit is 1, so they should be queued/serial
-        return [makeTodo("L-1-1"), makeTodo("L-1-2"), makeTodo("L-1-3")];
+        return [makeWorkItem("L-1-1"), makeWorkItem("L-1-2"), makeWorkItem("L-1-3")];
       },
     };
 
@@ -2742,7 +2742,7 @@ describe("orchestrateLoop watch mode", () => {
 
   it("watch mode default interval is 30 seconds", async () => {
     const orch = new Orchestrator({ reviewEnabled: false, wipLimit: 2, mergeStrategy: "asap" });
-    orch.addItem(makeTodo("D-1-1"));
+    orch.addItem(makeWorkItem("D-1-1"));
 
     let cycle = 0;
     const sleepDurations: number[] = [];
@@ -2772,7 +2772,7 @@ describe("orchestrateLoop watch mode", () => {
       },
       log: () => {},
       actionDeps: mockActionDeps(),
-      scanWorkItems: () => [makeTodo("D-1-1")], // No new items
+      scanWorkItems: () => [makeWorkItem("D-1-1")], // No new items
     };
 
     // maxIterations will bound the watch loop
@@ -2836,9 +2836,9 @@ describe("orchestrateLoop crew mode", () => {
 
   it("filters launch actions through crew broker — only claimed items launch", async () => {
     const orch = new Orchestrator({ reviewEnabled: false, wipLimit: 5, mergeStrategy: "asap" });
-    orch.addItem(makeTodo("T-1"));
-    orch.addItem(makeTodo("T-2"));
-    orch.addItem(makeTodo("T-3"));
+    orch.addItem(makeWorkItem("T-1"));
+    orch.addItem(makeWorkItem("T-2"));
+    orch.addItem(makeWorkItem("T-3"));
 
     let cycle = 0;
     const logs: LogEntry[] = [];
@@ -2851,9 +2851,9 @@ describe("orchestrateLoop crew mode", () => {
 
     const launchCalls: string[] = [];
     const actionDepsOverride = mockActionDeps({
-      launchSingleItem: vi.fn((todo) => {
-        launchCalls.push(todo.id);
-        return { worktreePath: "/tmp/test", workspaceRef: `ws:${todo.id}` };
+      launchSingleItem: vi.fn((workItem) => {
+        launchCalls.push(workItem.id);
+        return { worktreePath: "/tmp/test", workspaceRef: `ws:${workItem.id}` };
       }),
     });
 
@@ -2886,8 +2886,8 @@ describe("orchestrateLoop crew mode", () => {
 
   it("blocks ALL launches when broker is disconnected", async () => {
     const orch = new Orchestrator({ reviewEnabled: false, wipLimit: 5, mergeStrategy: "asap" });
-    orch.addItem(makeTodo("T-1"));
-    orch.addItem(makeTodo("T-2"));
+    orch.addItem(makeWorkItem("T-1"));
+    orch.addItem(makeWorkItem("T-2"));
 
     let cycle = 0;
     const logs: LogEntry[] = [];
@@ -2921,7 +2921,7 @@ describe("orchestrateLoop crew mode", () => {
 
   it("calls broker.complete after merge/done actions", async () => {
     const orch = new Orchestrator({ reviewEnabled: false, wipLimit: 2, mergeStrategy: "asap" });
-    orch.addItem(makeTodo("T-1"));
+    orch.addItem(makeWorkItem("T-1"));
 
     let cycle = 0;
     const { broker, completedIds } = mockCrewBroker({
@@ -3062,26 +3062,26 @@ describe("parseWatchArgs", () => {
 // ── validateItemIds ────────────────────────────────────────────────────
 
 describe("validateItemIds", () => {
-  const todoMap = new Map<string, WorkItem>([
-    ["H-FOO-1", makeTodo("H-FOO-1")],
-    ["H-FOO-2", makeTodo("H-FOO-2")],
-    ["H-FOO-3", makeTodo("H-FOO-3")],
+  const workItemMap = new Map<string, WorkItem>([
+    ["H-FOO-1", makeWorkItem("H-FOO-1")],
+    ["H-FOO-2", makeWorkItem("H-FOO-2")],
+    ["H-FOO-3", makeWorkItem("H-FOO-3")],
   ]);
 
   it("returns empty array when all IDs are valid", () => {
-    expect(validateItemIds(["H-FOO-1", "H-FOO-2"], todoMap)).toEqual([]);
+    expect(validateItemIds(["H-FOO-1", "H-FOO-2"], workItemMap)).toEqual([]);
   });
 
   it("returns unknown IDs", () => {
-    expect(validateItemIds(["H-FOO-1", "H-BAR-99"], todoMap)).toEqual(["H-BAR-99"]);
+    expect(validateItemIds(["H-FOO-1", "H-BAR-99"], workItemMap)).toEqual(["H-BAR-99"]);
   });
 
   it("returns all IDs when none match", () => {
-    expect(validateItemIds(["X-1", "Y-2"], todoMap)).toEqual(["X-1", "Y-2"]);
+    expect(validateItemIds(["X-1", "Y-2"], workItemMap)).toEqual(["X-1", "Y-2"]);
   });
 
   it("returns empty for empty input", () => {
-    expect(validateItemIds([], todoMap)).toEqual([]);
+    expect(validateItemIds([], workItemMap)).toEqual([]);
   });
 });
 
@@ -3103,12 +3103,12 @@ describe("cmdOrchestrate passthrough path", () => {
     expect(shouldEnterInteractive(parsed.itemIds.length > 0, { isTTY: true })).toBe(false);
     expect(shouldEnterInteractive(parsed.itemIds.length > 0, { isTTY: false })).toBe(false);
 
-    // Step 3: Validate items against a todo map
-    const todoMap = new Map<string, WorkItem>([
-      ["H-FOO-1", makeTodo("H-FOO-1")],
-      ["H-FOO-2", makeTodo("H-FOO-2")],
+    // Step 3: Validate items against a work item map
+    const workItemMap = new Map<string, WorkItem>([
+      ["H-FOO-1", makeWorkItem("H-FOO-1")],
+      ["H-FOO-2", makeWorkItem("H-FOO-2")],
     ]);
-    expect(validateItemIds(parsed.itemIds, todoMap)).toEqual([]);
+    expect(validateItemIds(parsed.itemIds, workItemMap)).toEqual([]);
 
     // Step 4: Verify orchestrator would receive correct config
     expect(parsed.itemIds).toEqual(["H-FOO-1", "H-FOO-2"]);
@@ -3132,11 +3132,11 @@ describe("cmdOrchestrate passthrough path", () => {
       "--wip-limit", "3",
     ]);
 
-    const todoMap = new Map<string, WorkItem>([
-      ["H-FOO-1", makeTodo("H-FOO-1")],
+    const workItemMap = new Map<string, WorkItem>([
+      ["H-FOO-1", makeWorkItem("H-FOO-1")],
     ]);
 
-    const unknown = validateItemIds(parsed.itemIds, todoMap);
+    const unknown = validateItemIds(parsed.itemIds, workItemMap);
     expect(unknown).toEqual(["H-UNKNOWN-99"]);
   });
 });

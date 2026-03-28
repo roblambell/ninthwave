@@ -32,18 +32,18 @@ import type { WorkItem } from "../core/types.ts";
 
 // ── Helpers ──────────────────────────────────────────────────────────
 
-function makeTodo(id: string): WorkItem {
+function makeWorkItem(id: string): WorkItem {
   return {
     id,
     priority: "high",
-    title: `TODO ${id}`,
+    title: `Item ${id}`,
     domain: "test",
     dependencies: [],
     bundleWith: [],
     status: "open",
     filePath: "",
     repoAlias: "",
-    rawText: `## ${id}\nTest todo`,
+    rawText: `## ${id}\nTest item`,
     filePaths: [],
   };
 }
@@ -55,7 +55,7 @@ function makeOrchestratorItem(
 ): OrchestratorItem {
   return {
     id,
-    workItem: makeTodo(id),
+    workItem: makeWorkItem(id),
     state: state as any,
     prNumber,
     lastTransition: "2026-03-24T10:00:00.000Z",
@@ -371,7 +371,7 @@ describe("serializeOrchestratorState", () => {
       id: "A-1-1",
       state: "implementing",
       prNumber: null,
-      title: "TODO A-1-1",
+      title: "Item A-1-1",
       lastTransition: "2026-03-24T10:00:00.000Z",
       ciFailCount: 0,
       retryCount: 0,
@@ -380,7 +380,7 @@ describe("serializeOrchestratorState", () => {
       id: "A-1-2",
       state: "merged",
       prNumber: 10,
-      title: "TODO A-1-2",
+      title: "Item A-1-2",
       lastTransition: "2026-03-24T10:00:00.000Z",
       ciFailCount: 0,
       retryCount: 0,

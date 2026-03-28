@@ -1,5 +1,5 @@
 import { describe, it, expect, afterEach } from "vitest";
-import { setupTempRepo, useFixtureDir, writeTodoFiles, cleanupTempRepos } from "./helpers.ts";
+import { setupTempRepo, useFixtureDir, writeWorkItemFiles, cleanupTempRepos } from "./helpers.ts";
 import { join } from "path";
 import { cmdConflicts } from "../core/commands/conflicts.ts";
 
@@ -35,7 +35,7 @@ describe("conflicts", () => {
     const repo = setupTempRepo();
     const worktreeDir = join(repo, ".worktrees");
 
-    const workDir = writeTodoFiles(repo, `## Shared
+    const workDir = writeWorkItemFiles(repo, `## Shared
 
 ### Feat: Item A (H-SH-1)
 
@@ -137,7 +137,7 @@ Key files: \`lib/shared.ex\`, \`lib/unique_b.ex\`
     const worktreeDir = join(repo, ".worktrees");
 
     // Two items that mention the same file in description but NOT in Key files
-    const workDir = writeTodoFiles(repo, `## Features
+    const workDir = writeWorkItemFiles(repo, `## Features
 
 ### Feat: Item A (H-FE-1)
 
