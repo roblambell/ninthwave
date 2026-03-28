@@ -4,8 +4,9 @@ import { existsSync, mkdirSync, readFileSync, writeFileSync, unlinkSync, copyFil
 import { join, basename, dirname } from "path";
 import { tmpdir } from "os";
 import { parseTodos } from "../parser.ts";
-import { die, warn, info, GREEN, RESET } from "../output.ts";
+import { die, warn, info, GREEN, BOLD, DIM, RESET } from "../output.ts";
 import { splitIds } from "../todo-utils.ts";
+import { computeBatches, CircularDependencyError } from "./batch-order.ts";
 import { run } from "../shell.ts";
 import {
   fetchOrigin,
@@ -779,6 +780,149 @@ PROJECT_ROOT: ${repoRoot}`;
     } catch {
       // ignore
     }
+  }
+}
+
+/**
+ * CLI-level regex for detecting TODO IDs as positional arguments.
+ * Matches uppercase IDs like H-RR-1, M-SF-1, L-VIS-15, H-CP-7a.
+ * Does NOT match lowercase variants or regular command names.
+ */
+export const TODO_ID_CLI_PATTERN = /^[A-Z]+-[A-Z0-9]+-\d+[a-z]*$/;
+
+/**
+ * Launch TODO items by ID with topological dependency ordering.
+ *
+ * This is the handler for `nw <ID> [ID2...]` — the primary way to launch items.
+ * It validates IDs, checks dependencies, computes batch order, and launches
+ * items layer by layer.
+ */
+export async function cmdRunItems(
+  ids: string[],
+  todosDir: string,
+  worktreeDir: string,
+  projectRoot: string,
+  muxOverride?: Multiplexer,
+): Promise<void> {
+  const items = parseTodos(todosDir, worktreeDir);
+  const itemMap = new Map<string, TodoItem>();
+  for (const item of items) {
+    itemMap.set(item.id, item);
+  }
+
+  // Validate all IDs exist
+  for (const id of ids) {
+    if (!itemMap.has(id)) {
+      die(`TODO item ${id} not found. Run 'nw list' to see available items.`);
+    }
+  }
+
+  const selectedSet = new Set(ids);
+
+  // Check dependencies: each dep must be either in the selected set or already completed
+  for (const id of ids) {
+    const item = itemMap.get(id)!;
+    for (const depId of item.dependencies) {
+      if (selectedSet.has(depId)) continue; // will be launched in correct order
+      if (!itemMap.has(depId)) continue; // already completed (todo file removed)
+      // Dep exists in TODO list but not in selected set — not ready
+      die(
+        `Cannot launch ${id}: depends on ${depId} which is neither completed nor included.\n` +
+        `  Either include ${depId} in the launch: nw ${[...ids, depId].join(" ")}\n` +
+        `  Or complete ${depId} first.`,
+      );
+    }
+  }
+
+  // Compute topological batch order
+  let batchAssignments: Map<string, number>;
+  let batchCount: number;
+  try {
+    const result = computeBatches(items, ids);
+    batchAssignments = result.assignments;
+    batchCount = result.batchCount;
+  } catch (e) {
+    if (e instanceof CircularDependencyError) {
+      die(
+        `Circular dependency detected among: ${e.circularItems.join(", ")}.\n` +
+        `  Resolve the dependency cycle before launching.`,
+      );
+    }
+    throw e;
+  }
+
+  // Log the computed batch plan
+  console.log(`${BOLD}Launch plan:${RESET} ${ids.length} item(s) in ${batchCount} batch(es)`);
+  for (let b = 1; b <= batchCount; b++) {
+    const batchItems = ids.filter((id) => batchAssignments.get(id) === b);
+    const labels = batchItems.map((id) => {
+      const item = itemMap.get(id)!;
+      const titleSnippet = item.title.length > 40
+        ? item.title.slice(0, 37) + "..."
+        : item.title;
+      return `${id} ${DIM}(${titleSnippet})${RESET}`;
+    });
+    console.log(`  Batch ${b}: ${labels.join(", ")}`);
+  }
+  console.log();
+
+  // Pre-flight: check for uncommitted TODO files
+  const todoCheck = checkUncommittedTodos(
+    projectRoot,
+    (cmd, a, opts) => defaultRun(cmd, a, opts),
+  );
+  if (todoCheck.status === "fail") {
+    warn(todoCheck.message);
+    warn(todoCheck.detail ?? "Commit TODO files before launching workers.");
+    die("Workers will branch from committed main and miss uncommitted TODO specs.");
+  }
+
+  // Apply custom GitHub token so workers inherit it via environment
+  applyGithubToken(projectRoot);
+
+  // Detect AI tool
+  const aiTool = detectAiTool();
+  if (aiTool === "unknown") {
+    die(
+      "Could not detect AI tool. Ensure claude, opencode, or copilot is in your PATH.",
+    );
+  }
+  info(`Detected AI tool: ${aiTool}`);
+
+  // Ensure worktree directory exists
+  mkdirSync(worktreeDir, { recursive: true });
+
+  // Clean stale partition locks before allocating
+  const partitionDir = join(worktreeDir, ".partitions");
+  const crossRepoIndex = join(worktreeDir, ".cross-repo-index");
+  cleanupStalePartitions(partitionDir, worktreeDir, (todoId) =>
+    getWorktreeInfo(todoId, crossRepoIndex, worktreeDir),
+  );
+
+  const mux = muxOverride ?? getMux();
+  const launched: string[] = [];
+
+  // Launch batch by batch
+  for (let b = 1; b <= batchCount; b++) {
+    const batchItems = ids.filter((id) => batchAssignments.get(id) === b);
+
+    for (const id of batchItems) {
+      const item = itemMap.get(id)!;
+      const result = launchSingleItem(item, todosDir, worktreeDir, projectRoot, aiTool, mux);
+      if (!result) {
+        die(`Failed to launch ${id}. Aborting remaining items.`);
+      }
+      launched.push(id);
+    }
+  }
+
+  console.log();
+  console.log(
+    `${GREEN}Launched ${launched.length} session(s) via ${aiTool}:${RESET}`,
+  );
+  for (const id of launched) {
+    const item = itemMap.get(id)!;
+    console.log(`  - ${id}: ${item.title}`);
   }
 }
 

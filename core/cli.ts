@@ -7,6 +7,7 @@ import { die } from "./output.ts";
 import { run } from "./shell.ts";
 import { lookupCommand, printHelp, printCommandHelp } from "./help.ts";
 import { shouldOnboard, cmdOnboard } from "./commands/onboard.ts";
+import { TODO_ID_CLI_PATTERN, cmdRunItems } from "./commands/launch.ts";
 
 // ── Project root resolution ──────────────────────────────────────────
 
@@ -62,10 +63,39 @@ if (!command) {
   process.exit(0);
 }
 
+// ── TODO ID detection ────────────────────────────────────────────────
+// If all positional args match the TODO ID pattern, route to cmdRunItems.
+
+const allPositional = [command, ...args].filter(
+  (a) => !a.startsWith("-"),
+);
+const allAreIds = allPositional.length > 0 && allPositional.every(
+  (a) => TODO_ID_CLI_PATTERN.test(a),
+);
+
+if (allAreIds) {
+  const projectRoot = getProjectRoot();
+  const todosDir = join(projectRoot, ".ninthwave", "todos");
+  const worktreeDir = join(projectRoot, ".worktrees");
+
+  if (!existsSync(todosDir)) {
+    die(`Todos directory not found at ${todosDir}`);
+  }
+
+  await cmdRunItems(allPositional, todosDir, worktreeDir, projectRoot);
+  process.exit(0);
+}
+
 // ── Registry lookup ──────────────────────────────────────────────────
 
 const entry = lookupCommand(command);
 if (!entry) {
+  // Check if the command looks like a lowercase TODO ID — offer a hint
+  const lowercaseIdPattern = /^[a-z]+-[a-z0-9]+-\d+[a-z]*$/;
+  if (lowercaseIdPattern.test(command)) {
+    const suggestion = command.toUpperCase();
+    die(`Unknown command: ${command}. Did you mean ${suggestion}? TODO IDs are uppercase.`);
+  }
   die(`Unknown command: ${command}`);
 }
 

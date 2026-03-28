@@ -28,7 +28,7 @@ vi.mock("../core/git.ts", () => ({
 // functions to this mock, update the comment in git.test.ts lines 5-11.
 
 
-import { detectAiTool, cmdStart, launchSingleItem, launchAiSession, launchReviewWorker, sanitizeTitle, extractTodoText, cleanStaleBranchForReuse } from "../core/commands/launch.ts";
+import { detectAiTool, cmdStart, cmdRunItems, launchSingleItem, launchAiSession, launchReviewWorker, sanitizeTitle, extractTodoText, cleanStaleBranchForReuse, TODO_ID_CLI_PATTERN } from "../core/commands/launch.ts";
 import { parseTodos } from "../core/parser.ts";
 import { fetchOrigin, ffMerge, createWorktree, branchExists, deleteBranch, findWorktreeForBranch, removeWorktree } from "../core/git.ts";
 
@@ -1312,5 +1312,365 @@ describe("launchReviewWorker", () => {
 
     const { deleteBranch } = require("../core/git.ts");
     expect(deleteBranch).toHaveBeenCalledWith(repo, "review/H-RVW-1");
+  });
+});
+
+// ── TODO_ID_CLI_PATTERN tests ───────────────────────────────────────
+
+describe("TODO_ID_CLI_PATTERN", () => {
+  it("matches valid uppercase TODO IDs", () => {
+    expect(TODO_ID_CLI_PATTERN.test("H-RR-1")).toBe(true);
+    expect(TODO_ID_CLI_PATTERN.test("M-SF-1")).toBe(true);
+    expect(TODO_ID_CLI_PATTERN.test("L-VIS-15")).toBe(true);
+    expect(TODO_ID_CLI_PATTERN.test("C-UO-1")).toBe(true);
+    expect(TODO_ID_CLI_PATTERN.test("H-CR-5")).toBe(true);
+    expect(TODO_ID_CLI_PATTERN.test("H-BF5-1")).toBe(true);
+  });
+
+  it("matches IDs with lowercase suffix (split items)", () => {
+    expect(TODO_ID_CLI_PATTERN.test("H-CP-7a")).toBe(true);
+    expect(TODO_ID_CLI_PATTERN.test("H-CP-7b")).toBe(true);
+  });
+
+  it("rejects regular command names", () => {
+    expect(TODO_ID_CLI_PATTERN.test("watch")).toBe(false);
+    expect(TODO_ID_CLI_PATTERN.test("init")).toBe(false);
+    expect(TODO_ID_CLI_PATTERN.test("list")).toBe(false);
+    expect(TODO_ID_CLI_PATTERN.test("start")).toBe(false);
+    expect(TODO_ID_CLI_PATTERN.test("status")).toBe(false);
+  });
+
+  it("rejects lowercase TODO IDs", () => {
+    expect(TODO_ID_CLI_PATTERN.test("h-rr-1")).toBe(false);
+    expect(TODO_ID_CLI_PATTERN.test("m-sf-1")).toBe(false);
+  });
+
+  it("rejects partial matches", () => {
+    expect(TODO_ID_CLI_PATTERN.test("H-RR")).toBe(false);
+    expect(TODO_ID_CLI_PATTERN.test("H")).toBe(false);
+    expect(TODO_ID_CLI_PATTERN.test("RR-1")).toBe(false);
+  });
+
+  it("rejects flags and other formats", () => {
+    expect(TODO_ID_CLI_PATTERN.test("--help")).toBe(false);
+    expect(TODO_ID_CLI_PATTERN.test("-v")).toBe(false);
+    expect(TODO_ID_CLI_PATTERN.test("")).toBe(false);
+  });
+});
+
+// ── cmdRunItems tests ───────────────────────────────────────────────
+
+describe("cmdRunItems", () => {
+  const originalEnv = { ...process.env };
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+    process.env.NINTHWAVE_AI_TOOL = "claude";
+  });
+
+  afterEach(() => {
+    process.env = { ...originalEnv };
+    cleanupTempRepos();
+  });
+
+  /** Set up todos with a dependency diamond: A -> B, A -> C, B -> D, C -> D */
+  function setupDiamondTodos(repo: string): string {
+    const todosDir = join(repo, ".ninthwave", "todos");
+    mkdirSync(todosDir, { recursive: true });
+
+    writeFileSync(
+      join(todosDir, "1-test--H-D-1.md"),
+      [
+        "# Item A (H-D-1)",
+        "",
+        "**Priority:** High",
+        "**Source:** Test",
+        "**Depends on:** None",
+        "**Domain:** test",
+        "",
+        "Item A — no deps.",
+        "",
+        "Acceptance: A works.",
+        "",
+        "Key files: `a.ts`",
+      ].join("\n"),
+    );
+
+    writeFileSync(
+      join(todosDir, "1-test--H-D-2.md"),
+      [
+        "# Item B (H-D-2)",
+        "",
+        "**Priority:** High",
+        "**Source:** Test",
+        "**Depends on:** H-D-1",
+        "**Domain:** test",
+        "",
+        "Item B — depends on A.",
+        "",
+        "Acceptance: B works.",
+        "",
+        "Key files: `b.ts`",
+      ].join("\n"),
+    );
+
+    writeFileSync(
+      join(todosDir, "1-test--H-D-3.md"),
+      [
+        "# Item C (H-D-3)",
+        "",
+        "**Priority:** High",
+        "**Source:** Test",
+        "**Depends on:** H-D-1",
+        "**Domain:** test",
+        "",
+        "Item C — depends on A.",
+        "",
+        "Acceptance: C works.",
+        "",
+        "Key files: `c.ts`",
+      ].join("\n"),
+    );
+
+    writeFileSync(
+      join(todosDir, "1-test--H-D-4.md"),
+      [
+        "# Item D (H-D-4)",
+        "",
+        "**Priority:** High",
+        "**Source:** Test",
+        "**Depends on:** H-D-2, H-D-3",
+        "**Domain:** test",
+        "",
+        "Item D — depends on B and C.",
+        "",
+        "Acceptance: D works.",
+        "",
+        "Key files: `d.ts`",
+      ].join("\n"),
+    );
+
+    spawnSync("git", ["-C", repo, "add", ".ninthwave/todos/"], { stdio: "pipe" });
+    spawnSync("git", ["-C", repo, "commit", "-m", "Add diamond todos", "--quiet"], { stdio: "pipe" });
+
+    return todosDir;
+  }
+
+  /** Set up todos with circular dependency: A -> B, B -> A */
+  function setupCircularTodos(repo: string): string {
+    const todosDir = join(repo, ".ninthwave", "todos");
+    mkdirSync(todosDir, { recursive: true });
+
+    writeFileSync(
+      join(todosDir, "1-test--H-CYC-1.md"),
+      [
+        "# Cycle A (H-CYC-1)",
+        "",
+        "**Priority:** High",
+        "**Source:** Test",
+        "**Depends on:** H-CYC-2",
+        "**Domain:** test",
+        "",
+        "Circular dep A.",
+      ].join("\n"),
+    );
+
+    writeFileSync(
+      join(todosDir, "1-test--H-CYC-2.md"),
+      [
+        "# Cycle B (H-CYC-2)",
+        "",
+        "**Priority:** High",
+        "**Source:** Test",
+        "**Depends on:** H-CYC-1",
+        "**Domain:** test",
+        "",
+        "Circular dep B.",
+      ].join("\n"),
+    );
+
+    spawnSync("git", ["-C", repo, "add", ".ninthwave/todos/"], { stdio: "pipe" });
+    spawnSync("git", ["-C", repo, "commit", "-m", "Add circular todos", "--quiet"], { stdio: "pipe" });
+
+    return todosDir;
+  }
+
+  it("dies when an ID is not found", async () => {
+    const repo = setupTempRepo();
+    const todosDir = setupTodosDir(repo);
+    const worktreeDir = join(repo, ".worktrees");
+
+    const output = await captureOutput(() =>
+      cmdRunItems(["NONEXISTENT-1"], todosDir, worktreeDir, repo),
+    );
+
+    expect(output).toContain("not found");
+    expect(output).toContain("nw list");
+  });
+
+  it("dies when a dependency is not included and not completed", async () => {
+    const repo = setupTempRepo();
+    const todosDir = setupTodosDir(repo);
+    const worktreeDir = join(repo, ".worktrees");
+
+    // H-CI-2 depends on M-CI-1, which is not passed and not completed
+    const output = await captureOutput(() =>
+      cmdRunItems(["H-CI-2"], todosDir, worktreeDir, repo),
+    );
+
+    expect(output).toContain("Cannot launch H-CI-2");
+    expect(output).toContain("depends on M-CI-1");
+    expect(output).toContain("neither completed nor included");
+  });
+
+  it("suggests including the missing dependency", async () => {
+    const repo = setupTempRepo();
+    const todosDir = setupTodosDir(repo);
+    const worktreeDir = join(repo, ".worktrees");
+
+    const output = await captureOutput(() =>
+      cmdRunItems(["H-CI-2"], todosDir, worktreeDir, repo),
+    );
+
+    // Should suggest including the dep
+    expect(output).toContain("nw H-CI-2 M-CI-1");
+  });
+
+  it("launches single ID with no deps (degenerates to simple launch)", async () => {
+    const mockMux = createMockMux();
+    const repo = setupTempRepo();
+    const todosDir = setupTodosDir(repo);
+    const worktreeDir = join(repo, ".worktrees");
+
+    const output = await captureOutput(() =>
+      cmdRunItems(["M-CI-1"], todosDir, worktreeDir, repo, mockMux),
+    );
+
+    expect(output).toContain("Launch plan:");
+    expect(output).toContain("1 item(s) in 1 batch(es)");
+    expect(output).toContain("Launched 1 session(s)");
+    expect(mockMux.launchWorkspace).toHaveBeenCalled();
+  });
+
+  it("launches two items in same batch when no inter-deps", async () => {
+    const mockMux = createMockMux();
+    const repo = setupTempRepo();
+    const todosDir = setupTodosDir(repo);
+    const worktreeDir = join(repo, ".worktrees");
+
+    // M-CI-1 and C-UO-1 have no inter-dependencies
+    const output = await captureOutput(() =>
+      cmdRunItems(["M-CI-1", "C-UO-1"], todosDir, worktreeDir, repo, mockMux),
+    );
+
+    expect(output).toContain("2 item(s) in 1 batch(es)");
+    expect(output).toContain("Launched 2 session(s)");
+    expect(mockMux.launchWorkspace).toHaveBeenCalledTimes(2);
+  });
+
+  it("computes correct topo-sort for dependency diamond", async () => {
+    const mockMux = createMockMux();
+    const repo = setupTempRepo();
+    const todosDir = setupDiamondTodos(repo);
+    const worktreeDir = join(repo, ".worktrees");
+
+    const output = await captureOutput(() =>
+      cmdRunItems(["H-D-1", "H-D-2", "H-D-3", "H-D-4"], todosDir, worktreeDir, repo, mockMux),
+    );
+
+    // Should show 3 batches: [A], [B, C], [D]
+    // Batch 1 has A (H-D-1)
+    // Batch 2 has B and C (H-D-2, H-D-3)
+    // Batch 3 has D (H-D-4)
+    expect(output).toContain("4 item(s) in 3 batch(es)");
+    expect(output).toContain("Batch 1:");
+    expect(output).toContain("Batch 2:");
+    expect(output).toContain("Batch 3:");
+    expect(output).toContain("Launched 4 session(s)");
+  });
+
+  it("dies with helpful message on circular dependency", async () => {
+    const repo = setupTempRepo();
+    const todosDir = setupCircularTodos(repo);
+    const worktreeDir = join(repo, ".worktrees");
+
+    const output = await captureOutput(() =>
+      cmdRunItems(["H-CYC-1", "H-CYC-2"], todosDir, worktreeDir, repo),
+    );
+
+    expect(output).toContain("Circular dependency detected");
+    expect(output).toContain("H-CYC-1");
+    expect(output).toContain("H-CYC-2");
+  });
+
+  it("allows dependency that's been completed (not in TODO list)", async () => {
+    const mockMux = createMockMux();
+    const repo = setupTempRepo();
+    const todosDir = join(repo, ".ninthwave", "todos");
+    mkdirSync(todosDir, { recursive: true });
+
+    // Create only H-CI-2 which depends on M-CI-1, but M-CI-1 doesn't exist (completed)
+    writeFileSync(
+      join(todosDir, "1-cloud-infrastructure--H-CI-2.md"),
+      [
+        "# Flaky connection pool timeout (H-CI-2)",
+        "",
+        "**Priority:** High",
+        "**Source:** Test",
+        "**Depends on:** M-CI-1",
+        "**Domain:** cloud-infrastructure",
+        "",
+        "Fix timeout errors.",
+        "",
+        "Acceptance: No more timeout errors.",
+        "",
+        "Key files: `config/test.exs`",
+      ].join("\n"),
+    );
+
+    spawnSync("git", ["-C", repo, "add", ".ninthwave/todos/"], { stdio: "pipe" });
+    spawnSync("git", ["-C", repo, "commit", "-m", "Add todo", "--quiet"], { stdio: "pipe" });
+
+    const worktreeDir = join(repo, ".worktrees");
+
+    // M-CI-1 doesn't exist in the TODO list → treated as completed → should be OK
+    const output = await captureOutput(() =>
+      cmdRunItems(["H-CI-2"], todosDir, worktreeDir, repo, mockMux),
+    );
+
+    expect(output).toContain("Launched 1 session(s)");
+    expect(output).not.toContain("Cannot launch");
+  });
+
+  it("dies if launch fails for an item in a batch", async () => {
+    const mockMux = createMockMux();
+    // Make the mux launch fail
+    mockMux.launchWorkspace.mockReturnValue(null);
+
+    const repo = setupTempRepo();
+    const todosDir = setupTodosDir(repo);
+    const worktreeDir = join(repo, ".worktrees");
+
+    const output = await captureOutput(() =>
+      cmdRunItems(["M-CI-1"], todosDir, worktreeDir, repo, mockMux),
+    );
+
+    expect(output).toContain("Failed to launch M-CI-1");
+    expect(output).toContain("Aborting remaining items");
+  });
+
+  it("logs batch plan before launching", async () => {
+    const mockMux = createMockMux();
+    const repo = setupTempRepo();
+    const todosDir = setupTodosDir(repo);
+    const worktreeDir = join(repo, ".worktrees");
+
+    const output = await captureOutput(() =>
+      cmdRunItems(["M-CI-1"], todosDir, worktreeDir, repo, mockMux),
+    );
+
+    expect(output).toContain("Launch plan:");
+    expect(output).toContain("Batch 1:");
+    expect(output).toContain("M-CI-1");
   });
 });

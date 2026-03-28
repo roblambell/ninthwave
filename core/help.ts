@@ -438,6 +438,7 @@ const HELP_PAD = 48;
 /** Print full usage help. */
 export function printHelp(): void {
   console.log("Usage: nw <command> [options]");
+  console.log("       nw <ID> [ID2...]          Launch TODO items by ID");
   console.log("       ninthwave <command> [options]");
   console.log();
   console.log("Commands:");
