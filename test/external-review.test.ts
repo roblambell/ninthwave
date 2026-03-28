@@ -342,7 +342,7 @@ describe("processExternalReviews", () => {
     expect(headChangedLog!.prNumber).toBe(10);
   });
 
-  it("respects reviewWipLimit (shared with TODO reviews)", () => {
+  it("respects reviewWipLimit (shared with item reviews)", () => {
     const prs = [
       makeExternalPR({ prNumber: 10, headSha: "a" }),
       makeExternalPR({ prNumber: 11, headSha: "b" }),
@@ -350,7 +350,7 @@ describe("processExternalReviews", () => {
     ];
     const { deps, launched } = makeExternalReviewDeps(prs);
 
-    // reviewWipLimit=2, currentReviewWipCount=1 (1 TODO review in progress)
+    // reviewWipLimit=2, currentReviewWipCount=1 (1 item review in progress)
     // → only 1 slot available for external reviews
     const result = processExternalReviews("/tmp/repo", [], 2, 1, deps);
 
@@ -374,7 +374,7 @@ describe("processExternalReviews", () => {
     ];
     const { deps, launched } = makeExternalReviewDeps(prs);
 
-    // reviewWipLimit=2, currentReviewWipCount=0 (no TODO reviews)
+    // reviewWipLimit=2, currentReviewWipCount=0 (no item reviews)
     // but 1 external review already reviewing → 1 slot left
     const result = processExternalReviews("/tmp/repo", existing, 2, 0, deps);
 

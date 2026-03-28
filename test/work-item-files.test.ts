@@ -1,4 +1,4 @@
-// Tests for core/todo-files.ts — file-per-todo operations.
+// Tests for core/work-item-files.ts — file-per-item operations.
 
 import { describe, it, expect, afterEach } from "vitest";
 import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, existsSync, rmSync } from "fs";
@@ -338,14 +338,14 @@ Just do the thing.
 // --- listWorkItems ---
 
 describe("listWorkItems", () => {
-  it("reads a directory of multiple todo files", () => {
+  it("reads a directory of multiple work item files", () => {
     const dir = makeTempDir();
     const workDir = join(dir, "work");
     const worktreeDir = join(dir, "worktrees");
     mkdirSync(workDir);
     mkdirSync(worktreeDir);
 
-    // Write two todo files
+    // Write two work item files
     writeFileSync(
       join(workDir, "1-bugs--H-BUG-1.md"),
       `# Fix crash (H-BUG-1)
@@ -476,7 +476,7 @@ Add the feature.
     mkdirSync(workDir);
     mkdirSync(worktreeDir);
 
-    writeFileSync(join(workDir, "bad.md"), "Not a valid todo file.");
+    writeFileSync(join(workDir, "bad.md"), "Not a valid work item file.");
     writeFileSync(
       join(workDir, "1-good--H-OK-1.md"),
       `# Good item (H-OK-1)

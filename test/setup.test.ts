@@ -679,7 +679,7 @@ describe("setupGlobal", () => {
     }
   });
 
-  it("does not create .ninthwave/, todos directory, or agent files", () => {
+  it("does not create .ninthwave/, work directory, or agent files", () => {
     const projectDir = setupTempRepo();
     const bundleDir = createFakeBundle(projectDir + "-bundle-parent");
 

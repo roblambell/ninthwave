@@ -1,4 +1,4 @@
-// Tests for the directory-based TODO parser.
+// Tests for the directory-based work item parser.
 
 import { describe, it, expect, afterEach } from "vitest";
 import { join } from "path";
@@ -15,14 +15,14 @@ afterEach(() => {
   cleanupTempRepos();
 });
 
-/** Helper: create a todos directory inside a temp repo and return its path. */
-function setupTodosDir(repo: string): string {
+/** Helper: create a work items directory inside a temp repo and return its path. */
+function setupWorkItemsDir(repo: string): string {
   const workDir = join(repo, ".ninthwave", "work");
   mkdirSync(workDir, { recursive: true });
   return workDir;
 }
 
-/** Helper: write a raw markdown todo file directly (for fine-grained control). */
+/** Helper: write a raw markdown work item file directly (for fine-grained control). */
 function writeRawTodoFile(workDir: string, filename: string, content: string): void {
   writeFileSync(join(workDir, filename), content);
 }
@@ -46,7 +46,7 @@ function makeWorkItem(overrides: Partial<WorkItem> & { id: string; priority: Pri
 describe("parseWorkItems — valid items", () => {
   it("parses all 4 items from directory", () => {
     const repo = setupTempRepo();
-    const workDir = setupTodosDir(repo);
+    const workDir = setupWorkItemsDir(repo);
 
     writeRawTodoFile(workDir, "2-cloud-infrastructure--M-CI-1.md", `# Upgrade CI runners (M-CI-1)
 
@@ -120,7 +120,7 @@ Key files: \`lib/onboarding/checklist.ex\`, \`assets/js/checklist.tsx\`
 
   it("extracts correct IDs", () => {
     const repo = setupTempRepo();
-    const workDir = setupTodosDir(repo);
+    const workDir = setupWorkItemsDir(repo);
 
     writeRawTodoFile(workDir, "2-cloud-infrastructure--M-CI-1.md", `# Upgrade CI runners (M-CI-1)
 
@@ -148,7 +148,7 @@ Acceptance: Fixed.
 
   it("extracts correct priorities", () => {
     const repo = setupTempRepo();
-    const workDir = setupTodosDir(repo);
+    const workDir = setupWorkItemsDir(repo);
 
     writeRawTodoFile(workDir, "2-test--M-CI-1.md", `# Item (M-CI-1)
 
@@ -181,7 +181,7 @@ Acceptance: Fixed.
 
   it("extracts correct titles", () => {
     const repo = setupTempRepo();
-    const workDir = setupTodosDir(repo);
+    const workDir = setupWorkItemsDir(repo);
 
     writeRawTodoFile(workDir, "2-test--M-CI-1.md", `# Upgrade CI runners (M-CI-1)
 
@@ -206,7 +206,7 @@ Acceptance: Fixed.
 
   it("extracts correct domains", () => {
     const repo = setupTempRepo();
-    const workDir = setupTodosDir(repo);
+    const workDir = setupWorkItemsDir(repo);
 
     writeRawTodoFile(workDir, "2-cloud-infrastructure--M-CI-1.md", `# Upgrade CI runners (M-CI-1)
 
@@ -231,7 +231,7 @@ Acceptance: Fixed.
 
   it("extracts dependencies", () => {
     const repo = setupTempRepo();
-    const workDir = setupTodosDir(repo);
+    const workDir = setupWorkItemsDir(repo);
 
     writeRawTodoFile(workDir, "2-test--M-CI-1.md", `# Upgrade CI runners (M-CI-1)
 
@@ -271,7 +271,7 @@ Acceptance: Fixed.
 
   it("extracts bundle-with", () => {
     const repo = setupTempRepo();
-    const workDir = setupTodosDir(repo);
+    const workDir = setupWorkItemsDir(repo);
 
     writeRawTodoFile(workDir, "1-test--H-UO-2.md", `# Add onboarding checklist (H-UO-2)
 
@@ -287,7 +287,7 @@ Acceptance: Fixed.
 
   it("all items have open status when no worktrees exist", () => {
     const repo = setupTempRepo();
-    const workDir = setupTodosDir(repo);
+    const workDir = setupWorkItemsDir(repo);
 
     writeRawTodoFile(workDir, "2-test--M-CI-1.md", `# Item (M-CI-1)
 
@@ -312,7 +312,7 @@ Acceptance: Fixed.
 
   it("extracts file paths from Key files line", () => {
     const repo = setupTempRepo();
-    const workDir = setupTodosDir(repo);
+    const workDir = setupWorkItemsDir(repo);
 
     writeRawTodoFile(workDir, "2-test--M-CI-1.md", `# Upgrade CI runners (M-CI-1)
 
@@ -349,7 +349,7 @@ Key files: \`config/test.exs\`
 
   it("stores raw markdown text per item", () => {
     const repo = setupTempRepo();
-    const workDir = setupTodosDir(repo);
+    const workDir = setupWorkItemsDir(repo);
 
     writeRawTodoFile(workDir, "2-test--M-CI-1.md", `# Upgrade CI runners (M-CI-1)
 
@@ -365,9 +365,9 @@ Acceptance: Runners upgraded.
     expect(items[0]!.rawText).toContain("**Priority:** Medium");
   });
 
-  it("sets filePath to the todo file path", () => {
+  it("sets filePath to the work item file path", () => {
     const repo = setupTempRepo();
-    const workDir = setupTodosDir(repo);
+    const workDir = setupWorkItemsDir(repo);
 
     writeRawTodoFile(workDir, "2-test--M-CI-1.md", `# Upgrade CI runners (M-CI-1)
 
@@ -384,7 +384,7 @@ Acceptance: Runners upgraded.
 describe("parseWorkItems — items with missing optional fields", () => {
   it("parses item with no dependencies line (defaults to empty array)", () => {
     const repo = setupTempRepo();
-    const workDir = setupTodosDir(repo);
+    const workDir = setupWorkItemsDir(repo);
 
     writeRawTodoFile(workDir, "1-test--H-BK-1.md", `# Some item (H-BK-1)
 
@@ -401,7 +401,7 @@ Description only.
 
   it("skips files without priority (returns null from parseWorkItemFile)", () => {
     const repo = setupTempRepo();
-    const workDir = setupTodosDir(repo);
+    const workDir = setupWorkItemsDir(repo);
 
     // No priority line — parseWorkItemFile returns null
     writeRawTodoFile(workDir, "2-test--M-BK-1.md", `# No priority item (M-BK-1)
@@ -429,7 +429,7 @@ This is valid.
 
   it("skips files without ID in heading", () => {
     const repo = setupTempRepo();
-    const workDir = setupTodosDir(repo);
+    const workDir = setupWorkItemsDir(repo);
 
     // No ID in heading — parseWorkItemFile returns null
     writeRawTodoFile(workDir, "2-test--no-id.md", `# Item with no ID
@@ -453,9 +453,9 @@ This is valid.
 });
 
 describe("parseWorkItems — empty directory", () => {
-  it("empty todos directory produces no items", () => {
+  it("empty work items directory produces no items", () => {
     const repo = setupTempRepo();
-    const workDir = setupTodosDir(repo);
+    const workDir = setupWorkItemsDir(repo);
 
     const items = parseWorkItems(workDir, join(repo, ".worktrees"));
     expect(items).toHaveLength(0);
@@ -474,7 +474,7 @@ describe("parseWorkItems — empty directory", () => {
 describe("parseWorkItems — multi-domain items", () => {
   it("parses items with different domains", () => {
     const repo = setupTempRepo();
-    const workDir = setupTodosDir(repo);
+    const workDir = setupWorkItemsDir(repo);
 
     writeRawTodoFile(workDir, "1-section-alpha--H-AL-1.md", `# Alpha item one (H-AL-1)
 
@@ -508,7 +508,7 @@ describe("parseWorkItems — multi-domain items", () => {
 
   it("extracts cross-domain dependencies", () => {
     const repo = setupTempRepo();
-    const workDir = setupTodosDir(repo);
+    const workDir = setupWorkItemsDir(repo);
 
     writeRawTodoFile(workDir, "1-alpha--H-AL-1.md", `# Alpha item (H-AL-1)
 
@@ -534,7 +534,7 @@ describe("parseWorkItems — multi-domain items", () => {
 describe("parseWorkItems — cross-repo items", () => {
   it("parses repo aliases", () => {
     const repo = setupTempRepo();
-    const workDir = setupTodosDir(repo);
+    const workDir = setupWorkItemsDir(repo);
 
     writeRawTodoFile(workDir, "1-api-service--H-API-1.md", `# Add rate limiting (H-API-1)
 
@@ -583,7 +583,7 @@ Key files: \`lib/gateway/rate_limiter.ex\`
 
   it("parses all items from cross-repo directory", () => {
     const repo = setupTempRepo();
-    const workDir = setupTodosDir(repo);
+    const workDir = setupWorkItemsDir(repo);
 
     writeRawTodoFile(workDir, "1-api--H-API-1.md", `# Rate limiting (H-API-1)
 
@@ -624,7 +624,7 @@ Key files: \`lib/gateway/rate_limiter.ex\`
 describe("parseWorkItems — in-progress detection", () => {
   it("detects in-progress from worktree directories", () => {
     const repo = setupTempRepo();
-    const workDir = setupTodosDir(repo);
+    const workDir = setupWorkItemsDir(repo);
 
     writeRawTodoFile(workDir, "2-test--M-CI-1.md", `# Upgrade CI runners (M-CI-1)
 
@@ -653,7 +653,7 @@ describe("parseWorkItems — in-progress detection", () => {
 
   it("detects in-progress from cross-repo index", () => {
     const repo = setupTempRepo();
-    const workDir = setupTodosDir(repo);
+    const workDir = setupWorkItemsDir(repo);
 
     writeRawTodoFile(workDir, "2-test--M-CI-1.md", `# Item (M-CI-1)
 
@@ -693,7 +693,7 @@ describe("parseWorkItems — in-progress detection", () => {
 describe("parseWorkItems — circular deps", () => {
   it("parses all 3 circular dep items", () => {
     const repo = setupTempRepo();
-    const workDir = setupTodosDir(repo);
+    const workDir = setupWorkItemsDir(repo);
 
     writeRawTodoFile(workDir, "1-circular--H-CC-1.md", `# Item A depends on B (H-CC-1)
 
@@ -722,7 +722,7 @@ describe("parseWorkItems — circular deps", () => {
 
   it("captures circular dependency references", () => {
     const repo = setupTempRepo();
-    const workDir = setupTodosDir(repo);
+    const workDir = setupWorkItemsDir(repo);
 
     writeRawTodoFile(workDir, "1-circular--H-CC-1.md", `# Item A (H-CC-1)
 
@@ -944,7 +944,7 @@ describe("extractFilePaths", () => {
 describe("parseWorkItems — test plan extraction", () => {
   it("extracts test plan from items that have one", () => {
     const repo = setupTempRepo();
-    const workDir = setupTodosDir(repo);
+    const workDir = setupWorkItemsDir(repo);
 
     writeRawTodoFile(workDir, "2-test--M-CI-1.md", `# Upgrade CI runners (M-CI-1)
 
@@ -986,7 +986,7 @@ Acceptance: Fixed.
 
   it("returns empty string for items without test plan", () => {
     const repo = setupTempRepo();
-    const workDir = setupTodosDir(repo);
+    const workDir = setupWorkItemsDir(repo);
 
     writeRawTodoFile(workDir, "0-test--C-UO-1.md", `# Add welcome email (C-UO-1)
 
@@ -1141,7 +1141,7 @@ describe("expandWildcardDeps", () => {
 describe("parseWorkItems — wildcard dependencies", () => {
   it("expands wildcard deps during parsing", () => {
     const repo = setupTempRepo();
-    const workDir = setupTodosDir(repo);
+    const workDir = setupWorkItemsDir(repo);
 
     writeRawTodoFile(workDir, "1-test-domain--H-TD-1.md", `# First item (H-TD-1)
 
@@ -1174,7 +1174,7 @@ describe("parseWorkItems — wildcard dependencies", () => {
 
   it("mixes literal and wildcard deps", () => {
     const repo = setupTempRepo();
-    const workDir = setupTodosDir(repo);
+    const workDir = setupWorkItemsDir(repo);
 
     writeRawTodoFile(workDir, "1-alpha--H-AL-1.md", `# A1 (H-AL-1)
 
@@ -1217,7 +1217,7 @@ describe("parseWorkItems — wildcard dependencies", () => {
 describe("parseWorkItems — writeWorkItemFile round-trip", () => {
   it("items written with writeWorkItemFile can be parsed back", () => {
     const repo = setupTempRepo();
-    const workDir = setupTodosDir(repo);
+    const workDir = setupWorkItemsDir(repo);
 
     const item = makeWorkItem({
       id: "H-RT-1",

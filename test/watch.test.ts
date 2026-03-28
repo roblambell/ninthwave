@@ -326,13 +326,13 @@ describe("checkPrStatus", () => {
     (gh.prList as Mock).mockImplementation(
       (_root: string, _branch: string, state: string) => {
         if (state === "open") return [];
-        if (state === "merged") return [{ number: 99, title: "fix: some work (TODO H-1-1)" }];
+        if (state === "merged") return [{ number: 99, title: "fix: some work (H-1-1)" }];
         return [];
       },
     );
 
     const result = checkPrStatus("H-1-1", "/fake/repo");
-    expect(result).toBe("H-1-1\t99\tmerged\t\t\tfix: some work (TODO H-1-1)");
+    expect(result).toBe("H-1-1\t99\tmerged\t\t\tfix: some work (H-1-1)");
   });
 
   it("returns no-pr when no PR exists", () => {
@@ -651,7 +651,7 @@ describe("cmdWatchReady cross-repo", () => {
 
     // Write cross-repo index with an entry pointing to a different repo
     const indexPath = join(worktreeDir, ".cross-repo-index");
-    writeFileSync(indexPath, "X-CR-1\t/target-repo\t/target-repo/.worktrees/todo-X-CR-1\n");
+    writeFileSync(indexPath, "X-CR-1\t/target-repo\t/target-repo/.worktrees/ninthwave-X-CR-1\n");
 
     // Mock prList to return no-pr for this cross-repo item
     (gh.prList as Mock).mockReturnValue([]);
@@ -700,7 +700,7 @@ describe("getWatchReadyState", () => {
     expect(result).toContain("no-pr");
   });
 
-  it("skips non-todo entries", () => {
+  it("skips non-item entries", () => {
     const repo = setupTempRepo();
     const worktreeDir = join(repo, ".worktrees");
     mkdirSync(join(worktreeDir, "ninthwave-A-1-1"), { recursive: true });
@@ -728,7 +728,7 @@ describe("getWatchReadyState cross-repo", () => {
 
     // Write cross-repo index
     const indexPath = join(worktreeDir, ".cross-repo-index");
-    writeFileSync(indexPath, "X-CR-2\t/other-repo\t/other-repo/.worktrees/todo-X-CR-2\n");
+    writeFileSync(indexPath, "X-CR-2\t/other-repo\t/other-repo/.worktrees/ninthwave-X-CR-2\n");
 
     (gh.prList as Mock).mockReturnValue([]);
 

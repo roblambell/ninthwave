@@ -29,18 +29,18 @@ import type { WorkItem } from "../core/types.ts";
 
 // ── Helpers ──────────────────────────────────────────────────────────
 
-function makeTodo(id: string, deps: string[] = []): WorkItem {
+function makeWorkItem(id: string, deps: string[] = []): WorkItem {
   return {
     id,
     priority: "high",
-    title: `TODO ${id}`,
+    title: `Item ${id}`,
     domain: "test",
     dependencies: deps,
     bundleWith: [],
     status: "open",
     filePath: "",
     repoAlias: "",
-    rawText: `## ${id}\nTest todo`,
+    rawText: `## ${id}\nTest item`,
     filePaths: [],
     testPlan: "",
     bootstrap: false,
@@ -59,7 +59,7 @@ function stripAnsi(s: string): string {
 describe("telemetry: startedAt / endedAt on transitions", () => {
   it("sets startedAt when item transitions to implementing", () => {
     const orch = new Orchestrator({ reviewEnabled: false, wipLimit: 2, mergeStrategy: "asap", maxCiRetries: 2, maxRetries: 1 });
-    orch.addItem(makeTodo("T-1-1"));
+    orch.addItem(makeWorkItem("T-1-1"));
 
     // Transition to ready, then launch
     const snapshot: PollSnapshot = { items: [], readyIds: ["T-1-1"] };
@@ -84,7 +84,7 @@ describe("telemetry: startedAt / endedAt on transitions", () => {
 
   it("sets endedAt when item transitions to done", () => {
     const orch = new Orchestrator({ reviewEnabled: false, wipLimit: 2, mergeStrategy: "asap", maxCiRetries: 2, maxRetries: 1 });
-    orch.addItem(makeTodo("T-1-1"));
+    orch.addItem(makeWorkItem("T-1-1"));
 
     // Fast-track to implementing
     const snap1: PollSnapshot = { items: [], readyIds: ["T-1-1"] };
@@ -125,7 +125,7 @@ describe("telemetry: startedAt / endedAt on transitions", () => {
       maxCiRetries: 2,
       maxRetries: 0,
     });
-    orch.addItem(makeTodo("T-1-1"));
+    orch.addItem(makeWorkItem("T-1-1"));
 
     // Launch → implementing
     orch.processTransitions({ items: [], readyIds: ["T-1-1"] });
@@ -146,7 +146,7 @@ describe("telemetry: startedAt / endedAt on transitions", () => {
 
   it("does not overwrite startedAt on re-entry to implementing", () => {
     const orch = new Orchestrator({ reviewEnabled: false, wipLimit: 2, mergeStrategy: "asap", maxCiRetries: 2, maxRetries: 1 });
-    orch.addItem(makeTodo("T-1-1"));
+    orch.addItem(makeWorkItem("T-1-1"));
 
     // First launch → implementing
     orch.processTransitions({ items: [], readyIds: ["T-1-1"] });
@@ -426,7 +426,7 @@ describe("serializeOrchestratorState includes telemetry", () => {
   it("includes startedAt, endedAt, exitCode, stderrTail in serialized state", () => {
     const items: OrchestratorItem[] = [{
       id: "T-1-1",
-      workItem: makeTodo("T-1-1"),
+      workItem: makeWorkItem("T-1-1"),
       state: "stuck",
       ciFailCount: 2,
       retryCount: 1,
@@ -447,7 +447,7 @@ describe("serializeOrchestratorState includes telemetry", () => {
   it("omits telemetry fields when not present (sparse serialization)", () => {
     const items: OrchestratorItem[] = [{
       id: "T-1-1",
-      workItem: makeTodo("T-1-1"),
+      workItem: makeWorkItem("T-1-1"),
       state: "implementing",
       ciFailCount: 0,
       retryCount: 0,
@@ -469,7 +469,7 @@ describe("collectRunMetrics includes telemetry fields", () => {
     const items: OrchestratorItem[] = [
       {
         id: "T-1-1",
-        workItem: makeTodo("T-1-1"),
+        workItem: makeWorkItem("T-1-1"),
         state: "done",
         ciFailCount: 0,
         retryCount: 0,
@@ -480,7 +480,7 @@ describe("collectRunMetrics includes telemetry fields", () => {
       },
       {
         id: "T-1-2",
-        workItem: makeTodo("T-1-2"),
+        workItem: makeWorkItem("T-1-2"),
         state: "stuck",
         ciFailCount: 2,
         retryCount: 1,
@@ -523,7 +523,7 @@ describe("collectRunMetrics includes telemetry fields", () => {
   it("omits telemetry fields when not present on orchestrator items", () => {
     const items: OrchestratorItem[] = [{
       id: "T-1-1",
-      workItem: makeTodo("T-1-1"),
+      workItem: makeWorkItem("T-1-1"),
       state: "done",
       ciFailCount: 0,
       retryCount: 0,

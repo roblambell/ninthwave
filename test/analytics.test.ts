@@ -47,18 +47,18 @@ import type { WorkItem } from "../core/types.ts";
 
 // ── Helpers ──────────────────────────────────────────────────────────
 
-function makeTodo(id: string, deps: string[] = []): WorkItem {
+function makeWorkItem(id: string, deps: string[] = []): WorkItem {
   return {
     id,
     priority: "high",
-    title: `TODO ${id}`,
+    title: `Item ${id}`,
     domain: "test",
     dependencies: deps,
     bundleWith: [],
     status: "open",
     filePath: "",
     repoAlias: "",
-    rawText: `## ${id}\nTest todo`,
+    rawText: `## ${id}\nTest item`,
     filePaths: [],
     testPlan: "",
     bootstrap: false,
@@ -68,7 +68,7 @@ function makeTodo(id: string, deps: string[] = []): WorkItem {
 function mockActionDeps(overrides?: Partial<OrchestratorDeps>): OrchestratorDeps {
   return {
     launchSingleItem: vi.fn(() => ({
-      worktreePath: "/tmp/test/todo-test",
+      worktreePath: "/tmp/test/item-test",
       workspaceRef: "workspace:1",
     })),
     cleanSingleWorktree: vi.fn(() => true),
@@ -106,14 +106,14 @@ describe("collectRunMetrics", () => {
     const items: OrchestratorItem[] = [
       {
         id: "T-1-1",
-        workItem: makeTodo("T-1-1"),
+        workItem: makeWorkItem("T-1-1"),
         state: "done",
         ciFailCount: 0,
         lastTransition: new Date().toISOString(),
       },
       {
         id: "T-1-2",
-        workItem: makeTodo("T-1-2"),
+        workItem: makeWorkItem("T-1-2"),
         state: "stuck",
         ciFailCount: 2,
         lastTransition: new Date().toISOString(),
@@ -143,14 +143,14 @@ describe("collectRunMetrics", () => {
     const items: OrchestratorItem[] = [
       {
         id: "T-1-1",
-        workItem: makeTodo("T-1-1"),
+        workItem: makeWorkItem("T-1-1"),
         state: "done",
         ciFailCount: 0,
         lastTransition: new Date().toISOString(),
       },
       {
         id: "T-1-2",
-        workItem: makeTodo("T-1-2"),
+        workItem: makeWorkItem("T-1-2"),
         state: "done",
         ciFailCount: 3,
         prNumber: 42,
@@ -282,7 +282,7 @@ describe("writeRunMetrics", () => {
 describe("orchestrateLoop analytics integration", () => {
   it("writes metrics file on orchestrate_complete", async () => {
     const orch = new Orchestrator({ reviewEnabled: false, wipLimit: 2, mergeStrategy: "asap" });
-    orch.addItem(makeTodo("T-1-1"));
+    orch.addItem(makeWorkItem("T-1-1"));
 
     let cycle = 0;
     const logs: LogEntry[] = [];
@@ -341,7 +341,7 @@ describe("orchestrateLoop analytics integration", () => {
 
   it("includes CI retry count in metrics for items with failures", async () => {
     const orch = new Orchestrator({ reviewEnabled: false, wipLimit: 2, mergeStrategy: "asap" });
-    orch.addItem(makeTodo("T-1-1"));
+    orch.addItem(makeWorkItem("T-1-1"));
 
     let cycle = 0;
     const io = mockAnalyticsIO();
@@ -389,7 +389,7 @@ describe("orchestrateLoop analytics integration", () => {
 
   it("skips analytics when analyticsDir is not configured", async () => {
     const orch = new Orchestrator({ reviewEnabled: false, wipLimit: 2, mergeStrategy: "asap" });
-    orch.addItem(makeTodo("T-1-1"));
+    orch.addItem(makeWorkItem("T-1-1"));
 
     let cycle = 0;
     const logs: LogEntry[] = [];
@@ -428,7 +428,7 @@ describe("orchestrateLoop analytics integration", () => {
 
   it("handles analytics write failure gracefully", async () => {
     const orch = new Orchestrator({ reviewEnabled: false, wipLimit: 2, mergeStrategy: "asap" });
-    orch.addItem(makeTodo("T-1-1"));
+    orch.addItem(makeWorkItem("T-1-1"));
 
     let cycle = 0;
     const logs: LogEntry[] = [];
@@ -966,7 +966,7 @@ describe("commitAnalyticsFiles", () => {
 describe("orchestrateLoop analytics auto-commit", () => {
   it("auto-commits analytics files after writing metrics", async () => {
     const orch = new Orchestrator({ reviewEnabled: false, wipLimit: 2, mergeStrategy: "asap" });
-    orch.addItem(makeTodo("T-1-1"));
+    orch.addItem(makeWorkItem("T-1-1"));
 
     let cycle = 0;
     const logs: LogEntry[] = [];
@@ -1016,7 +1016,7 @@ describe("orchestrateLoop analytics auto-commit", () => {
 
   it("logs skip when no analytics changes to commit", async () => {
     const orch = new Orchestrator({ reviewEnabled: false, wipLimit: 2, mergeStrategy: "asap" });
-    orch.addItem(makeTodo("T-1-1"));
+    orch.addItem(makeWorkItem("T-1-1"));
 
     let cycle = 0;
     const logs: LogEntry[] = [];
@@ -1064,7 +1064,7 @@ describe("orchestrateLoop analytics auto-commit", () => {
 
   it("handles analytics commit failure gracefully", async () => {
     const orch = new Orchestrator({ reviewEnabled: false, wipLimit: 2, mergeStrategy: "asap" });
-    orch.addItem(makeTodo("T-1-1"));
+    orch.addItem(makeWorkItem("T-1-1"));
 
     let cycle = 0;
     const logs: LogEntry[] = [];
@@ -1118,7 +1118,7 @@ describe("orchestrateLoop analytics auto-commit", () => {
 
   it("skips auto-commit when analyticsCommit deps not provided", async () => {
     const orch = new Orchestrator({ reviewEnabled: false, wipLimit: 2, mergeStrategy: "asap" });
-    orch.addItem(makeTodo("T-1-1"));
+    orch.addItem(makeWorkItem("T-1-1"));
 
     let cycle = 0;
     const logs: LogEntry[] = [];
@@ -1283,14 +1283,14 @@ describe("collectRunMetrics with cost data", () => {
     const items: OrchestratorItem[] = [
       {
         id: "T-1-1",
-        workItem: makeTodo("T-1-1"),
+        workItem: makeWorkItem("T-1-1"),
         state: "done",
         ciFailCount: 0,
         lastTransition: new Date().toISOString(),
       },
       {
         id: "T-1-2",
-        workItem: makeTodo("T-1-2"),
+        workItem: makeWorkItem("T-1-2"),
         state: "done",
         ciFailCount: 0,
         lastTransition: new Date().toISOString(),
@@ -1323,7 +1323,7 @@ describe("collectRunMetrics with cost data", () => {
     const items: OrchestratorItem[] = [
       {
         id: "T-1-1",
-        workItem: makeTodo("T-1-1"),
+        workItem: makeWorkItem("T-1-1"),
         state: "done",
         ciFailCount: 0,
         lastTransition: new Date().toISOString(),
@@ -1348,14 +1348,14 @@ describe("collectRunMetrics with cost data", () => {
     const items: OrchestratorItem[] = [
       {
         id: "T-1-1",
-        workItem: makeTodo("T-1-1"),
+        workItem: makeWorkItem("T-1-1"),
         state: "done",
         ciFailCount: 0,
         lastTransition: new Date().toISOString(),
       },
       {
         id: "T-1-2",
-        workItem: makeTodo("T-1-2"),
+        workItem: makeWorkItem("T-1-2"),
         state: "stuck",
         ciFailCount: 2,
         lastTransition: new Date().toISOString(),
@@ -1511,7 +1511,7 @@ describe("formatAnalytics with cost data", () => {
 describe("orchestrateLoop cost capture", () => {
   it("captures cost data from worker screen before cleanup", async () => {
     const orch = new Orchestrator({ reviewEnabled: false, wipLimit: 2, mergeStrategy: "asap" });
-    orch.addItem(makeTodo("T-1-1"));
+    orch.addItem(makeWorkItem("T-1-1"));
 
     let cycle = 0;
     const io = mockAnalyticsIO();
@@ -1573,7 +1573,7 @@ describe("orchestrateLoop cost capture", () => {
 
   it("handles missing cost data gracefully (readScreen returns no cost info)", async () => {
     const orch = new Orchestrator({ reviewEnabled: false, wipLimit: 2, mergeStrategy: "asap" });
-    orch.addItem(makeTodo("T-1-1"));
+    orch.addItem(makeWorkItem("T-1-1"));
 
     let cycle = 0;
     const io = mockAnalyticsIO();
@@ -1626,7 +1626,7 @@ describe("orchestrateLoop cost capture", () => {
 
   it("handles readScreen not provided (null cost data)", async () => {
     const orch = new Orchestrator({ reviewEnabled: false, wipLimit: 2, mergeStrategy: "asap" });
-    orch.addItem(makeTodo("T-1-1"));
+    orch.addItem(makeWorkItem("T-1-1"));
 
     let cycle = 0;
     const io = mockAnalyticsIO();
@@ -1779,7 +1779,7 @@ describe("collectRunMetrics with detection latency", () => {
     const items: OrchestratorItem[] = [
       {
         id: "T-1-1",
-        workItem: makeTodo("T-1-1"),
+        workItem: makeWorkItem("T-1-1"),
         state: "done",
         ciFailCount: 0,
         lastTransition: new Date().toISOString(),
@@ -1787,7 +1787,7 @@ describe("collectRunMetrics with detection latency", () => {
       },
       {
         id: "T-1-2",
-        workItem: makeTodo("T-1-2"),
+        workItem: makeWorkItem("T-1-2"),
         state: "done",
         ciFailCount: 0,
         lastTransition: new Date().toISOString(),
@@ -1795,7 +1795,7 @@ describe("collectRunMetrics with detection latency", () => {
       },
       {
         id: "T-1-3",
-        workItem: makeTodo("T-1-3"),
+        workItem: makeWorkItem("T-1-3"),
         state: "done",
         ciFailCount: 0,
         lastTransition: new Date().toISOString(),
@@ -1821,7 +1821,7 @@ describe("collectRunMetrics with detection latency", () => {
   it("flags slow detection when p95 exceeds 60s", () => {
     const items: OrchestratorItem[] = Array.from({ length: 20 }, (_, i) => ({
       id: `T-1-${i + 1}`,
-      workItem: makeTodo(`T-1-${i + 1}`),
+      workItem: makeWorkItem(`T-1-${i + 1}`),
       state: "done" as const,
       ciFailCount: 0,
       lastTransition: new Date().toISOString(),
@@ -1847,7 +1847,7 @@ describe("collectRunMetrics with detection latency", () => {
     const items: OrchestratorItem[] = [
       {
         id: "T-1-1",
-        workItem: makeTodo("T-1-1"),
+        workItem: makeWorkItem("T-1-1"),
         state: "done",
         ciFailCount: 0,
         lastTransition: new Date().toISOString(),
@@ -1870,7 +1870,7 @@ describe("collectRunMetrics with detection latency", () => {
     const items: OrchestratorItem[] = [
       {
         id: "T-1-1",
-        workItem: makeTodo("T-1-1"),
+        workItem: makeWorkItem("T-1-1"),
         state: "done",
         ciFailCount: 0,
         lastTransition: new Date().toISOString(),
@@ -1878,7 +1878,7 @@ describe("collectRunMetrics with detection latency", () => {
       },
       {
         id: "T-1-2",
-        workItem: makeTodo("T-1-2"),
+        workItem: makeWorkItem("T-1-2"),
         state: "done",
         ciFailCount: 0,
         lastTransition: new Date().toISOString(),
@@ -1902,7 +1902,7 @@ describe("collectRunMetrics with detection latency", () => {
     const items: OrchestratorItem[] = [
       {
         id: "T-1-1",
-        workItem: makeTodo("T-1-1"),
+        workItem: makeWorkItem("T-1-1"),
         state: "done",
         ciFailCount: 0,
         lastTransition: new Date().toISOString(),
@@ -2217,7 +2217,7 @@ describe("collectRunMetrics with detailed cost data", () => {
     const items: OrchestratorItem[] = [
       {
         id: "T-1-1",
-        workItem: makeTodo("T-1-1"),
+        workItem: makeWorkItem("T-1-1"),
         state: "done",
         ciFailCount: 0,
         prNumber: 10,
@@ -2246,9 +2246,9 @@ describe("collectRunMetrics with detailed cost data", () => {
 
   it("computes model breakdown across items", () => {
     const items: OrchestratorItem[] = [
-      { id: "T-1-1", workItem: makeTodo("T-1-1"), state: "done", ciFailCount: 0, prNumber: 1, lastTransition: new Date().toISOString() },
-      { id: "T-1-2", workItem: makeTodo("T-1-2"), state: "done", ciFailCount: 0, prNumber: 2, lastTransition: new Date().toISOString() },
-      { id: "T-1-3", workItem: makeTodo("T-1-3"), state: "done", ciFailCount: 0, prNumber: 3, lastTransition: new Date().toISOString() },
+      { id: "T-1-1", workItem: makeWorkItem("T-1-1"), state: "done", ciFailCount: 0, prNumber: 1, lastTransition: new Date().toISOString() },
+      { id: "T-1-2", workItem: makeWorkItem("T-1-2"), state: "done", ciFailCount: 0, prNumber: 2, lastTransition: new Date().toISOString() },
+      { id: "T-1-3", workItem: makeWorkItem("T-1-3"), state: "done", ciFailCount: 0, prNumber: 3, lastTransition: new Date().toISOString() },
     ];
 
     const costData = new Map<string, CostSummary>([
@@ -2267,9 +2267,9 @@ describe("collectRunMetrics with detailed cost data", () => {
 
   it("computes cost-per-PR for completed items with PRs", () => {
     const items: OrchestratorItem[] = [
-      { id: "T-1-1", workItem: makeTodo("T-1-1"), state: "done", ciFailCount: 0, prNumber: 1, lastTransition: new Date().toISOString() },
-      { id: "T-1-2", workItem: makeTodo("T-1-2"), state: "done", ciFailCount: 0, prNumber: 2, lastTransition: new Date().toISOString() },
-      { id: "T-1-3", workItem: makeTodo("T-1-3"), state: "stuck", ciFailCount: 2, lastTransition: new Date().toISOString() },
+      { id: "T-1-1", workItem: makeWorkItem("T-1-1"), state: "done", ciFailCount: 0, prNumber: 1, lastTransition: new Date().toISOString() },
+      { id: "T-1-2", workItem: makeWorkItem("T-1-2"), state: "done", ciFailCount: 0, prNumber: 2, lastTransition: new Date().toISOString() },
+      { id: "T-1-3", workItem: makeWorkItem("T-1-3"), state: "stuck", ciFailCount: 2, lastTransition: new Date().toISOString() },
     ];
 
     const costData = new Map<string, CostSummary>([
@@ -2286,7 +2286,7 @@ describe("collectRunMetrics with detailed cost data", () => {
 
   it("returns null costPerPr when no cost data", () => {
     const items: OrchestratorItem[] = [
-      { id: "T-1-1", workItem: makeTodo("T-1-1"), state: "done", ciFailCount: 0, prNumber: 1, lastTransition: new Date().toISOString() },
+      { id: "T-1-1", workItem: makeWorkItem("T-1-1"), state: "done", ciFailCount: 0, prNumber: 1, lastTransition: new Date().toISOString() },
     ];
 
     const metrics = collectRunMetrics(items, config, "2026-03-24T10:00:00.000Z", "2026-03-24T10:05:00.000Z", "claude");
@@ -2296,7 +2296,7 @@ describe("collectRunMetrics with detailed cost data", () => {
 
   it("returns undefined modelBreakdown when no model data", () => {
     const items: OrchestratorItem[] = [
-      { id: "T-1-1", workItem: makeTodo("T-1-1"), state: "done", ciFailCount: 0, lastTransition: new Date().toISOString() },
+      { id: "T-1-1", workItem: makeWorkItem("T-1-1"), state: "done", ciFailCount: 0, lastTransition: new Date().toISOString() },
     ];
 
     const metrics = collectRunMetrics(items, config, "2026-03-24T10:00:00.000Z", "2026-03-24T10:05:00.000Z", "claude");

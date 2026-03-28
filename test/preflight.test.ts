@@ -333,7 +333,7 @@ describe("preflight", () => {
 });
 
 describe("preflight with projectRoot", () => {
-  it("includes TODO check when projectRoot is provided", () => {
+  it("includes work item check when projectRoot is provided", () => {
     const runner: ShellRunner = (cmd: string, args: string[]): RunResult => {
       if (cmd === "git" && args.includes("--porcelain")) {
         return { stdout: "", stderr: "", exitCode: 0 };

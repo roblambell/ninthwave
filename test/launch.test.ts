@@ -48,10 +48,10 @@ function createMockMux(): Multiplexer & Record<string, Mock> {
 }
 
 /**
- * Set up a todos directory with individual todo files matching the valid.md fixture.
- * Returns the path to the todos directory.
+ * Set up a work items directory with individual work item files matching the valid.md fixture.
+ * Returns the path to the work items directory.
  */
-function setupTodosDir(repo: string): string {
+function setupWorkItemsDir(repo: string): string {
   const workDir = join(repo, ".ninthwave", "work");
   mkdirSync(workDir, { recursive: true });
 
@@ -137,9 +137,9 @@ function setupTodosDir(repo: string): string {
     ].join("\n"),
   );
 
-  // Commit TODO files so pre-flight checks pass
+  // Commit work item files so pre-flight checks pass
   spawnSync("git", ["-C", repo, "add", ".ninthwave/work/"], { stdio: "pipe" });
-  spawnSync("git", ["-C", repo, "commit", "-m", "Add todo files", "--quiet"], { stdio: "pipe" });
+  spawnSync("git", ["-C", repo, "commit", "-m", "Add work item files", "--quiet"], { stdio: "pipe" });
 
   return workDir;
 }
@@ -235,7 +235,7 @@ describe("cmdStart", () => {
 
   it("dies with no arguments", async () => {
     const repo = setupTempRepo();
-    const workDir = setupTodosDir(repo);
+    const workDir = setupWorkItemsDir(repo);
     const worktreeDir = join(repo, ".worktrees");
 
     const output = await captureOutput(() =>
@@ -247,7 +247,7 @@ describe("cmdStart", () => {
 
   it("dies when item ID not found", async () => {
     const repo = setupTempRepo();
-    const workDir = setupTodosDir(repo);
+    const workDir = setupWorkItemsDir(repo);
     const worktreeDir = join(repo, ".worktrees");
 
     const output = await captureOutput(() =>
@@ -260,7 +260,7 @@ describe("cmdStart", () => {
   it("launches session for a valid item", async () => {
     const mockMux = createMockMux();
     const repo = setupTempRepo();
-    const workDir = setupTodosDir(repo);
+    const workDir = setupWorkItemsDir(repo);
     const worktreeDir = join(repo, ".worktrees");
 
     const output = await captureOutput(() =>
@@ -276,7 +276,7 @@ describe("cmdStart", () => {
 
     const mockMux = createMockMux();
     const repo = setupTempRepo();
-    const workDir = setupTodosDir(repo);
+    const workDir = setupWorkItemsDir(repo);
     const worktreeDir = join(repo, ".worktrees");
 
     const output = await captureOutput(() =>
@@ -303,7 +303,7 @@ describe("launchSingleItem", () => {
   it("creates worktree and launches session for a single item", async () => {
     const mockMux = createMockMux();
     const repo = setupTempRepo();
-    const workDir = setupTodosDir(repo);
+    const workDir = setupWorkItemsDir(repo);
     const worktreeDir = join(repo, ".worktrees");
     const items = parseWorkItems(workDir, worktreeDir);
     const item = items.find((i) => i.id === "M-CI-1")!;
@@ -324,7 +324,7 @@ describe("launchSingleItem", () => {
     mockMux.launchWorkspace.mockReturnValueOnce(null);
 
     const repo = setupTempRepo();
-    const workDir = setupTodosDir(repo);
+    const workDir = setupWorkItemsDir(repo);
     const worktreeDir = join(repo, ".worktrees");
     const items = parseWorkItems(workDir, worktreeDir);
     const item = items.find((i) => i.id === "M-CI-1")!;
@@ -340,7 +340,7 @@ describe("launchSingleItem", () => {
   it("allocates a partition for the item", async () => {
     const mockMux = createMockMux();
     const repo = setupTempRepo();
-    const workDir = setupTodosDir(repo);
+    const workDir = setupWorkItemsDir(repo);
     const worktreeDir = join(repo, ".worktrees");
     const items = parseWorkItems(workDir, worktreeDir);
     const item = items.find((i) => i.id === "M-CI-1")!;
@@ -356,7 +356,7 @@ describe("launchSingleItem", () => {
   it("ensures worktree directory is created", async () => {
     const mockMux = createMockMux();
     const repo = setupTempRepo();
-    const workDir = setupTodosDir(repo);
+    const workDir = setupWorkItemsDir(repo);
     const worktreeDir = join(repo, ".worktrees");
     const items = parseWorkItems(workDir, worktreeDir);
     const item = items.find((i) => i.id === "M-CI-1")!;
@@ -373,7 +373,7 @@ describe("launchSingleItem", () => {
   it("logs warning when fetchOrigin fails but still creates worktree", async () => {
     const mockMux = createMockMux();
     const repo = setupTempRepo();
-    const workDir = setupTodosDir(repo);
+    const workDir = setupWorkItemsDir(repo);
     const worktreeDir = join(repo, ".worktrees");
     const items = parseWorkItems(workDir, worktreeDir);
     const item = items.find((i) => i.id === "M-CI-1")!;
@@ -397,7 +397,7 @@ describe("launchSingleItem", () => {
   it("logs warning when ffMerge fails but still creates worktree", async () => {
     const mockMux = createMockMux();
     const repo = setupTempRepo();
-    const workDir = setupTodosDir(repo);
+    const workDir = setupWorkItemsDir(repo);
     const worktreeDir = join(repo, ".worktrees");
     const items = parseWorkItems(workDir, worktreeDir);
     const item = items.find((i) => i.id === "M-CI-1")!;
@@ -421,7 +421,7 @@ describe("launchSingleItem", () => {
   it("warning includes actionable context about stale worktree", async () => {
     const mockMux = createMockMux();
     const repo = setupTempRepo();
-    const workDir = setupTodosDir(repo);
+    const workDir = setupWorkItemsDir(repo);
     const worktreeDir = join(repo, ".worktrees");
     const items = parseWorkItems(workDir, worktreeDir);
     const item = items.find((i) => i.id === "M-CI-1")!;
@@ -449,7 +449,7 @@ describe("launchSingleItem", () => {
   it("returns correct worktreePath for hub repo items", async () => {
     const mockMux = createMockMux();
     const repo = setupTempRepo();
-    const workDir = setupTodosDir(repo);
+    const workDir = setupWorkItemsDir(repo);
     const worktreeDir = join(repo, ".worktrees");
     const items = parseWorkItems(workDir, worktreeDir);
     const item = items.find((i) => i.id === "M-CI-1")!;
@@ -464,7 +464,7 @@ describe("launchSingleItem", () => {
   it("creates worktree from dep branch when baseBranch is set", async () => {
     const mockMux = createMockMux();
     const repo = setupTempRepo();
-    const workDir = setupTodosDir(repo);
+    const workDir = setupWorkItemsDir(repo);
     const worktreeDir = join(repo, ".worktrees");
     const items = parseWorkItems(workDir, worktreeDir);
     const item = items.find((i) => i.id === "M-CI-1")!;
@@ -488,7 +488,7 @@ describe("launchSingleItem", () => {
   it("fetches dep branch instead of main when baseBranch is set", async () => {
     const mockMux = createMockMux();
     const repo = setupTempRepo();
-    const workDir = setupTodosDir(repo);
+    const workDir = setupWorkItemsDir(repo);
     const worktreeDir = join(repo, ".worktrees");
     const items = parseWorkItems(workDir, worktreeDir);
     const item = items.find((i) => i.id === "M-CI-1")!;
@@ -512,7 +512,7 @@ describe("launchSingleItem", () => {
   it("includes BASE_BRANCH in system prompt when baseBranch is set", async () => {
     const mockMux = createMockMux();
     const repo = setupTempRepo();
-    const workDir = setupTodosDir(repo);
+    const workDir = setupWorkItemsDir(repo);
     const worktreeDir = join(repo, ".worktrees");
     const items = parseWorkItems(workDir, worktreeDir);
     const item = items.find((i) => i.id === "M-CI-1")!;
@@ -534,7 +534,7 @@ describe("launchSingleItem", () => {
   it("does not include BASE_BRANCH in system prompt when baseBranch is not set", async () => {
     const mockMux = createMockMux();
     const repo = setupTempRepo();
-    const workDir = setupTodosDir(repo);
+    const workDir = setupWorkItemsDir(repo);
     const worktreeDir = join(repo, ".worktrees");
     const items = parseWorkItems(workDir, worktreeDir);
     const item = items.find((i) => i.id === "M-CI-1")!;
@@ -554,7 +554,7 @@ describe("launchSingleItem", () => {
   it("non-stacked launch still fetches main and calls ffMerge", async () => {
     const mockMux = createMockMux();
     const repo = setupTempRepo();
-    const workDir = setupTodosDir(repo);
+    const workDir = setupWorkItemsDir(repo);
     const worktreeDir = join(repo, ".worktrees");
     const items = parseWorkItems(workDir, worktreeDir);
     const item = items.find((i) => i.id === "M-CI-1")!;
@@ -597,7 +597,7 @@ describe("launchSingleItem external worktree handling", () => {
   it("removes external worktree and retries branch deletion on failure", async () => {
     const mockMux = createMockMux();
     const repo = setupTempRepo();
-    const workDir = setupTodosDir(repo);
+    const workDir = setupWorkItemsDir(repo);
     const worktreeDir = join(repo, ".worktrees");
     const items = parseWorkItems(workDir, worktreeDir);
     const item = items.find((i) => i.id === "M-CI-1")!;
@@ -631,7 +631,7 @@ describe("launchSingleItem external worktree handling", () => {
   it("propagates error when external worktree removal fails on retry", async () => {
     const mockMux = createMockMux();
     const repo = setupTempRepo();
-    const workDir = setupTodosDir(repo);
+    const workDir = setupWorkItemsDir(repo);
     const worktreeDir = join(repo, ".worktrees");
     const items = parseWorkItems(workDir, worktreeDir);
     const item = items.find((i) => i.id === "M-CI-1")!;
@@ -670,7 +670,7 @@ describe("launchSingleItem external worktree handling", () => {
   it("propagates error when no external worktree found but branch deletion fails", async () => {
     const mockMux = createMockMux();
     const repo = setupTempRepo();
-    const workDir = setupTodosDir(repo);
+    const workDir = setupWorkItemsDir(repo);
     const worktreeDir = join(repo, ".worktrees");
     const items = parseWorkItems(workDir, worktreeDir);
     const item = items.find((i) => i.id === "M-CI-1")!;
@@ -701,7 +701,7 @@ describe("launchSingleItem external worktree handling", () => {
   it("handles branch in both orchestrator worktree and external worktree", async () => {
     const mockMux = createMockMux();
     const repo = setupTempRepo();
-    const workDir = setupTodosDir(repo);
+    const workDir = setupWorkItemsDir(repo);
     const worktreeDir = join(repo, ".worktrees");
     const items = parseWorkItems(workDir, worktreeDir);
     const item = items.find((i) => i.id === "M-CI-1")!;
@@ -870,8 +870,8 @@ describe("sanitizeTitle", () => {
 describe("extractItemText", () => {
   afterEach(() => cleanupTempRepos());
 
-  /** Helper to create a todos directory with individual todo files. */
-  function createTodosDir(repo: string): string {
+  /** Helper to create a work items directory with individual work item files. */
+  function createWorkItemsDir(repo: string): string {
     const workDir = join(repo, ".ninthwave", "work");
     mkdirSync(workDir, { recursive: true });
     return workDir;
@@ -879,7 +879,7 @@ describe("extractItemText", () => {
 
   it("returns full file contents for a valid ID", () => {
     const repo = setupTempRepo();
-    const workDir = createTodosDir(repo);
+    const workDir = createWorkItemsDir(repo);
     const fileContent = [
       "# Fix: Some bug (H-BUG-1)",
       "",
@@ -915,7 +915,7 @@ describe("extractItemText", () => {
 
   it("returns empty string when ID is not found", () => {
     const repo = setupTempRepo();
-    const workDir = createTodosDir(repo);
+    const workDir = createWorkItemsDir(repo);
     writeFileSync(
       join(workDir, "1-bugs--H-BUG-1.md"),
       "# Fix: Some bug (H-BUG-1)\n\n**Priority:** High\n**Depends on:** None\n**Domain:** bugs\n",
@@ -936,7 +936,7 @@ describe("extractItemText", () => {
 
   it("returns correct file for ID that is a prefix of another", () => {
     const repo = setupTempRepo();
-    const workDir = createTodosDir(repo);
+    const workDir = createWorkItemsDir(repo);
     writeFileSync(
       join(workDir, "1-bugs--H-BUG-10.md"),
       "# Fix: Item ten (H-BUG-10)\n\n**Priority:** High\n**Depends on:** None\n**Domain:** bugs\n\nDescription for 10.\n",
@@ -946,7 +946,7 @@ describe("extractItemText", () => {
       "# Fix: Item one (H-BUG-1)\n\n**Priority:** High\n**Depends on:** None\n**Domain:** bugs\n\nDescription for 1.\n",
     );
 
-    // File-per-todo uses exact suffix matching (--H-BUG-1.md), so H-BUG-1 matches exactly
+    // File-per-item uses exact suffix matching (--H-BUG-1.md), so H-BUG-1 matches exactly
     const text = extractItemText(workDir, "H-BUG-1");
     expect(text).toContain("Item one");
     expect(text).toContain("Description for 1.");
@@ -955,7 +955,7 @@ describe("extractItemText", () => {
 
   it("returns file contents including acceptance criteria", () => {
     const repo = setupTempRepo();
-    const workDir = createTodosDir(repo);
+    const workDir = createWorkItemsDir(repo);
     writeFileSync(
       join(workDir, "3-misc--L-LAST-1.md"),
       [
@@ -980,7 +980,7 @@ describe("extractItemText", () => {
 
   it("returns empty string when directory is empty", () => {
     const repo = setupTempRepo();
-    const workDir = createTodosDir(repo);
+    const workDir = createWorkItemsDir(repo);
 
     const text = extractItemText(workDir, "H-BUG-1");
     expect(text).toBe("");
@@ -1092,7 +1092,7 @@ describe("launchSingleItem agentName default", () => {
   it("launches with --agent ninthwave-implementer by default", async () => {
     const mockMux = createMockMux();
     const repo = setupTempRepo();
-    const workDir = setupTodosDir(repo);
+    const workDir = setupWorkItemsDir(repo);
     const worktreeDir = join(repo, ".worktrees");
     const items = parseWorkItems(workDir, worktreeDir);
     const item = items.find((i) => i.id === "M-CI-1")!;
@@ -1155,7 +1155,7 @@ describe("launchReviewWorker", () => {
       expect(res!.workspaceRef).toBe("workspace:1");
     });
 
-    // Should fetch the todo branch
+    // Should fetch the item branch
     expect(fetchOrigin).toHaveBeenCalledWith(repo, "ninthwave/H-RVW-1");
     // Should create worktree with review branch from origin/ninthwave/{id}
     expect(createWorktree).toHaveBeenCalledWith(
@@ -1318,7 +1318,7 @@ describe("launchReviewWorker", () => {
 // ── WORK_ITEM_ID_CLI_PATTERN tests ───────────────────────────────────────
 
 describe("WORK_ITEM_ID_CLI_PATTERN", () => {
-  it("matches valid uppercase TODO IDs", () => {
+  it("matches valid uppercase item IDs", () => {
     expect(WORK_ITEM_ID_CLI_PATTERN.test("H-RR-1")).toBe(true);
     expect(WORK_ITEM_ID_CLI_PATTERN.test("M-SF-1")).toBe(true);
     expect(WORK_ITEM_ID_CLI_PATTERN.test("L-VIS-15")).toBe(true);
@@ -1340,7 +1340,7 @@ describe("WORK_ITEM_ID_CLI_PATTERN", () => {
     expect(WORK_ITEM_ID_CLI_PATTERN.test("status")).toBe(false);
   });
 
-  it("rejects lowercase TODO IDs", () => {
+  it("rejects lowercase item IDs", () => {
     expect(WORK_ITEM_ID_CLI_PATTERN.test("h-rr-1")).toBe(false);
     expect(WORK_ITEM_ID_CLI_PATTERN.test("m-sf-1")).toBe(false);
   });
@@ -1373,8 +1373,8 @@ describe("cmdRunItems", () => {
     cleanupTempRepos();
   });
 
-  /** Set up todos with a dependency diamond: A -> B, A -> C, B -> D, C -> D */
-  function setupDiamondTodos(repo: string): string {
+  /** Set up items with a dependency diamond: A -> B, A -> C, B -> D, C -> D */
+  function setupDiamondItems(repo: string): string {
     const workDir = join(repo, ".ninthwave", "work");
     mkdirSync(workDir, { recursive: true });
 
@@ -1451,13 +1451,13 @@ describe("cmdRunItems", () => {
     );
 
     spawnSync("git", ["-C", repo, "add", ".ninthwave/work/"], { stdio: "pipe" });
-    spawnSync("git", ["-C", repo, "commit", "-m", "Add diamond todos", "--quiet"], { stdio: "pipe" });
+    spawnSync("git", ["-C", repo, "commit", "-m", "Add diamond items", "--quiet"], { stdio: "pipe" });
 
     return workDir;
   }
 
-  /** Set up todos with circular dependency: A -> B, B -> A */
-  function setupCircularTodos(repo: string): string {
+  /** Set up items with circular dependency: A -> B, B -> A */
+  function setupCircularItems(repo: string): string {
     const workDir = join(repo, ".ninthwave", "work");
     mkdirSync(workDir, { recursive: true });
 
@@ -1490,14 +1490,14 @@ describe("cmdRunItems", () => {
     );
 
     spawnSync("git", ["-C", repo, "add", ".ninthwave/work/"], { stdio: "pipe" });
-    spawnSync("git", ["-C", repo, "commit", "-m", "Add circular todos", "--quiet"], { stdio: "pipe" });
+    spawnSync("git", ["-C", repo, "commit", "-m", "Add circular items", "--quiet"], { stdio: "pipe" });
 
     return workDir;
   }
 
   it("dies when an ID is not found", async () => {
     const repo = setupTempRepo();
-    const workDir = setupTodosDir(repo);
+    const workDir = setupWorkItemsDir(repo);
     const worktreeDir = join(repo, ".worktrees");
 
     const output = await captureOutput(() =>
@@ -1510,7 +1510,7 @@ describe("cmdRunItems", () => {
 
   it("dies when a dependency is not included and not completed", async () => {
     const repo = setupTempRepo();
-    const workDir = setupTodosDir(repo);
+    const workDir = setupWorkItemsDir(repo);
     const worktreeDir = join(repo, ".worktrees");
 
     // H-CI-2 depends on M-CI-1, which is not passed and not completed
@@ -1525,7 +1525,7 @@ describe("cmdRunItems", () => {
 
   it("suggests including the missing dependency", async () => {
     const repo = setupTempRepo();
-    const workDir = setupTodosDir(repo);
+    const workDir = setupWorkItemsDir(repo);
     const worktreeDir = join(repo, ".worktrees");
 
     const output = await captureOutput(() =>
@@ -1539,7 +1539,7 @@ describe("cmdRunItems", () => {
   it("launches single ID with no deps (degenerates to simple launch)", async () => {
     const mockMux = createMockMux();
     const repo = setupTempRepo();
-    const workDir = setupTodosDir(repo);
+    const workDir = setupWorkItemsDir(repo);
     const worktreeDir = join(repo, ".worktrees");
 
     const output = await captureOutput(() =>
@@ -1555,7 +1555,7 @@ describe("cmdRunItems", () => {
   it("launches two items in same batch when no inter-deps", async () => {
     const mockMux = createMockMux();
     const repo = setupTempRepo();
-    const workDir = setupTodosDir(repo);
+    const workDir = setupWorkItemsDir(repo);
     const worktreeDir = join(repo, ".worktrees");
 
     // M-CI-1 and C-UO-1 have no inter-dependencies
@@ -1571,7 +1571,7 @@ describe("cmdRunItems", () => {
   it("computes correct topo-sort for dependency diamond", async () => {
     const mockMux = createMockMux();
     const repo = setupTempRepo();
-    const workDir = setupDiamondTodos(repo);
+    const workDir = setupDiamondItems(repo);
     const worktreeDir = join(repo, ".worktrees");
 
     const output = await captureOutput(() =>
@@ -1591,7 +1591,7 @@ describe("cmdRunItems", () => {
 
   it("dies with helpful message on circular dependency", async () => {
     const repo = setupTempRepo();
-    const workDir = setupCircularTodos(repo);
+    const workDir = setupCircularItems(repo);
     const worktreeDir = join(repo, ".worktrees");
 
     const output = await captureOutput(() =>
@@ -1603,7 +1603,7 @@ describe("cmdRunItems", () => {
     expect(output).toContain("H-CYC-2");
   });
 
-  it("allows dependency that's been completed (not in TODO list)", async () => {
+  it("allows dependency that's been completed (not in item list)", async () => {
     const mockMux = createMockMux();
     const repo = setupTempRepo();
     const workDir = join(repo, ".ninthwave", "work");
@@ -1629,11 +1629,11 @@ describe("cmdRunItems", () => {
     );
 
     spawnSync("git", ["-C", repo, "add", ".ninthwave/work/"], { stdio: "pipe" });
-    spawnSync("git", ["-C", repo, "commit", "-m", "Add todo", "--quiet"], { stdio: "pipe" });
+    spawnSync("git", ["-C", repo, "commit", "-m", "Add work item", "--quiet"], { stdio: "pipe" });
 
     const worktreeDir = join(repo, ".worktrees");
 
-    // M-CI-1 doesn't exist in the TODO list → treated as completed → should be OK
+    // M-CI-1 doesn't exist in the item list → treated as completed → should be OK
     const output = await captureOutput(() =>
       cmdRunItems(["H-CI-2"], workDir, worktreeDir, repo, mockMux),
     );
@@ -1648,7 +1648,7 @@ describe("cmdRunItems", () => {
     mockMux.launchWorkspace.mockReturnValue(null);
 
     const repo = setupTempRepo();
-    const workDir = setupTodosDir(repo);
+    const workDir = setupWorkItemsDir(repo);
     const worktreeDir = join(repo, ".worktrees");
 
     const output = await captureOutput(() =>
@@ -1662,7 +1662,7 @@ describe("cmdRunItems", () => {
   it("logs batch plan before launching", async () => {
     const mockMux = createMockMux();
     const repo = setupTempRepo();
-    const workDir = setupTodosDir(repo);
+    const workDir = setupWorkItemsDir(repo);
     const worktreeDir = join(repo, ".worktrees");
 
     const output = await captureOutput(() =>

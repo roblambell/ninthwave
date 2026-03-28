@@ -308,7 +308,7 @@ describe("WebSocketCrewBroker", () => {
   // ── Claim with timeout ──────────────────────────────────────────
 
   describe("claim", () => {
-    it("returns todoId on successful claim", async () => {
+    it("returns itemId on successful claim", async () => {
       server = startTestServer({
         onMessage: (ws, msg) => {
           if (msg.type === "claim") {
@@ -337,7 +337,7 @@ describe("WebSocketCrewBroker", () => {
       broker.disconnect();
     });
 
-    it("returns null on claim with no available todos", async () => {
+    it("returns null on claim with no available items", async () => {
       server = startTestServer({
         onMessage: (ws, msg) => {
           if (msg.type === "claim") {
@@ -460,7 +460,7 @@ describe("WebSocketCrewBroker", () => {
   // ── Reconnect reconciliation ──────────────────────────────────────
 
   describe("reconnect reconciliation", () => {
-    it("handles reconnect_state with resumed/released/reclaimed TODOs", async () => {
+    it("handles reconnect_state with resumed/released/reclaimed items", async () => {
       let reconnectState: ReconnectState | null = null;
 
       // Track connections on server side so we can close them and detect reconnects

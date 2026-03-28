@@ -18,7 +18,7 @@ import {
 describe("cross-repo", () => {
   afterEach(() => cleanupTempRepos());
 
-  // Group 1: parse_todos() Repo field extraction
+  // Group 1: parseWorkItems() Repo field extraction
   describe("repo field parsing", () => {
     it("parses all 4 items from cross_repo fixture", () => {
       const repo = setupTempRepo();

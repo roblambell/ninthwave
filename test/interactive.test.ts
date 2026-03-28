@@ -18,7 +18,7 @@ import type { WorkItem } from "../core/types.ts";
 
 // ── Helpers ──────────────────────────────────────────────────────────
 
-function makeTodo(
+function makeWorkItem(
   id: string,
   title: string,
   priority: "critical" | "high" | "medium" | "low" = "medium",
@@ -32,7 +32,7 @@ function makeTodo(
     dependencies: deps,
     bundleWith: [],
     status: "open",
-    filePath: `/tmp/todos/${id}.md`,
+    filePath: `/tmp/items/${id}.md`,
     repoAlias: "",
     rawText: `## ${id}\n${title}`,
     filePaths: [],
@@ -113,63 +113,63 @@ describe("parseSelection", () => {
 // ── promptItems ──────────────────────────────────────────────────────
 
 describe("promptItems", () => {
-  it("returns empty array for empty todo list", async () => {
+  it("returns empty array for empty item list", async () => {
     const prompt = makePrompt([]);
     const result = await promptItems([], prompt);
     expect(result).toEqual([]);
   });
 
   it("returns selected IDs for valid selection", async () => {
-    const todos = [
-      makeTodo("A-1", "First task", "high"),
-      makeTodo("B-2", "Second task", "medium"),
-      makeTodo("C-3", "Third task", "low"),
+    const items = [
+      makeWorkItem("A-1", "First task", "high"),
+      makeWorkItem("B-2", "Second task", "medium"),
+      makeWorkItem("C-3", "Third task", "low"),
     ];
     const prompt = makePrompt(["1 3"]);
-    const result = await promptItems(todos, prompt);
+    const result = await promptItems(items, prompt);
     // Sorted by priority: A-1(high), B-2(medium), C-3(low)
     expect(result).toEqual(["A-1", "C-3"]);
   });
 
   it("returns all IDs when 'all' is entered", async () => {
-    const todos = [
-      makeTodo("A-1", "First"),
-      makeTodo("B-2", "Second"),
+    const items = [
+      makeWorkItem("A-1", "First"),
+      makeWorkItem("B-2", "Second"),
     ];
     const prompt = makePrompt(["all"]);
-    const result = await promptItems(todos, prompt);
+    const result = await promptItems(items, prompt);
     expect(result).toHaveLength(2);
     expect(result).toContain("A-1");
     expect(result).toContain("B-2");
   });
 
   it("returns empty when user quits", async () => {
-    const todos = [makeTodo("A-1", "First")];
+    const items = [makeWorkItem("A-1", "First")];
     const prompt = makePrompt(["q"]);
-    const result = await promptItems(todos, prompt);
+    const result = await promptItems(items, prompt);
     expect(result).toEqual([]);
   });
 
   it("re-prompts on invalid input then accepts valid", async () => {
-    const todos = [
-      makeTodo("A-1", "First"),
-      makeTodo("B-2", "Second"),
+    const items = [
+      makeWorkItem("A-1", "First"),
+      makeWorkItem("B-2", "Second"),
     ];
     // First invalid, then valid
     const prompt = makePrompt(["abc", "1"]);
-    const result = await promptItems(todos, prompt);
+    const result = await promptItems(items, prompt);
     expect(result).toEqual(["A-1"]);
   });
 
   it("sorts items by priority", async () => {
-    const todos = [
-      makeTodo("L-1", "Low task", "low"),
-      makeTodo("C-1", "Critical task", "critical"),
-      makeTodo("M-1", "Medium task", "medium"),
+    const items = [
+      makeWorkItem("L-1", "Low task", "low"),
+      makeWorkItem("C-1", "Critical task", "critical"),
+      makeWorkItem("M-1", "Medium task", "medium"),
     ];
     // Select all to verify sort order
     const prompt = makePrompt(["all"]);
-    const result = await promptItems(todos, prompt);
+    const result = await promptItems(items, prompt);
     expect(result).toEqual(["C-1", "M-1", "L-1"]);
   });
 });
@@ -250,7 +250,7 @@ describe("promptWipLimit", () => {
 // ── confirmSummary ───────────────────────────────────────────────────
 
 describe("confirmSummary", () => {
-  const todos = [makeTodo("A-1", "First task")];
+  const items = [makeWorkItem("A-1", "First task")];
   const result: InteractiveResult = {
     itemIds: ["A-1"],
     mergeStrategy: "asap",
@@ -258,17 +258,17 @@ describe("confirmSummary", () => {
   };
 
   it("returns true on Y (default)", async () => {
-    const confirmed = await confirmSummary(result, todos, makePrompt([""]));
+    const confirmed = await confirmSummary(result, items, makePrompt([""]));
     expect(confirmed).toBe(true);
   });
 
   it("returns false on n", async () => {
-    const confirmed = await confirmSummary(result, todos, makePrompt(["n"]));
+    const confirmed = await confirmSummary(result, items, makePrompt(["n"]));
     expect(confirmed).toBe(false);
   });
 
   it("returns false on no", async () => {
-    const confirmed = await confirmSummary(result, todos, makePrompt(["no"]));
+    const confirmed = await confirmSummary(result, items, makePrompt(["no"]));
     expect(confirmed).toBe(false);
   });
 });
@@ -276,15 +276,15 @@ describe("confirmSummary", () => {
 // ── runInteractiveFlow ───────────────────────────────────────────────
 
 describe("runInteractiveFlow", () => {
-  const todos = [
-    makeTodo("A-1", "First task", "high"),
-    makeTodo("B-2", "Second task", "medium"),
+  const items = [
+    makeWorkItem("A-1", "First task", "high"),
+    makeWorkItem("B-2", "Second task", "medium"),
   ];
 
   it("returns complete result for valid flow", async () => {
     // Answers: select items "1 2", merge strategy "1" (asap), wip limit "5", confirm ""
     const prompt = makePrompt(["1 2", "1", "5", ""]);
-    const result = await runInteractiveFlow(todos, 3, { prompt });
+    const result = await runInteractiveFlow(items, 3, { prompt });
 
     expect(result).not.toBeNull();
     expect(result!.itemIds).toEqual(["A-1", "B-2"]);
@@ -294,18 +294,18 @@ describe("runInteractiveFlow", () => {
 
   it("returns null when user quits at item selection", async () => {
     const prompt = makePrompt(["q"]);
-    const result = await runInteractiveFlow(todos, 3, { prompt });
+    const result = await runInteractiveFlow(items, 3, { prompt });
     expect(result).toBeNull();
   });
 
   it("returns null when user cancels at confirmation", async () => {
     // Answers: select items "1", merge strategy "1", wip limit "", confirm "n"
     const prompt = makePrompt(["1", "1", "", "n"]);
-    const result = await runInteractiveFlow(todos, 3, { prompt });
+    const result = await runInteractiveFlow(items, 3, { prompt });
     expect(result).toBeNull();
   });
 
-  it("returns null for empty todo list", async () => {
+  it("returns null for empty item list", async () => {
     const prompt = makePrompt([]);
     const result = await runInteractiveFlow([], 3, { prompt });
     expect(result).toBeNull();
@@ -314,7 +314,7 @@ describe("runInteractiveFlow", () => {
   it("completes flow with approved strategy and custom wip", async () => {
     // Answers: select "all", merge "2" (approved), wip "7", confirm ""
     const prompt = makePrompt(["all", "2", "7", ""]);
-    const result = await runInteractiveFlow(todos, 3, { prompt });
+    const result = await runInteractiveFlow(items, 3, { prompt });
 
     expect(result).not.toBeNull();
     expect(result!.mergeStrategy).toBe("approved");
@@ -326,17 +326,17 @@ describe("runInteractiveFlow", () => {
 
 describe("displayItemsSummary", () => {
   it("output contains item IDs, titles, and priority labels", () => {
-    const todos = [
-      makeTodo("A-1", "First task", "high"),
-      makeTodo("B-2", "Second task", "medium"),
-      makeTodo("C-3", "Third task", "low"),
+    const items = [
+      makeWorkItem("A-1", "First task", "high"),
+      makeWorkItem("B-2", "Second task", "medium"),
+      makeWorkItem("C-3", "Third task", "low"),
     ];
 
     const logs: string[] = [];
     const origLog = console.log;
     console.log = (...args: unknown[]) => logs.push(args.join(" "));
     try {
-      displayItemsSummary(todos);
+      displayItemsSummary(items);
     } finally {
       console.log = origLog;
     }
@@ -354,17 +354,17 @@ describe("displayItemsSummary", () => {
   });
 
   it("renders items sorted by priority", () => {
-    const todos = [
-      makeTodo("L-1", "Low task", "low"),
-      makeTodo("C-1", "Critical task", "critical"),
-      makeTodo("M-1", "Medium task", "medium"),
+    const items = [
+      makeWorkItem("L-1", "Low task", "low"),
+      makeWorkItem("C-1", "Critical task", "critical"),
+      makeWorkItem("M-1", "Medium task", "medium"),
     ];
 
     const logs: string[] = [];
     const origLog = console.log;
     console.log = (...args: unknown[]) => logs.push(args.join(" "));
     try {
-      displayItemsSummary(todos);
+      displayItemsSummary(items);
     } finally {
       console.log = origLog;
     }
@@ -379,15 +379,15 @@ describe("displayItemsSummary", () => {
   });
 
   it("shows dependency info for items with deps", () => {
-    const todos = [
-      makeTodo("A-1", "First task", "high", ["X-1", "Y-2"]),
+    const items = [
+      makeWorkItem("A-1", "First task", "high", ["X-1", "Y-2"]),
     ];
 
     const logs: string[] = [];
     const origLog = console.log;
     console.log = (...args: unknown[]) => logs.push(args.join(" "));
     try {
-      displayItemsSummary(todos);
+      displayItemsSummary(items);
     } finally {
       console.log = origLog;
     }
@@ -396,7 +396,7 @@ describe("displayItemsSummary", () => {
     expect(output).toContain("deps: X-1, Y-2");
   });
 
-  it("handles empty todo list", () => {
+  it("handles empty item list", () => {
     const logs: string[] = [];
     const origLog = console.log;
     console.log = (...args: unknown[]) => logs.push(args.join(" "));

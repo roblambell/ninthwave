@@ -1,5 +1,5 @@
 import { describe, it, expect, afterEach, vi } from "vitest";
-import { setupTempRepo, useFixtureDir, writeTodoFiles, cleanupTempRepos } from "./helpers.ts";
+import { setupTempRepo, useFixtureDir, writeWorkItemFiles, cleanupTempRepos } from "./helpers.ts";
 import { join } from "path";
 import { parseWorkItems } from "../core/parser.ts";
 import {
@@ -117,7 +117,7 @@ describe("batch-order", () => {
     const repo = setupTempRepo();
     const worktreeDir = join(repo, ".worktrees");
 
-    const workDir = writeTodoFiles(repo, `## Mixed
+    const workDir = writeWorkItemFiles(repo, `## Mixed
 
 ### Feat: Free item (H-MX-1)
 
@@ -279,7 +279,7 @@ describe("computeBatches", () => {
   it("partial circular: assigns free items then throws for cycle", () => {
     const repo = setupTempRepo();
 
-    const workDir = writeTodoFiles(repo, `## Mixed
+    const workDir = writeWorkItemFiles(repo, `## Mixed
 
 ### Feat: Free item (H-MX-1)
 
@@ -340,7 +340,7 @@ Acceptance: Test fixture only.
     const repo = setupTempRepo();
 
     // Diamond: A has no deps, B depends on A, C depends on A, D depends on B+C
-    const workDir = writeTodoFiles(repo, `## Diamond
+    const workDir = writeWorkItemFiles(repo, `## Diamond
 
 ### Feat: Root (H-DI-1)
 
@@ -421,7 +421,7 @@ Acceptance: Test fixture only.
     const repo = setupTempRepo();
 
     // Three domain items + one item depending on the whole domain via wildcard
-    const workDir = writeTodoFiles(repo, `## Alpha
+    const workDir = writeWorkItemFiles(repo, `## Alpha
 
 ### Feat: A1 (H-AL-1)
 
