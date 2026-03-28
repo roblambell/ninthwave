@@ -25,7 +25,7 @@ import {
   cmdAutopilotWatch,
   cmdPrWatch,
   cmdPrActivity,
-} from "./commands/watch.ts";
+} from "./commands/pr-monitor.ts";
 import { cmdCiFailures } from "./commands/ci.ts";
 import { cmdVersionBump } from "./commands/version-bump.ts";
 import { cmdSetup } from "./commands/setup.ts";

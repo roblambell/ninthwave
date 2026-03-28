@@ -24,7 +24,7 @@ import {
 } from "../orchestrator.ts";
 import { parseTodos } from "../parser.ts";
 import { resolveRepo, getWorktreeInfo, bootstrapRepo } from "../cross-repo.ts";
-import { checkPrStatus, scanExternalPRs } from "./watch.ts";
+import { checkPrStatus, scanExternalPRs } from "./pr-monitor.ts";
 import { launchSingleItem, launchReviewWorker, launchRepairWorker, detectAiTool, cleanStaleBranchForReuse } from "./start.ts";
 import { cleanSingleWorktree } from "./clean.ts";
 import { prMerge, prComment, checkPrMergeable, getRepoOwner, applyGithubToken, fetchTrustedPrComments, upsertOrchestratorComment } from "../gh.ts";
@@ -476,7 +476,7 @@ const SKIP_REVIEW_LABEL = "ninthwave: skip-review";
 
 /** Dependencies for processExternalReviews, injectable for testing. */
 export interface ExternalReviewDeps {
-  scanExternalPRs: (repoRoot: string) => import("./watch.ts").ExternalPR[];
+  scanExternalPRs: (repoRoot: string) => import("./pr-monitor.ts").ExternalPR[];
   launchReview: (prNumber: number, repoRoot: string) => { workspaceRef: string } | null;
   cleanReview: (reviewWorkspaceRef: string) => boolean;
   log: (entry: LogEntry) => void;

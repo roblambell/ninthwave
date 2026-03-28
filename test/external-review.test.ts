@@ -3,7 +3,7 @@
 // No vi.mock — uses dependency injection to stay bun-test compatible.
 
 import { describe, it, expect, vi } from "vitest";
-import { scanExternalPRs, type ExternalPR, type ScanExternalPRsDeps } from "../core/commands/watch.ts";
+import { scanExternalPRs, type ExternalPR, type ScanExternalPRsDeps } from "../core/commands/pr-monitor.ts";
 import {
   readExternalReviews,
   writeExternalReviews,
@@ -43,7 +43,7 @@ function makeReviewItem(overrides: Partial<ExternalReviewItem> = {}): ExternalRe
   };
 }
 
-function mockScanDeps(prs: Array<Record<string, unknown>>): import("../core/commands/watch.ts").ScanExternalPRsDeps {
+function mockScanDeps(prs: Array<Record<string, unknown>>): import("../core/commands/pr-monitor.ts").ScanExternalPRsDeps {
   return {
     ghRunner: (_root, _args) => ({
       exitCode: 0,

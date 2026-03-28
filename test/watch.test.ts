@@ -30,7 +30,7 @@ import {
   findGoneItems,
   TRUSTED_ASSOC,
   CI_FAILURE_STATES,
-} from "../core/commands/watch.ts";
+} from "../core/commands/pr-monitor.ts";
 
 function captureOutput(fn: () => void): string {
   const lines: string[] = [];
