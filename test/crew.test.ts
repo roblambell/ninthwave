@@ -194,7 +194,7 @@ describe("WebSocketCrewBroker", () => {
   it("connects and disconnects", async () => {
     server = startTestServer();
     const { log } = createLogCollector();
-    const broker = new WebSocketCrewBroker(tempDir, server.port, "test-crew", {
+    const broker = new WebSocketCrewBroker(tempDir, `ws://localhost:${server.port}`, "test-crew", {
       log,
       heartbeatIntervalMs: 60_000, // don't fire during test
     });
@@ -208,7 +208,7 @@ describe("WebSocketCrewBroker", () => {
     server.server.stop();
     server = startTestServer();
 
-    const broker2 = new WebSocketCrewBroker(tempDir, server.port, "test-crew", {
+    const broker2 = new WebSocketCrewBroker(tempDir, `ws://localhost:${server.port}`, "test-crew", {
       log,
       heartbeatIntervalMs: 60_000,
     });
@@ -253,7 +253,7 @@ describe("WebSocketCrewBroker", () => {
 
     try {
       const { log } = createLogCollector();
-      const broker = new WebSocketCrewBroker(tempDir, customServer.port, "test-crew", {
+      const broker = new WebSocketCrewBroker(tempDir, `ws://localhost:${customServer.port}`, "test-crew", {
         log,
         heartbeatIntervalMs: 60_000,
       });
@@ -272,7 +272,7 @@ describe("WebSocketCrewBroker", () => {
   it("isConnected() returns false when WS drops, true after reconnect", async () => {
     server = startTestServer();
     const { log } = createLogCollector();
-    const broker = new WebSocketCrewBroker(tempDir, server.port, "test-crew", {
+    const broker = new WebSocketCrewBroker(tempDir, `ws://localhost:${server.port}`, "test-crew", {
       log,
       reconnectIntervalMs: 100, // fast reconnect for test
       heartbeatIntervalMs: 60_000,
@@ -321,7 +321,7 @@ describe("WebSocketCrewBroker", () => {
         },
       });
       const { log } = createLogCollector();
-      const broker = new WebSocketCrewBroker(tempDir, server.port, "test-crew", {
+      const broker = new WebSocketCrewBroker(tempDir, `ws://localhost:${server.port}`, "test-crew", {
         log,
         claimTimeoutMs: 2_000,
         heartbeatIntervalMs: 60_000,
@@ -350,7 +350,7 @@ describe("WebSocketCrewBroker", () => {
         },
       });
       const { log } = createLogCollector();
-      const broker = new WebSocketCrewBroker(tempDir, server.port, "test-crew", {
+      const broker = new WebSocketCrewBroker(tempDir, `ws://localhost:${server.port}`, "test-crew", {
         log,
         claimTimeoutMs: 2_000,
         heartbeatIntervalMs: 60_000,
@@ -370,7 +370,7 @@ describe("WebSocketCrewBroker", () => {
       // Server doesn't reply to claim at all
       server = startTestServer();
       const { log } = createLogCollector();
-      const broker = new WebSocketCrewBroker(tempDir, server.port, "test-crew", {
+      const broker = new WebSocketCrewBroker(tempDir, `ws://localhost:${server.port}`, "test-crew", {
         log,
         claimTimeoutMs: 200, // 200ms timeout for fast test
         heartbeatIntervalMs: 60_000,
@@ -393,7 +393,7 @@ describe("WebSocketCrewBroker", () => {
 
     it("returns null when not connected", async () => {
       const { log } = createLogCollector();
-      const broker = new WebSocketCrewBroker(tempDir, 9999, "test-crew", {
+      const broker = new WebSocketCrewBroker(tempDir, "ws://localhost:9999", "test-crew", {
         log,
         heartbeatIntervalMs: 60_000,
       });
@@ -409,7 +409,7 @@ describe("WebSocketCrewBroker", () => {
     it("logs warning on unknown message type (does not crash)", async () => {
       server = startTestServer();
       const { logs, log } = createLogCollector();
-      const broker = new WebSocketCrewBroker(tempDir, server.port, "test-crew", {
+      const broker = new WebSocketCrewBroker(tempDir, `ws://localhost:${server.port}`, "test-crew", {
         log,
         heartbeatIntervalMs: 60_000,
       });
@@ -434,7 +434,7 @@ describe("WebSocketCrewBroker", () => {
     it("logs warning on malformed JSON (does not crash)", async () => {
       server = startTestServer();
       const { logs, log } = createLogCollector();
-      const broker = new WebSocketCrewBroker(tempDir, server.port, "test-crew", {
+      const broker = new WebSocketCrewBroker(tempDir, `ws://localhost:${server.port}`, "test-crew", {
         log,
         heartbeatIntervalMs: 60_000,
       });
@@ -507,7 +507,7 @@ describe("WebSocketCrewBroker", () => {
 
       try {
         const { log } = createLogCollector();
-        const broker = new WebSocketCrewBroker(tempDir, customServer.port, "test-crew", {
+        const broker = new WebSocketCrewBroker(tempDir, `ws://localhost:${customServer.port}`, "test-crew", {
           log,
           reconnectIntervalMs: 100,
           heartbeatIntervalMs: 60_000,
@@ -561,7 +561,7 @@ describe("WebSocketCrewBroker", () => {
         },
       });
       const { log } = createLogCollector();
-      const broker = new WebSocketCrewBroker(tempDir, server.port, "test-crew", {
+      const broker = new WebSocketCrewBroker(tempDir, `ws://localhost:${server.port}`, "test-crew", {
         log,
         heartbeatIntervalMs: 60_000,
       });
@@ -595,7 +595,7 @@ describe("WebSocketCrewBroker", () => {
         },
       });
       const { log } = createLogCollector();
-      const broker = new WebSocketCrewBroker(tempDir, server.port, "test-crew", {
+      const broker = new WebSocketCrewBroker(tempDir, `ws://localhost:${server.port}`, "test-crew", {
         log,
         heartbeatIntervalMs: 60_000,
       });

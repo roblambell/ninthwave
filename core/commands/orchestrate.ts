@@ -1789,6 +1789,7 @@ export async function cmdOrchestrate(
   let crewCode: string | undefined;
   let crewCreate = false;
   let crewPort = 0;
+  let crewUrl: string | undefined;
   let crewName: string | undefined;
 
   // Parse args
@@ -1903,6 +1904,10 @@ export async function cmdOrchestrate(
         break;
       case "--crew-port":
         crewPort = parseInt(args[i + 1] ?? "0", 10);
+        i += 2;
+        break;
+      case "--crew-url":
+        crewUrl = args[i + 1];
         i += 2;
         break;
       case "--crew-name":
@@ -2221,20 +2226,25 @@ export async function cmdOrchestrate(
     const res = await fetch(`http://localhost:${brokerPort}/api/crews`, { method: "POST" });
     const body = (await res.json()) as { code: string };
     crewCode = body.code;
-    crewPort = brokerPort;
+    crewUrl = `ws://localhost:${brokerPort}`;
 
     info(`Crew created: ${crewCode}`);
     info(`  Port: ${brokerPort}`);
-    info(`  Join: ninthwave watch --crew ${crewCode} --crew-port ${brokerPort} ...`);
+    info(`  Join: ninthwave orchestrate --crew ${crewCode} --crew-url ws://localhost:${brokerPort} ...`);
   }
 
   let resolvedCrewName: string | undefined;
   if (crewCode) {
-    if (!crewPort) {
-      die("--crew-port is required when using --crew");
+    // Resolve the crew URL: --crew-url takes priority, then --crew-port, then default cloud
+    if (!crewUrl) {
+      if (crewPort) {
+        crewUrl = `ws://localhost:${crewPort}`;
+      } else {
+        crewUrl = "wss://ninthwave.sh";
+      }
     }
     resolvedCrewName = crewName ?? (await import("os")).hostname();
-    const broker = new WebSocketCrewBroker(projectRoot, crewPort, crewCode, {
+    const broker = new WebSocketCrewBroker(projectRoot, crewUrl, crewCode, {
       log: (level, msg) => log({ ts: new Date().toISOString(), level, event: "crew_client", message: msg }),
     }, resolvedCrewName);
 

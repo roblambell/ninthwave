@@ -200,14 +200,14 @@ export class WebSocketCrewBroker implements CrewBroker {
 
   constructor(
     projectRoot: string,
-    port: number,
+    url: string,
     crewCode: string,
     deps: CrewBrokerDeps,
     name?: string,
   ) {
     this.daemonId = getOrCreateDaemonId(projectRoot);
     this.name = name ?? hostname();
-    this.url = `ws://localhost:${port}/api/crews/${crewCode}/ws`;
+    this.url = `${url}/api/crews/${crewCode}/ws`;
     this.deps = deps;
   }
 
