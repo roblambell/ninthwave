@@ -1,11 +1,9 @@
-// `ninthwave setup` — project and global setup command.
+// Setup utilities — shared functions for project initialization.
 //
-// Project mode (default): seeds .ninthwave/, .ninthwave/todos/, skill symlinks, agent symlinks, .gitignore
-// Global mode (--global): seeds ~/.claude/skills/ symlinks only
+// Provides: prerequisite checking, skill/agent symlink management,
+// interactive agent selection, nw symlink creation, and global setup.
 //
-// Agent installation is interactive: detects installed AI tools, presents a
-// checkbox for agent selection, shows a preview of symlinks, and asks for
-// confirmation before creating anything.
+// Used by `core/commands/init.ts` for the unified `ninthwave init` command.
 
 import {
   existsSync,
@@ -19,7 +17,6 @@ import {
 } from "fs";
 import { join, relative, dirname, resolve } from "path";
 import { getBundleDir } from "../paths.ts";
-import { userStateDir, migrateRuntimeState } from "../daemon.ts";
 import { info, die, warn, RED, YELLOW, GREEN, RESET, BOLD, DIM } from "../output.ts";
 import { run } from "../shell.ts";
 import {
@@ -148,7 +145,7 @@ export function checkPrerequisites(
 
   if (missing.length > 0) {
     console.log(
-      `${RED}Missing prerequisites:${RESET} ${missing.join(", ")}. Install them and re-run ${BOLD}ninthwave setup${RESET}.`,
+      `${RED}Missing prerequisites:${RESET} ${missing.join(", ")}. Install them and re-run ${BOLD}ninthwave init${RESET}.`,
     );
     console.log();
   }
@@ -204,7 +201,7 @@ export function createNwSymlink(
 
 /**
  * Symlink directories that should be gitignored in non-self-hosting projects.
- * These are created by `ninthwave setup` and point to the local ninthwave installation.
+ * These are created by `ninthwave init` and point to the local ninthwave installation.
  */
 export const SYMLINK_GITIGNORE_DIRS = [
   ".claude/agents/",
@@ -454,197 +451,6 @@ export function setupGlobal(bundleDir: string): void {
   console.log("Done! Global skills are available in all projects.");
 }
 
-/**
- * Project setup: seed .ninthwave/, .ninthwave/todos/, skill symlinks, agent symlinks, .gitignore.
- *
- * Optional `deps` parameter allows injecting stubs for testing.
- * When `agentSelection` is provided in deps, it's used directly (skipping interactive prompts).
- * When not provided, all agents are installed to all tool directories (backward-compatible default).
- */
-export function setupProject(
-  projectDir: string,
-  bundleDir: string,
-  deps?: {
-    commandExists?: CommandChecker;
-    ghAuthCheck?: AuthChecker;
-    resolveCommandPath?: CommandPathResolver;
-    /** Explicit agent selection — bypasses interactive prompts. */
-    agentSelection?: AgentSelection;
-  },
-): void {
-  console.log(`Setting up ninthwave in: ${projectDir}`);
-  console.log(`Bundle location: ${bundleDir}`);
-  console.log();
-
-  // Check prerequisites before proceeding
-  const prereqs = checkPrerequisites(deps?.commandExists, deps?.ghAuthCheck);
-  if (!prereqs.allPresent) {
-    die(`Missing required tools: ${prereqs.missing.join(", ")}`);
-  }
-
-  // --- .ninthwave/ config ---
-  console.log("Config (.ninthwave/)...");
-  mkdirSync(join(projectDir, ".ninthwave"), { recursive: true });
-
-  // Config file (preserve existing)
-  const configPath = join(projectDir, ".ninthwave/config");
-  if (!existsSync(configPath)) {
-    writeFileSync(
-      configPath,
-      `# ninthwave project configuration
-# All settings are optional -- sensible defaults are used.
-
-# File extensions for LOC counting in version-bump (space-separated glob patterns)
-# LOC_EXTENSIONS="*.ts *.tsx *.js *.jsx *.py *.go"
-
-# Path to domain mapping file (optional)
-# DOMAINS_FILE=.ninthwave/domains.conf
-`,
-    );
-    console.log("  .ninthwave/config (created)");
-  } else {
-    console.log("  .ninthwave/config (exists, skipped)");
-  }
-
-  // Domains config (preserve existing)
-  const domainsPath = join(projectDir, ".ninthwave/domains.conf");
-  if (!existsSync(domainsPath)) {
-    writeFileSync(
-      domainsPath,
-      `# Domain mappings for ninthwave
-# Format: pattern=domain_key
-# Patterns are matched case-insensitively against todo file domain fields.
-# Lines starting with # are comments.
-#
-# Examples:
-# auth=auth
-# infrastructure=infra
-# frontend=frontend
-# database=db
-`,
-    );
-    console.log("  .ninthwave/domains.conf (created)");
-  } else {
-    console.log("  .ninthwave/domains.conf (exists, skipped)");
-  }
-
-  console.log();
-
-  // --- .ninthwave/todos/ ---
-  const todosPath = join(projectDir, ".ninthwave/todos");
-  if (!existsSync(todosPath)) {
-    mkdirSync(todosPath, { recursive: true });
-    writeFileSync(join(todosPath, ".gitkeep"), "");
-    console.log(".ninthwave/todos/ (created)");
-  } else {
-    console.log(".ninthwave/todos/ (exists, skipped)");
-  }
-
-  console.log();
-
-  // --- Skill discovery symlinks ---
-  console.log("Skills...");
-  const skillsDir = join(projectDir, ".claude/skills");
-  createSkillSymlinks(skillsDir, bundleDir);
-
-  console.log();
-
-  // --- Agent files (symlinked to stay in sync with source) ---
-  console.log("Agents...");
-
-  // Determine agent selection: use injected selection, or default to all agents + all tools
-  const selection: AgentSelection = deps?.agentSelection ?? {
-    agents: discoverAgentSources(bundleDir),
-    toolDirs: [...AGENT_TARGET_DIRS],
-  };
-
-  const plan = buildSymlinkPlan(projectDir, bundleDir, selection);
-  executeSymlinkPlan(plan);
-
-  console.log();
-
-  // --- .gitignore ---
-  const gitignorePath = join(projectDir, ".gitignore");
-  const selfHosting = isSelfHosting(projectDir, bundleDir);
-
-  if (existsSync(gitignorePath)) {
-    let content = readFileSync(gitignorePath, "utf-8");
-    let modified = false;
-
-    if (!content.includes(".worktrees/")) {
-      content += "\n# ninthwave worktrees\n.worktrees/\n";
-      modified = true;
-    }
-
-    // Add symlink directories for non-self-hosting projects
-    if (!selfHosting) {
-      const missing = SYMLINK_GITIGNORE_DIRS.filter(
-        (d) => !content.includes(d),
-      );
-      if (missing.length > 0) {
-        content +=
-          "\n# ninthwave symlinks (developer-local, re-created by ninthwave setup)\n";
-        for (const entry of missing) {
-          content += entry + "\n";
-        }
-        modified = true;
-      }
-    }
-
-    if (modified) {
-      writeFileSync(gitignorePath, content);
-      console.log(".gitignore (updated)");
-    }
-  } else {
-    let content = "# ninthwave worktrees\n.worktrees/\n";
-    if (!selfHosting) {
-      content +=
-        "\n# ninthwave symlinks (developer-local, re-created by ninthwave setup)\n";
-      for (const entry of SYMLINK_GITIGNORE_DIRS) {
-        content += entry + "\n";
-      }
-    }
-    writeFileSync(gitignorePath, content);
-    console.log(".gitignore (created)");
-  }
-
-  console.log();
-
-  // --- nw short alias ---
-  console.log("CLI alias...");
-  createNwSymlink(deps?.commandExists, deps?.resolveCommandPath);
-
-  console.log();
-
-  // --- Migrate runtime state to user state directory ---
-  migrateRuntimeState(projectDir);
-
-  // --- Version tracking (written to user state dir, not project) ---
-  const versionResult = run("git", [
-    "-C",
-    bundleDir,
-    "describe",
-    "--tags",
-    "--always",
-  ]);
-  const version =
-    versionResult.exitCode === 0 ? versionResult.stdout : "unknown";
-  const stateDir = userStateDir(projectDir);
-  mkdirSync(stateDir, { recursive: true });
-  writeFileSync(join(stateDir, "version"), version + "\n");
-
-  // --- Summary ---
-  console.log("Done! All files are project-level (commit to git).");
-  console.log();
-  console.log(`Multiplexer: ${BOLD}${prereqs.detectedMux}${RESET}${prereqs.detectedMux !== "cmux" ? ` ${DIM}(install cmux for visual sidebar)${RESET}` : ""}`);
-  console.log();
-  console.log("Next steps:");
-  console.log("  1. Review: git diff");
-  console.log("  2. Commit: git add -A && git commit -m 'chore: set up ninthwave'");
-  console.log("  3. Add work items to .ninthwave/todos/ and run /work");
-  console.log();
-  console.log(`${DIM}Tip: Use ${BOLD}nw${RESET}${DIM} as a short alias for ${BOLD}ninthwave${RESET}${DIM} in daily use.${RESET}`);
-}
 
 // ── Interactive agent selection ──────────────────────────────────────
 
@@ -753,65 +559,3 @@ export async function interactiveAgentSelection(
   return selection;
 }
 
-/**
- * CLI entry point for `ninthwave setup`.
- *
- * Flags:
- *   --global  Set up global skills only
- *   --yes     Skip interactive prompts, accept defaults
- */
-export async function cmdSetup(args: string[]): Promise<void> {
-  const isGlobal = args.includes("--global");
-  const autoYes = args.includes("--yes") || args.includes("-y");
-  const bundleDir = getBundleDir();
-
-  if (isGlobal) {
-    setupGlobal(bundleDir);
-    return;
-  }
-
-  // Resolve project root via git
-  const result = run("git", [
-    "rev-parse",
-    "--path-format=absolute",
-    "--git-common-dir",
-  ]);
-  if (result.exitCode !== 0) {
-    die("Not inside a git repository");
-  }
-  const projectDir = result.stdout.replace(/\/.git$/, "");
-
-  // Determine agent selection
-  const isTTY = process.stdin.isTTY ?? false;
-
-  if (autoYes || !isTTY) {
-    // Non-interactive: install all agents to all detected tools (or all tools if none detected)
-    const detectedTools = detectProjectTools(projectDir);
-    const toolDirs =
-      detectedTools.length > 0 ? detectedTools : [...AGENT_TARGET_DIRS];
-    setupProject(projectDir, bundleDir, {
-      agentSelection: {
-        agents: discoverAgentSources(bundleDir),
-        toolDirs,
-      },
-    });
-  } else {
-    // Interactive: prompt for agent selection before running setup
-    // Run prerequisites check first (part of setupProject), then interactive selection
-    const selection = await interactiveAgentSelection(
-      projectDir,
-      bundleDir,
-    );
-
-    if (selection === null) {
-      // User cancelled — still run setup for non-agent parts
-      setupProject(projectDir, bundleDir, {
-        agentSelection: { agents: [], toolDirs: [] },
-      });
-    } else {
-      setupProject(projectDir, bundleDir, {
-        agentSelection: selection,
-      });
-    }
-  }
-}

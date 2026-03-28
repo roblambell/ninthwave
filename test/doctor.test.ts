@@ -221,7 +221,7 @@ describe("checkNinthwaveConfig", () => {
     const repo = setupTempRepo();
     const result = checkNinthwaveConfig(repo);
     expect(result.status).toBe("warn");
-    expect(result.detail).toContain("nw setup");
+    expect(result.detail).toContain("nw init");
   });
 });
 

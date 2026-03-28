@@ -8,6 +8,7 @@ import {
   writeFileSync,
   mkdirSync,
   lstatSync,
+  readlinkSync,
 } from "fs";
 import { setupTempRepo, cleanupTempRepos } from "./helpers.ts";
 import { userStateDir } from "../core/daemon.ts";
@@ -27,10 +28,25 @@ import {
   generateConfig,
   initProject,
   type InitDeps,
+  type InitProjectOpts,
   type DetectionResult,
 } from "../core/commands/init.ts";
-import type { CommandChecker } from "../core/commands/setup.ts";
-import { SYMLINK_GITIGNORE_DIRS } from "../core/commands/setup.ts";
+import type {
+  CommandChecker,
+  AuthChecker,
+  CommandPathResolver,
+  AgentSelection,
+} from "../core/commands/setup.ts";
+import {
+  SYMLINK_GITIGNORE_DIRS,
+  AGENT_SOURCES,
+  AGENT_TARGET_DIRS,
+  AGENT_DESCRIPTIONS,
+  discoverAgentSources,
+  buildSymlinkPlan,
+  setupGlobal,
+} from "../core/commands/setup.ts";
+import { lookupCommand } from "../core/help.ts";
 
 // Store original env
 const originalEnv = { ...process.env };
@@ -64,6 +80,10 @@ function createFakeBundle(dir: string): string {
   writeFileSync(
     join(bundleDir, "agents", "todo-worker.md"),
     "# Todo Worker Agent\n",
+  );
+  writeFileSync(
+    join(bundleDir, "agents", "review-worker.md"),
+    "# Review Worker Agent\n",
   );
 
   // Create VERSION file
@@ -1538,5 +1558,531 @@ describe("initProject workspace config.json", () => {
     expect(configJson.workspace.packages[0].testCmd).toBe(
       "yarn workspace app test",
     );
+  });
+});
+
+// --- Merged setup functionality (migrated from setup.test.ts) ---
+
+/**
+ * Stub deps where all prerequisites are present and authenticated.
+ * Used for initProject opts to avoid host-machine dependencies.
+ */
+const allPresentDeps: InitProjectOpts = {
+  commandExists: (() => true) as CommandChecker,
+  ghAuthCheck: (() => ({
+    authenticated: true,
+    stderr: "",
+  })) as AuthChecker,
+};
+
+const defaultInitDeps: InitDeps = {
+  commandExists: (() => true) as CommandChecker,
+  getEnv: () => undefined,
+};
+
+// --- Prerequisite checks warn instead of die ---
+
+describe("initProject — prerequisite checking", () => {
+  it("warns but does not abort when prerequisites are missing", () => {
+    const projectDir = setupTempRepo();
+    const bundleDir = createFakeBundle(projectDir + "-bundle-parent");
+
+    const deps: InitDeps = {
+      commandExists: (() => false) as CommandChecker,
+      getEnv: () => undefined,
+    };
+
+    // Should NOT throw — init warns but never aborts on missing tools
+    const detection = initProject(projectDir, bundleDir, deps);
+
+    // Setup still completed
+    expect(existsSync(join(projectDir, ".ninthwave/config"))).toBe(true);
+    expect(existsSync(join(projectDir, ".ninthwave/todos/.gitkeep"))).toBe(true);
+    expect(existsSync(join(projectDir, ".ninthwave/friction/.gitkeep"))).toBe(true);
+    expect(detection).toBeDefined();
+  });
+
+  it("prints prerequisite check output", () => {
+    const projectDir = setupTempRepo();
+    const bundleDir = createFakeBundle(projectDir + "-bundle-parent");
+
+    const logs: string[] = [];
+    const origLog = console.log;
+    console.log = (...args: unknown[]) => logs.push(args.join(" "));
+
+    const deps: InitDeps = {
+      commandExists: ((cmd: string) => cmd === "gh") as CommandChecker,
+      getEnv: () => undefined,
+    };
+
+    try {
+      initProject(projectDir, bundleDir, deps);
+    } finally {
+      console.log = origLog;
+    }
+
+    const output = logs.join("\n");
+    expect(output).toContain("Checking prerequisites");
+    expect(output).toContain("gh");
+  });
+
+  it("uses opts.commandExists for prerequisite checks", () => {
+    const projectDir = setupTempRepo();
+    const bundleDir = createFakeBundle(projectDir + "-bundle-parent");
+
+    const deps: InitDeps = {
+      commandExists: (() => false) as CommandChecker,
+      getEnv: () => undefined,
+    };
+
+    const opts: InitProjectOpts = {
+      commandExists: (() => true) as CommandChecker,
+      ghAuthCheck: (() => ({ authenticated: true, stderr: "" })) as AuthChecker,
+    };
+
+    // opts.commandExists overrides deps.commandExists for prerequisites
+    const detection = initProject(projectDir, bundleDir, deps, opts);
+
+    expect(detection).toBeDefined();
+    expect(existsSync(join(projectDir, ".ninthwave/config"))).toBe(true);
+  });
+});
+
+// --- Agent selection ---
+
+describe("initProject — agent selection", () => {
+  it("installs all agents to all tool dirs by default", () => {
+    const projectDir = setupTempRepo();
+    const bundleDir = createFakeBundle(projectDir + "-bundle-parent");
+
+    const deps: InitDeps = {
+      commandExists: (() => false) as CommandChecker,
+      getEnv: () => undefined,
+    };
+
+    initProject(projectDir, bundleDir, deps);
+
+    // All agents should be in all tool dirs
+    expect(existsSync(join(projectDir, ".claude/agents/todo-worker.md"))).toBe(true);
+    expect(existsSync(join(projectDir, ".opencode/agents/todo-worker.md"))).toBe(true);
+    expect(existsSync(join(projectDir, ".github/agents/todo-worker.agent.md"))).toBe(true);
+    expect(existsSync(join(projectDir, ".claude/agents/review-worker.md"))).toBe(true);
+    expect(existsSync(join(projectDir, ".opencode/agents/review-worker.md"))).toBe(true);
+    expect(existsSync(join(projectDir, ".github/agents/review-worker.agent.md"))).toBe(true);
+  });
+
+  it("uses opts.agentSelection when provided", () => {
+    const projectDir = setupTempRepo();
+    const bundleDir = createFakeBundle(projectDir + "-bundle-parent");
+
+    const deps: InitDeps = {
+      commandExists: (() => false) as CommandChecker,
+      getEnv: () => undefined,
+    };
+
+    const opts: InitProjectOpts = {
+      agentSelection: {
+        agents: ["todo-worker.md"],
+        toolDirs: [AGENT_TARGET_DIRS[0]!], // .claude/agents only
+      },
+    };
+
+    initProject(projectDir, bundleDir, deps, opts);
+
+    // Should have todo-worker in .claude/agents
+    expect(existsSync(join(projectDir, ".claude/agents/todo-worker.md"))).toBe(true);
+
+    // Should NOT have agents in other tool dirs
+    expect(existsSync(join(projectDir, ".opencode/agents/todo-worker.md"))).toBe(false);
+    expect(existsSync(join(projectDir, ".github/agents/todo-worker.agent.md"))).toBe(false);
+
+    // Should NOT have review-worker
+    expect(existsSync(join(projectDir, ".claude/agents/review-worker.md"))).toBe(false);
+  });
+
+  it("installs no agents when selection is empty", () => {
+    const projectDir = setupTempRepo();
+    const bundleDir = createFakeBundle(projectDir + "-bundle-parent");
+
+    const deps: InitDeps = {
+      commandExists: (() => false) as CommandChecker,
+      getEnv: () => undefined,
+    };
+
+    const opts: InitProjectOpts = {
+      agentSelection: { agents: [], toolDirs: [] },
+    };
+
+    initProject(projectDir, bundleDir, deps, opts);
+
+    // No agent directories should be created
+    expect(existsSync(join(projectDir, ".claude/agents"))).toBe(false);
+    expect(existsSync(join(projectDir, ".opencode/agents"))).toBe(false);
+    expect(existsSync(join(projectDir, ".github/agents"))).toBe(false);
+
+    // But skills should still be set up
+    expect(existsSync(join(projectDir, ".claude/skills/work"))).toBe(true);
+  });
+
+  it("creates agent files as symlinks, not copies", () => {
+    const projectDir = setupTempRepo();
+    const bundleDir = createFakeBundle(projectDir + "-bundle-parent");
+
+    const deps: InitDeps = {
+      commandExists: (() => false) as CommandChecker,
+      getEnv: () => undefined,
+    };
+
+    initProject(projectDir, bundleDir, deps);
+
+    // All agent files should be symlinks
+    for (const agent of AGENT_SOURCES) {
+      const baseName = agent.replace(/\.md$/, "");
+      for (const target of AGENT_TARGET_DIRS) {
+        const filename = target.suffix === ".agent.md" ? `${baseName}.agent.md` : agent;
+        const linkPath = join(projectDir, target.dir, filename);
+        expect(lstatSync(linkPath).isSymbolicLink()).toBe(true);
+
+        // Verify symlink target is relative
+        const symlinkTarget = readlinkSync(linkPath);
+        expect(symlinkTarget.startsWith("/")).toBe(false);
+      }
+    }
+  });
+});
+
+// --- nw symlink ---
+
+describe("initProject — nw symlink", () => {
+  it("creates nw symlink via opts.resolveCommandPath", () => {
+    const projectDir = setupTempRepo();
+    const bundleDir = createFakeBundle(projectDir + "-bundle-parent");
+
+    // Create a fake bin directory with a ninthwave binary
+    const fakeBin = join(projectDir, "fake-bin");
+    mkdirSync(fakeBin, { recursive: true });
+    writeFileSync(join(fakeBin, "ninthwave"), "#!/bin/sh\n");
+
+    const deps: InitDeps = {
+      commandExists: (() => false) as CommandChecker,
+      getEnv: () => undefined,
+    };
+
+    const opts: InitProjectOpts = {
+      commandExists: ((cmd: string) =>
+        cmd === "nw" ? false : true) as CommandChecker,
+      resolveCommandPath: ((cmd: string) =>
+        cmd === "ninthwave"
+          ? join(fakeBin, "ninthwave")
+          : null) as CommandPathResolver,
+    };
+
+    initProject(projectDir, bundleDir, deps, opts);
+
+    // Verify nw symlink was created
+    expect(existsSync(join(fakeBin, "nw"))).toBe(true);
+    expect(lstatSync(join(fakeBin, "nw")).isSymbolicLink()).toBe(true);
+    expect(readlinkSync(join(fakeBin, "nw"))).toBe("ninthwave");
+  });
+
+  it("prints CLI alias section in output", () => {
+    const projectDir = setupTempRepo();
+    const bundleDir = createFakeBundle(projectDir + "-bundle-parent");
+
+    const logs: string[] = [];
+    const origLog = console.log;
+    console.log = (...args: unknown[]) => logs.push(args.join(" "));
+
+    const deps: InitDeps = {
+      commandExists: (() => false) as CommandChecker,
+      getEnv: () => undefined,
+    };
+
+    try {
+      initProject(projectDir, bundleDir, deps);
+    } finally {
+      console.log = origLog;
+    }
+
+    const output = logs.join("\n");
+    expect(output).toContain("CLI alias");
+    expect(output).toContain("Tip:");
+    expect(output).toContain("nw");
+  });
+});
+
+// --- --global mode ---
+
+describe("initProject — global mode", () => {
+  it("setupGlobal creates skill symlinks in ~/.claude/skills/", () => {
+    const projectDir = setupTempRepo();
+    const bundleDir = createFakeBundle(projectDir + "-bundle-parent");
+
+    // Use a temp directory as HOME
+    const fakeHome = join(projectDir, "fake-home");
+    mkdirSync(fakeHome, { recursive: true });
+    process.env.HOME = fakeHome;
+
+    setupGlobal(bundleDir);
+
+    const skillsDir = join(fakeHome, ".claude/skills");
+    for (const skill of [
+      "work",
+      "decompose",
+      "todo-preview",
+      "ninthwave-upgrade",
+    ]) {
+      const linkPath = join(skillsDir, skill);
+      expect(existsSync(linkPath)).toBe(true);
+      expect(lstatSync(linkPath).isSymbolicLink()).toBe(true);
+
+      // Symlink target must be relative
+      const target = readlinkSync(linkPath);
+      expect(target.startsWith("/")).toBe(false);
+    }
+  });
+
+  it("setupGlobal does not create project-level artifacts", () => {
+    const projectDir = setupTempRepo();
+    const bundleDir = createFakeBundle(projectDir + "-bundle-parent");
+
+    const fakeHome = join(projectDir, "fake-home");
+    mkdirSync(fakeHome, { recursive: true });
+    process.env.HOME = fakeHome;
+
+    setupGlobal(bundleDir);
+
+    // No project-level artifacts
+    expect(existsSync(join(fakeHome, ".ninthwave"))).toBe(false);
+    expect(existsSync(join(fakeHome, ".ninthwave/todos"))).toBe(false);
+    expect(existsSync(join(fakeHome, ".claude/agents"))).toBe(false);
+  });
+});
+
+// --- nw setup is no longer a valid command ---
+
+describe("setup command removal", () => {
+  it("'setup' is not in the command registry", () => {
+    const entry = lookupCommand("setup");
+    expect(entry).toBeUndefined();
+  });
+
+  it("'init' is in the command registry with --global flag", () => {
+    const entry = lookupCommand("init");
+    expect(entry).toBeDefined();
+    expect(entry!.flags).toContain("--global");
+    expect(entry!.flags).toContain("--yes");
+  });
+});
+
+// --- Merged flow: idempotency ---
+
+describe("initProject — idempotency", () => {
+  it("running init twice produces consistent result (steady state)", () => {
+    const projectDir = setupTempRepo();
+    const bundleDir = createFakeBundle(projectDir + "-bundle-parent");
+
+    const deps: InitDeps = {
+      commandExists: (() => false) as CommandChecker,
+      getEnv: () => undefined,
+    };
+
+    // First run creates directories that are detected on second run (expected)
+    initProject(projectDir, bundleDir, deps);
+
+    // Second run reaches steady state (agent dirs already exist → detected as AI tools)
+    initProject(projectDir, bundleDir, deps);
+
+    // Capture steady state
+    const steadyConfig = readFileSync(
+      join(projectDir, ".ninthwave/config"),
+      "utf-8",
+    );
+    const steadyGitignore = readFileSync(
+      join(projectDir, ".gitignore"),
+      "utf-8",
+    );
+
+    // Third run should match steady state
+    initProject(projectDir, bundleDir, deps);
+
+    // Verify state is identical to second run
+    expect(readFileSync(join(projectDir, ".ninthwave/config"), "utf-8")).toBe(
+      steadyConfig,
+    );
+    expect(readFileSync(join(projectDir, ".gitignore"), "utf-8")).toBe(
+      steadyGitignore,
+    );
+
+    // Symlinks still valid
+    for (const skill of [
+      "work",
+      "decompose",
+      "todo-preview",
+      "ninthwave-upgrade",
+    ]) {
+      const linkPath = join(projectDir, ".claude/skills", skill);
+      expect(lstatSync(linkPath).isSymbolicLink()).toBe(true);
+    }
+
+    // Agent symlinks still valid
+    for (const agent of AGENT_SOURCES) {
+      const linkPath = join(projectDir, ".claude/agents", agent);
+      expect(lstatSync(linkPath).isSymbolicLink()).toBe(true);
+    }
+  });
+
+  it("does not duplicate symlink gitignore entries on re-run", () => {
+    const projectDir = setupTempRepo();
+    const bundleDir = createFakeBundle(projectDir + "-bundle-parent");
+
+    const deps: InitDeps = {
+      commandExists: (() => false) as CommandChecker,
+      getEnv: () => undefined,
+    };
+
+    // Run init twice
+    initProject(projectDir, bundleDir, deps);
+    initProject(projectDir, bundleDir, deps);
+
+    const content = readFileSync(join(projectDir, ".gitignore"), "utf-8");
+    for (const dir of SYMLINK_GITIGNORE_DIRS) {
+      const matches = content.match(new RegExp(dir.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"), "g"));
+      expect(matches).toHaveLength(1);
+    }
+  });
+});
+
+// --- Merged flow: preserves existing files ---
+
+describe("initProject — preserves existing files", () => {
+  it("creates .ninthwave/ directory with config and domains.conf", () => {
+    const projectDir = setupTempRepo();
+    const bundleDir = createFakeBundle(projectDir + "-bundle-parent");
+
+    const deps: InitDeps = {
+      commandExists: (() => false) as CommandChecker,
+      getEnv: () => undefined,
+    };
+
+    initProject(projectDir, bundleDir, deps);
+
+    // .ninthwave/config exists
+    expect(existsSync(join(projectDir, ".ninthwave/config"))).toBe(true);
+
+    // .ninthwave/domains.conf exists
+    expect(existsSync(join(projectDir, ".ninthwave/domains.conf"))).toBe(true);
+    const domainsContent = readFileSync(
+      join(projectDir, ".ninthwave/domains.conf"),
+      "utf-8",
+    );
+    expect(domainsContent).toContain("Domain mappings");
+  });
+
+  it("creates .ninthwave/todos/ directory", () => {
+    const projectDir = setupTempRepo();
+    const bundleDir = createFakeBundle(projectDir + "-bundle-parent");
+
+    const deps: InitDeps = {
+      commandExists: (() => false) as CommandChecker,
+      getEnv: () => undefined,
+    };
+
+    initProject(projectDir, bundleDir, deps);
+
+    expect(existsSync(join(projectDir, ".ninthwave/todos"))).toBe(true);
+    expect(existsSync(join(projectDir, ".ninthwave/todos/.gitkeep"))).toBe(true);
+  });
+
+  it("creates relative skill symlinks in .claude/skills/", () => {
+    const projectDir = setupTempRepo();
+    const bundleDir = createFakeBundle(projectDir + "-bundle-parent");
+
+    const deps: InitDeps = {
+      commandExists: (() => false) as CommandChecker,
+      getEnv: () => undefined,
+    };
+
+    initProject(projectDir, bundleDir, deps);
+
+    for (const skill of [
+      "work",
+      "decompose",
+      "todo-preview",
+      "ninthwave-upgrade",
+    ]) {
+      const linkPath = join(projectDir, ".claude/skills", skill);
+      expect(existsSync(linkPath)).toBe(true);
+      expect(lstatSync(linkPath).isSymbolicLink()).toBe(true);
+
+      // Symlink target must be relative (not starting with /)
+      const target = readlinkSync(linkPath);
+      expect(target.startsWith("/")).toBe(false);
+    }
+  });
+
+  it("creates .gitignore with .worktrees/ entry", () => {
+    const projectDir = setupTempRepo();
+    const bundleDir = createFakeBundle(projectDir + "-bundle-parent");
+
+    const deps: InitDeps = {
+      commandExists: (() => false) as CommandChecker,
+      getEnv: () => undefined,
+    };
+
+    initProject(projectDir, bundleDir, deps);
+
+    expect(existsSync(join(projectDir, ".gitignore"))).toBe(true);
+    const content = readFileSync(join(projectDir, ".gitignore"), "utf-8");
+    expect(content).toContain(".worktrees/");
+  });
+
+  it("appends to existing .gitignore without duplicating", () => {
+    const projectDir = setupTempRepo();
+    const bundleDir = createFakeBundle(projectDir + "-bundle-parent");
+
+    // Pre-create .gitignore with some content
+    writeFileSync(join(projectDir, ".gitignore"), "node_modules/\n");
+
+    const deps: InitDeps = {
+      commandExists: (() => false) as CommandChecker,
+      getEnv: () => undefined,
+    };
+
+    initProject(projectDir, bundleDir, deps);
+
+    const content = readFileSync(join(projectDir, ".gitignore"), "utf-8");
+    expect(content).toContain("node_modules/");
+    expect(content).toContain(".worktrees/");
+
+    // Run again — should not duplicate
+    initProject(projectDir, bundleDir, deps);
+
+    const content2 = readFileSync(join(projectDir, ".gitignore"), "utf-8");
+    const matches = content2.match(/\.worktrees\//g);
+    expect(matches).toHaveLength(1);
+  });
+
+  it("records version in user state directory", () => {
+    const projectDir = setupTempRepo();
+    const bundleDir = createFakeBundle(projectDir + "-bundle-parent");
+
+    const deps: InitDeps = {
+      commandExists: (() => false) as CommandChecker,
+      getEnv: () => undefined,
+    };
+
+    initProject(projectDir, bundleDir, deps);
+
+    const stateDir = userStateDir(projectDir);
+    expect(existsSync(join(stateDir, "version"))).toBe(true);
+    const version = readFileSync(
+      join(stateDir, "version"),
+      "utf-8",
+    );
+    // Should have some version string (git describe output)
+    expect(version.trim()).toBeTruthy();
+    // Version should NOT be in the project's .ninthwave/ directory
+    expect(existsSync(join(projectDir, ".ninthwave/version"))).toBe(false);
   });
 });

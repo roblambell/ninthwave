@@ -66,7 +66,7 @@ export function checkNinthwaveConfig(projectRoot: string): CheckResult {
   return {
     status: "warn",
     message: ".ninthwave/config not found",
-    detail: "Run: nw setup",
+    detail: "Run: nw init",
   };
 }
 

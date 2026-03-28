@@ -77,7 +77,6 @@ describe("CLI flags", () => {
     it("help output includes key commands", () => {
       const result = runCli("--help");
       expect(result.stdout).toContain("init");
-      expect(result.stdout).toContain("setup");
       expect(result.stdout).toContain("version");
       expect(result.stdout).toContain("list");
       expect(result.stdout).toContain("watch");

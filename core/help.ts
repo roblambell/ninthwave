@@ -27,7 +27,6 @@ import {
 } from "./commands/pr-monitor.ts";
 import { cmdCiFailures } from "./commands/ci.ts";
 import { cmdVersionBump } from "./commands/version-bump.ts";
-import { cmdSetup } from "./commands/setup.ts";
 import { cmdInit } from "./commands/init.ts";
 import { cmdWatch } from "./commands/orchestrate.ts";
 import { cmdReconcile } from "./commands/reconcile.ts";
@@ -98,25 +97,14 @@ export const COMMAND_REGISTRY: ReadonlyArray<CommandEntry> = [
   },
   {
     name: "init",
-    usage: "init",
-    description: "Auto-detect and initialize ninthwave (zero input)",
+    usage: "init [--global] [--yes]",
+    description: "Auto-detect and initialize ninthwave",
     group: "workflow",
     needsRoot: false,
     needsTodos: false,
-    handler: () => cmdInit(),
-    flags: [],
-    examples: ["nw init"],
-  },
-  {
-    name: "setup",
-    usage: "setup [--global]",
-    description: "Set up ninthwave in a project or globally",
-    group: "workflow",
-    needsRoot: false,
-    needsTodos: false,
-    handler: async (ctx) => { await cmdSetup(ctx.args); },
-    flags: ["--global"],
-    examples: ["nw setup", "nw setup --global"],
+    handler: async (ctx) => { await cmdInit(ctx.args); },
+    flags: ["--global", "--yes", "-y"],
+    examples: ["nw init", "nw init --global", "nw init --yes"],
   },
   {
     name: "version",

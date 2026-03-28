@@ -1,9 +1,12 @@
-// `ninthwave init` — zero-input project initialization with auto-detection.
+// `ninthwave init` — unified project initialization with auto-detection.
 //
 // Detects: (1) repo structure (monorepo vs single), (2) CI system (GitHub Actions),
 // (3) multiplexer (cmux), (4) AI tool config (.claude/, .opencode/, copilot).
 // Writes .ninthwave/config with detected settings, runs setup scaffolding,
-// and prints a summary.
+// creates agent symlinks, nw alias, and prints a summary.
+//
+// Merged from setup.ts: also handles prerequisite checking (warn mode),
+// interactive agent selection, nw symlink creation, and --global mode.
 
 import {
   existsSync,
@@ -11,12 +14,10 @@ import {
   writeFileSync,
   readFileSync,
   readdirSync,
-  unlinkSync,
-  symlinkSync,
 } from "fs";
-import { join, relative } from "path";
+import { join } from "path";
 import { getBundleDir } from "../paths.ts";
-import { userStateDir } from "../daemon.ts";
+import { userStateDir, migrateRuntimeState } from "../daemon.ts";
 import { info, GREEN, BOLD, DIM, RESET, YELLOW, RED } from "../output.ts";
 import { run } from "../shell.ts";
 import type { WorkspaceConfig, WorkspacePackage } from "../types.ts";
@@ -25,6 +26,18 @@ import {
   isSelfHosting,
   SYMLINK_GITIGNORE_DIRS,
   type CommandChecker,
+  type AuthChecker,
+  type CommandPathResolver,
+  type AgentSelection,
+  checkPrerequisites,
+  createNwSymlink,
+  setupGlobal,
+  interactiveAgentSelection,
+  detectProjectTools,
+  discoverAgentSources,
+  buildSymlinkPlan,
+  executeSymlinkPlan,
+  AGENT_TARGET_DIRS,
 } from "./setup.ts";
 
 // --- Detection types ---
@@ -55,6 +68,20 @@ export interface InitDeps {
   readFile?: (path: string) => string | null;
   readDir?: (dir: string) => string[];
   getEnv?: (key: string) => string | undefined;
+}
+
+/**
+ * Options for initProject — setup-specific dependencies.
+ */
+export interface InitProjectOpts {
+  /** Agent selection — bypasses prompts. Defaults to all agents + all detected tools. */
+  agentSelection?: AgentSelection;
+  /** Command checker for prerequisite checks. Falls back to InitDeps.commandExists. */
+  commandExists?: CommandChecker;
+  /** GitHub auth checker for prerequisite checks. */
+  ghAuthCheck?: AuthChecker;
+  /** Command path resolver for nw symlink creation. */
+  resolveCommandPath?: CommandPathResolver;
 }
 
 const defaultFileExists = (path: string): boolean => existsSync(path);
@@ -625,19 +652,20 @@ export function printSummary(detection: DetectionResult): void {
   console.log();
 }
 
-// --- Scaffolding (reuses setup logic) ---
-
-const AGENT_TARGETS = [
-  { dir: ".claude/agents", filename: "todo-worker.md" },
-  { dir: ".opencode/agents", filename: "todo-worker.md" },
-  { dir: ".github/agents", filename: "todo-worker.agent.md" },
-];
+// --- Scaffolding ---
 
 /**
- * Run the scaffolding portion of setup — creates all project files.
- * Unlike setupProject, this never aborts on missing prerequisites.
+ * Run the scaffolding portion of init — creates all project files.
+ * Never aborts on missing prerequisites.
+ *
+ * Uses AgentSelection for agent installation. Defaults to all agents
+ * in all tool directories if no selection is provided.
  */
-function scaffold(projectDir: string, bundleDir: string): void {
+function scaffold(
+  projectDir: string,
+  bundleDir: string,
+  agentSelection?: AgentSelection,
+): void {
   // --- .ninthwave/ directory ---
   mkdirSync(join(projectDir, ".ninthwave"), { recursive: true });
 
@@ -674,16 +702,12 @@ function scaffold(projectDir: string, bundleDir: string): void {
   createSkillSymlinks(skillsDir, bundleDir);
 
   // --- Agent files (symlinked to stay in sync with source) ---
-  const agentSource = join(bundleDir, "agents", "todo-worker.md");
-  if (existsSync(agentSource)) {
-    for (const target of AGENT_TARGETS) {
-      const targetDir = join(projectDir, target.dir);
-      mkdirSync(targetDir, { recursive: true });
-      const linkPath = join(targetDir, target.filename);
-      if (existsSync(linkPath)) unlinkSync(linkPath);
-      symlinkSync(relative(targetDir, agentSource), linkPath);
-    }
-  }
+  const selection = agentSelection ?? {
+    agents: discoverAgentSources(bundleDir),
+    toolDirs: [...AGENT_TARGET_DIRS],
+  };
+  const plan = buildSymlinkPlan(projectDir, bundleDir, selection);
+  executeSymlinkPlan(plan);
 
   // --- .gitignore ---
   const gitignorePath = join(projectDir, ".gitignore");
@@ -705,7 +729,7 @@ function scaffold(projectDir: string, bundleDir: string): void {
       );
       if (missing.length > 0) {
         content +=
-          "\n# ninthwave symlinks (developer-local, re-created by ninthwave setup)\n";
+          "\n# ninthwave symlinks (developer-local, re-created by ninthwave init)\n";
         for (const entry of missing) {
           content += entry + "\n";
         }
@@ -720,7 +744,7 @@ function scaffold(projectDir: string, bundleDir: string): void {
     let content = "# ninthwave worktrees\n.worktrees/\n";
     if (!selfHosting) {
       content +=
-        "\n# ninthwave symlinks (developer-local, re-created by ninthwave setup)\n";
+        "\n# ninthwave symlinks (developer-local, re-created by ninthwave init)\n";
       for (const entry of SYMLINK_GITIGNORE_DIRS) {
         content += entry + "\n";
       }
@@ -748,13 +772,16 @@ function scaffold(projectDir: string, bundleDir: string): void {
 /**
  * Run `ninthwave init` — auto-detect project environment and set up ninthwave.
  *
- * Pure auto-detection: never prompts, never aborts on missing tools.
- * Writes .ninthwave/config with detected settings, runs scaffolding, prints summary.
+ * Unified flow: auto-detect -> print summary -> check prerequisites (warn) ->
+ * write config -> scaffold with agent selection -> nw symlink -> print next steps.
+ *
+ * Never aborts on missing prerequisites — warnings only.
  */
 export function initProject(
   projectDir: string,
   bundleDir: string,
   deps?: InitDeps,
+  opts?: InitProjectOpts,
 ): DetectionResult {
   console.log(`Initializing ninthwave in: ${projectDir}`);
   console.log();
@@ -767,14 +794,21 @@ export function initProject(
   // 2. Print detection summary
   printSummary(detection);
 
-  // 3. Write config with detected values (always overwrite — init is authoritative)
+  // 3. Check prerequisites (warn, don't abort)
+  const cmdExists = opts?.commandExists ?? deps?.commandExists;
+  checkPrerequisites(
+    cmdExists ?? undefined,
+    opts?.ghAuthCheck ?? undefined,
+  );
+
+  // 4. Write config with detected values (always overwrite — init is authoritative)
   const configPath = join(projectDir, ".ninthwave/config");
   mkdirSync(join(projectDir, ".ninthwave"), { recursive: true });
   writeFileSync(configPath, generateConfig(detection));
   console.log("Configured:");
   console.log(`  .ninthwave/config ${DIM}(auto-detected settings)${RESET}`);
 
-  // 3b. Write workspace config as JSON (structured data)
+  // 4b. Write workspace config as JSON (structured data)
   if (detection.workspace) {
     const configJsonPath = join(projectDir, ".ninthwave/config.json");
     const configJson = { workspace: detection.workspace };
@@ -782,17 +816,24 @@ export function initProject(
     console.log(`  .ninthwave/config.json ${DIM}(workspace packages)${RESET}`);
   }
 
-  // 4. Run scaffolding
-  scaffold(projectDir, bundleDir);
+  // 5. Run scaffolding (with agent selection)
+  scaffold(projectDir, bundleDir, opts?.agentSelection);
   console.log(`  .ninthwave/domains.conf`);
   console.log(`  .ninthwave/todos/ ${DIM}(work items)${RESET}`);
   console.log(`  .ninthwave/friction/ ${DIM}(friction log)${RESET}`);
   console.log(`  .claude/skills/ ${DIM}(symlinks)${RESET}`);
-  console.log(`  Agent files ${DIM}(.claude, .opencode, .github)${RESET}`);
   console.log(`  .gitignore`);
   console.log();
 
-  // 5. Done
+  // 6. Create nw symlink
+  console.log("CLI alias...");
+  createNwSymlink(cmdExists ?? undefined, opts?.resolveCommandPath);
+  console.log();
+
+  // 7. Migrate runtime state
+  migrateRuntimeState(projectDir);
+
+  // 8. Done
   console.log(`${GREEN}Done!${RESET} ninthwave is ready.`);
   console.log();
   console.log("Next steps:");
@@ -800,14 +841,28 @@ export function initProject(
   console.log("  2. Add work items to .ninthwave/todos/");
   console.log("  3. Run: ninthwave list");
   console.log();
+  console.log(`${DIM}Tip: Use ${BOLD}nw${RESET}${DIM} as a short alias for ${BOLD}ninthwave${RESET}${DIM} in daily use.${RESET}`);
 
   return detection;
 }
 
 /**
  * CLI entry point for `ninthwave init`.
+ *
+ * Flags:
+ *   --global  Set up global skills only
+ *   --yes     Skip interactive prompts, accept defaults
  */
-export function cmdInit(): void {
+export async function cmdInit(args: string[] = []): Promise<void> {
+  const isGlobal = args.includes("--global");
+  const autoYes = args.includes("--yes") || args.includes("-y");
+  const bundleDir = getBundleDir();
+
+  if (isGlobal) {
+    setupGlobal(bundleDir);
+    return;
+  }
+
   // Resolve project root via git
   const result = run("git", [
     "rev-parse",
@@ -819,7 +874,25 @@ export function cmdInit(): void {
     process.exit(1);
   }
   const projectDir = result.stdout.replace(/\/.git$/, "");
-  const bundleDir = getBundleDir();
 
-  initProject(projectDir, bundleDir);
+  // Determine agent selection
+  const isTTY = process.stdin.isTTY ?? false;
+  let agentSelection: AgentSelection | undefined;
+
+  if (autoYes || !isTTY) {
+    // Non-interactive: all agents to all detected tools (or all tools if none detected)
+    const detectedTools = detectProjectTools(projectDir);
+    const toolDirs =
+      detectedTools.length > 0 ? detectedTools : [...AGENT_TARGET_DIRS];
+    agentSelection = {
+      agents: discoverAgentSources(bundleDir),
+      toolDirs,
+    };
+  } else {
+    // Interactive: prompt for agent selection
+    const selection = await interactiveAgentSelection(projectDir, bundleDir);
+    agentSelection = selection ?? { agents: [], toolDirs: [] };
+  }
+
+  initProject(projectDir, bundleDir, undefined, { agentSelection });
 }
