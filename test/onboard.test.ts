@@ -16,7 +16,6 @@ import {
   shouldOnboard,
   onboard,
   cmdNoArgs,
-  promptAction,
   AI_TOOLS,
   MUX_OPTIONS,
   type CommandChecker,
@@ -24,6 +23,7 @@ import {
   type NoArgsDeps,
 } from "../core/commands/onboard.ts";
 import type { WorkItem } from "../core/types.ts";
+import type { MergeStrategy } from "../core/orchestrator.ts";
 
 afterEach(() => {
   cleanupTempRepos();
@@ -427,46 +427,6 @@ describe("onboard", () => {
   });
 });
 
-// ── promptAction ───────────────────────────────────────────────────
-
-describe("promptAction", () => {
-  it("returns 'run' for input 1", async () => {
-    const result = await promptAction(async () => "1");
-    expect(result).toBe("run");
-  });
-
-  it("returns 'watch' for input 2", async () => {
-    const result = await promptAction(async () => "2");
-    expect(result).toBe("watch");
-  });
-
-  it("returns 'run' for text 'run'", async () => {
-    const result = await promptAction(async () => "run");
-    expect(result).toBe("run");
-  });
-
-  it("returns 'watch' for text 'watch'", async () => {
-    const result = await promptAction(async () => "watch");
-    expect(result).toBe("watch");
-  });
-
-  it("returns 'quit' for 'q'", async () => {
-    const result = await promptAction(async () => "q");
-    expect(result).toBe("quit");
-  });
-
-  it("retries on invalid input then accepts valid choice", async () => {
-    let calls = 0;
-    const result = await promptAction(async () => {
-      calls++;
-      if (calls === 1) return "invalid";
-      return "1";
-    });
-    expect(result).toBe("run");
-    expect(calls).toBe(2);
-  });
-});
-
 // ── cmdNoArgs ──────────────────────────────────────────────────────
 
 describe("cmdNoArgs", () => {
@@ -602,7 +562,7 @@ describe("cmdNoArgs", () => {
     expect(output).toContain("12345");
   });
 
-  it("shows checkbox picker and runs selected items", async () => {
+  it("orchestrate path: calls cmdWatch with all item IDs, merge strategy, and WIP limit", async () => {
     const projectDir = setupTempRepo();
     mkdirSync(join(projectDir, ".ninthwave", "work"), { recursive: true });
 
@@ -610,6 +570,45 @@ describe("cmdNoArgs", () => {
       fakeTodo("H-FOO-1", "First task"),
       fakeTodo("H-FOO-2", "Second task"),
     ];
+    let summaryCalled = false;
+    let watchArgs: string[] = [];
+    let watchCalled = false;
+
+    await cmdNoArgs(projectDir, {
+      isTTY: true,
+      parseWorkItems: () => todos,
+      isDaemonRunning: () => null,
+      displayItemsSummary: () => { summaryCalled = true; },
+      promptMode: async () => "orchestrate",
+      promptMergeStrategy: async () => "approved" as MergeStrategy,
+      promptWipLimit: async () => 3,
+      runWatch: async (args) => {
+        watchCalled = true;
+        watchArgs = args;
+      },
+    });
+
+    expect(summaryCalled).toBe(true);
+    expect(watchCalled).toBe(true);
+    // Should pass all item IDs, merge strategy, and WIP limit as CLI args
+    expect(watchArgs).toContain("--items");
+    expect(watchArgs).toContain("H-FOO-1");
+    expect(watchArgs).toContain("H-FOO-2");
+    expect(watchArgs).toContain("--merge-strategy");
+    expect(watchArgs).toContain("approved");
+    expect(watchArgs).toContain("--wip-limit");
+    expect(watchArgs).toContain("3");
+  });
+
+  it("launch subset path: calls promptItems then cmdRunItems with selected IDs", async () => {
+    const projectDir = setupTempRepo();
+    mkdirSync(join(projectDir, ".ninthwave", "work"), { recursive: true });
+
+    const todos = [
+      fakeTodo("H-FOO-1", "First task"),
+      fakeTodo("H-FOO-2", "Second task"),
+    ];
+    let promptItemsCalled = false;
     let runSelectedCalled = false;
     let runSelectedIds: string[] = [];
 
@@ -617,59 +616,46 @@ describe("cmdNoArgs", () => {
       isTTY: true,
       parseWorkItems: () => todos,
       isDaemonRunning: () => null,
-      promptItems: async () => ["H-FOO-1"],
-      promptAction: async () => "run",
+      displayItemsSummary: () => {},
+      promptMode: async () => "launch",
+      promptItems: async () => {
+        promptItemsCalled = true;
+        return ["H-FOO-1"];
+      },
       runSelected: async (ids) => {
         runSelectedCalled = true;
         runSelectedIds = ids;
       },
     });
 
+    expect(promptItemsCalled).toBe(true);
     expect(runSelectedCalled).toBe(true);
     expect(runSelectedIds).toEqual(["H-FOO-1"]);
   });
 
-  it("shows checkbox picker and launches watch for 'watch' action", async () => {
+  it("defaults to orchestrate on empty input at mode prompt", async () => {
     const projectDir = setupTempRepo();
     mkdirSync(join(projectDir, ".ninthwave", "work"), { recursive: true });
 
-    const todos = [fakeTodo("H-FOO-1", "Task")];
+    const todos = [fakeTodo("H-1", "Task")];
     let watchCalled = false;
 
+    // promptMode returning "orchestrate" simulates the default behavior
     await cmdNoArgs(projectDir, {
       isTTY: true,
       parseWorkItems: () => todos,
       isDaemonRunning: () => null,
-      promptItems: async () => ["H-FOO-1"],
-      promptAction: async () => "watch",
+      displayItemsSummary: () => {},
+      promptMode: async () => "orchestrate",
+      promptMergeStrategy: async () => "asap" as MergeStrategy,
+      promptWipLimit: async () => 4,
       runWatch: async () => { watchCalled = true; },
     });
 
     expect(watchCalled).toBe(true);
   });
 
-  it("exits gracefully when user quits at item selection", async () => {
-    const projectDir = setupTempRepo();
-    mkdirSync(join(projectDir, ".ninthwave", "work"), { recursive: true });
-
-    let actionCalled = false;
-    let runCalled = false;
-
-    await cmdNoArgs(projectDir, {
-      isTTY: true,
-      parseWorkItems: () => [fakeTodo("H-1", "Task")],
-      isDaemonRunning: () => null,
-      promptItems: async () => [], // User quit
-      promptAction: async () => { actionCalled = true; return "run"; },
-      runSelected: async () => { runCalled = true; },
-    });
-
-    // Should not proceed to action prompt or run
-    expect(actionCalled).toBe(false);
-    expect(runCalled).toBe(false);
-  });
-
-  it("exits gracefully when user quits at action prompt", async () => {
+  it("exits gracefully when user quits at mode prompt", async () => {
     const projectDir = setupTempRepo();
     mkdirSync(join(projectDir, ".ninthwave", "work"), { recursive: true });
 
@@ -680,13 +666,60 @@ describe("cmdNoArgs", () => {
       isTTY: true,
       parseWorkItems: () => [fakeTodo("H-1", "Task")],
       isDaemonRunning: () => null,
-      promptItems: async () => ["H-1"],
-      promptAction: async () => "quit",
+      displayItemsSummary: () => {},
+      promptMode: async () => "quit",
       runSelected: async () => { runCalled = true; },
       runWatch: async () => { watchCalled = true; },
     });
 
     expect(runCalled).toBe(false);
     expect(watchCalled).toBe(false);
+  });
+
+  it("exits gracefully when user quits at item selection in launch subset path", async () => {
+    const projectDir = setupTempRepo();
+    mkdirSync(join(projectDir, ".ninthwave", "work"), { recursive: true });
+
+    let runCalled = false;
+
+    await cmdNoArgs(projectDir, {
+      isTTY: true,
+      parseWorkItems: () => [fakeTodo("H-1", "Task")],
+      isDaemonRunning: () => null,
+      displayItemsSummary: () => {},
+      promptMode: async () => "launch",
+      promptItems: async () => [], // User quit
+      runSelected: async () => { runCalled = true; },
+    });
+
+    expect(runCalled).toBe(false);
+  });
+
+  it("orchestrate path never calls promptItems (no double-prompting)", async () => {
+    const projectDir = setupTempRepo();
+    mkdirSync(join(projectDir, ".ninthwave", "work"), { recursive: true });
+
+    const todos = [
+      fakeTodo("H-FOO-1", "First task"),
+      fakeTodo("H-FOO-2", "Second task"),
+    ];
+    let promptItemsCalled = false;
+
+    await cmdNoArgs(projectDir, {
+      isTTY: true,
+      parseWorkItems: () => todos,
+      isDaemonRunning: () => null,
+      displayItemsSummary: () => {},
+      promptMode: async () => "orchestrate",
+      promptMergeStrategy: async () => "asap" as MergeStrategy,
+      promptWipLimit: async () => 4,
+      promptItems: async () => {
+        promptItemsCalled = true;
+        return ["H-FOO-1"];
+      },
+      runWatch: async () => {},
+    });
+
+    expect(promptItemsCalled).toBe(false);
   });
 });

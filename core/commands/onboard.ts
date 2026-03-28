@@ -5,7 +5,7 @@
 // 1. No git repo → help text
 // 2. No .ninthwave/ → first-run onboarding (init flow)
 // 3. .ninthwave/ exists, no work items → guidance message
-// 4. Work items exist, no daemon → checkbox picker with run/watch options
+// 4. Work items exist, no daemon → mode-first prompt (orchestrate/launch)
 // 5. Daemon running → live status view
 
 import { createInterface } from "readline";
@@ -16,7 +16,6 @@ import {
   DIM,
   GREEN,
   YELLOW,
-  CYAN,
   RED,
   RESET,
 } from "../output.ts";
@@ -26,7 +25,9 @@ import { initProject } from "./init.ts";
 import { getBundleDir } from "../paths.ts";
 import { isDaemonRunning } from "../daemon.ts";
 import { parseWorkItems } from "../parser.ts";
-import { promptItems } from "../interactive.ts";
+import { promptItems, displayItemsSummary, promptMode, promptMergeStrategy, promptWipLimit } from "../interactive.ts";
+import type { Mode } from "../interactive.ts";
+import type { MergeStrategy } from "../orchestrator.ts";
 import { printHelp } from "../help.ts";
 
 // ── AI tool descriptors ─────────────────────────────────────────────
@@ -103,8 +104,11 @@ export interface NoArgsDeps extends OnboardDeps {
   existsSync?: typeof existsSync;
   parseWorkItems?: (workDir: string, worktreeDir: string) => WorkItem[];
   isDaemonRunning?: (projectRoot: string) => number | null;
+  displayItemsSummary?: (todos: WorkItem[]) => void;
+  promptMode?: (prompt: PromptFn) => Promise<Mode>;
+  promptMergeStrategy?: (prompt: PromptFn) => Promise<MergeStrategy>;
+  promptWipLimit?: (defaultLimit: number, prompt: PromptFn) => Promise<number>;
   promptItems?: (todos: WorkItem[], prompt: PromptFn) => Promise<string[]>;
-  promptAction?: (prompt: PromptFn) => Promise<"run" | "watch" | "quit">;
   runSelected?: (ids: string[], workDir: string, worktreeDir: string, projectRoot: string) => Promise<void>;
   runWatch?: (args: string[], workDir: string, worktreeDir: string, projectRoot: string) => Promise<void>;
   runStatusWatch?: (worktreeDir: string, projectRoot: string) => Promise<void>;
@@ -385,34 +389,6 @@ export async function onboard(
   // cmux: GUI app, workspace is already visible — no attach needed
 }
 
-// ── Action picker ──────────────────────────────────────────────────
-
-/**
- * After the user selects work items, ask whether to run selected items
- * or watch all items with the orchestrator.
- */
-export async function promptAction(
-  prompt: PromptFn,
-): Promise<"run" | "watch" | "quit"> {
-  console.log();
-  console.log(`  ${BOLD}1${RESET}. ${CYAN}Run selected${RESET}  ${DIM}— launch parallel sessions for chosen items${RESET}`);
-  console.log(`  ${BOLD}2${RESET}. ${CYAN}Watch all${RESET}     ${DIM}— start the orchestrator for all items${RESET}`);
-  console.log();
-
-  while (true) {
-    const answer = await prompt(`${BOLD}Choose [1-2]: ${RESET}`);
-
-    if (answer.toLowerCase() === "q" || answer.toLowerCase() === "quit") {
-      return "quit";
-    }
-
-    if (answer === "1" || answer.toLowerCase() === "run") return "run";
-    if (answer === "2" || answer.toLowerCase() === "watch") return "watch";
-
-    console.log(`  ${YELLOW}Enter 1, 2, or "q" to quit.${RESET}`);
-  }
-}
-
 // ── CLI entry point ─────────────────────────────────────────────────
 
 /**
@@ -444,7 +420,9 @@ export async function cmdOnboard(projectDir: string): Promise<void> {
  * 3. No `.ninthwave/` → first-run onboarding (init flow)
  * 4. `.ninthwave/` exists, no work items → guidance message
  * 5. Work items exist, daemon running → live status view
- * 6. Work items exist, no daemon → checkbox picker + action choice
+ * 6. Work items exist, no daemon → mode-first prompt:
+ *    a. Orchestrate (default) → merge strategy + WIP limit → cmdWatch
+ *    b. Launch subset → item selection → cmdRunItems
  */
 export async function cmdNoArgs(
   projectRoot: string | null,
@@ -454,8 +432,11 @@ export async function cmdNoArgs(
   const checkExists = deps.existsSync ?? existsSync;
   const doParseT = deps.parseWorkItems ?? parseWorkItems;
   const checkDaemon = deps.isDaemonRunning ?? isDaemonRunning;
+  const doDisplaySummary = deps.displayItemsSummary ?? displayItemsSummary;
+  const doPromptMode = deps.promptMode ?? promptMode;
+  const doPromptMergeStrategy = deps.promptMergeStrategy ?? promptMergeStrategy;
+  const doPromptWipLimit = deps.promptWipLimit ?? promptWipLimit;
   const doPromptItems = deps.promptItems ?? promptItems;
-  const doPromptAction = deps.promptAction ?? promptAction;
   const prompt = deps.prompt ?? defaultPrompt;
   const helpFn = deps.printHelp ?? printHelp;
 
@@ -512,27 +493,41 @@ export async function cmdNoArgs(
     return;
   }
 
-  // State 5: Work items exist, no daemon → checkbox picker
-  const selectedIds = await doPromptItems(todos, prompt);
-  if (selectedIds.length === 0) return;
+  // State 5: Work items exist, no daemon → mode-first flow
+  // Show read-only summary of all items
+  doDisplaySummary(todos);
 
-  const action = await doPromptAction(prompt);
-  if (action === "quit") return;
+  // Ask: Orchestrate (default) or Launch subset?
+  const mode = await doPromptMode(prompt);
+  if (mode === "quit") return;
 
-  if (action === "run") {
+  if (mode === "orchestrate") {
+    // Prompt for merge strategy and WIP limit, then pass all item IDs to cmdWatch
+    const strategy = await doPromptMergeStrategy(prompt);
+    const wipLimit = await doPromptWipLimit(4, prompt);
+    const allItemIds = todos.map((t) => t.id);
+    const watchArgs = [
+      "--items", ...allItemIds,
+      "--merge-strategy", strategy,
+      "--wip-limit", String(wipLimit),
+    ];
+
+    if (deps.runWatch) {
+      await deps.runWatch(watchArgs, workDir, worktreeDir, projectRoot);
+    } else {
+      const { cmdWatch } = await import("./orchestrate.ts");
+      await cmdWatch(watchArgs, workDir, worktreeDir, projectRoot);
+    }
+  } else {
+    // "launch" — prompt for item selection, then run selected
+    const selectedIds = await doPromptItems(todos, prompt);
+    if (selectedIds.length === 0) return;
+
     if (deps.runSelected) {
       await deps.runSelected(selectedIds, workDir, worktreeDir, projectRoot);
     } else {
       const { cmdRunItems } = await import("./launch.ts");
       await cmdRunItems(selectedIds, workDir, worktreeDir, projectRoot);
-    }
-  } else {
-    // "watch" — launch orchestrator for all items
-    if (deps.runWatch) {
-      await deps.runWatch([], workDir, worktreeDir, projectRoot);
-    } else {
-      const { cmdWatch } = await import("./orchestrate.ts");
-      await cmdWatch([], workDir, worktreeDir, projectRoot);
     }
   }
 }

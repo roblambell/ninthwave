@@ -123,7 +123,7 @@ export type Mode = "orchestrate" | "launch" | "quit";
 /**
  * Prompt the user to choose between "Orchestrate" (default) and "Launch subset".
  * Returns "orchestrate", "launch", or "quit".
- * Follows the same input loop pattern as promptAction() in onboard.ts.
+ * Used by cmdNoArgs() in onboard.ts for the mode-first flow.
  */
 export async function promptMode(
   prompt: PromptFn,
