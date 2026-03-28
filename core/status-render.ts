@@ -241,6 +241,41 @@ export function truncateTitle(title: string, maxWidth: number): string {
   return title.slice(0, maxWidth - 3) + "...";
 }
 
+/**
+ * Return a color-coded blocker icon based on unresolved blocker count.
+ * RED ⧗ for 2+ blockers, YELLOW ⧗ for 1 blocker, plain space for 0.
+ * Always 1 visible character wide to preserve column alignment.
+ */
+export function blockerIcon(blockerCount: number): string {
+  if (blockerCount >= 2) return `${RED}⧗${RESET}`;
+  if (blockerCount === 1) return `${YELLOW}⧗${RESET}`;
+  return " ";
+}
+
+/**
+ * Render a dimmed sub-line showing blocker IDs, indented to align under the ID column.
+ * Format: "    └ H-CA-1, H-CA-3" with truncation and "..." when the list exceeds titleWidth.
+ * The entire line is wrapped in DIM regardless of queued state.
+ */
+export function formatBlockerSubline(
+  blockerIds: string[],
+  titleWidth: number,
+  isQueued: boolean,
+): string {
+  const prefix = "    └ ";
+  const idList = blockerIds.join(", ");
+  const available = titleWidth - prefix.length;
+  let content: string;
+  if (available <= 0) {
+    content = "";
+  } else if (idList.length <= available) {
+    content = idList;
+  } else {
+    content = idList.slice(0, available - 3) + "...";
+  }
+  return `${DIM}${prefix}${content}${RESET}`;
+}
+
 /** Format milliseconds into a human-readable age string (e.g., "2h 15m", "3d 1h"). */
 export function formatAge(ms: number): string {
   if (ms < 0) ms = 0;

@@ -35,6 +35,8 @@ import {
   formatCompactMetrics,
   formatUnifiedProgress,
   formatTitleMetrics,
+  blockerIcon,
+  formatBlockerSubline,
   MIN_FULLSCREEN_ROWS,
   type StatusItem,
   type ItemState,
@@ -51,6 +53,7 @@ import {
 import type { OrchestratorItem } from "../core/orchestrator.ts";
 import type { DaemonState } from "../core/daemon.ts";
 import type { WorkItem } from "../core/types.ts";
+import { RED, YELLOW, DIM, RESET } from "../core/output.ts";
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
@@ -162,6 +165,71 @@ describe("truncateTitle", () => {
   });
   it("handles very small maxWidth", () => {
     expect(truncateTitle("Hello", 2)).toBe("He");
+  });
+});
+
+describe("blockerIcon", () => {
+  it("returns RED ⧗ for count >= 2", () => {
+    expect(blockerIcon(2)).toBe(`${RED}⧗${RESET}`);
+    expect(blockerIcon(5)).toBe(`${RED}⧗${RESET}`);
+  });
+
+  it("returns YELLOW ⧗ for count === 1", () => {
+    expect(blockerIcon(1)).toBe(`${YELLOW}⧗${RESET}`);
+  });
+
+  it("returns a single space for count === 0", () => {
+    expect(blockerIcon(0)).toBe(" ");
+  });
+
+  it("output is always 1 visible character wide", () => {
+    // Icon or space — strip ANSI, should be 1 char
+    expect(stripAnsi(blockerIcon(0))).toHaveLength(1);
+    expect(stripAnsi(blockerIcon(1))).toHaveLength(1);
+    expect(stripAnsi(blockerIcon(3))).toHaveLength(1);
+  });
+});
+
+describe("formatBlockerSubline", () => {
+  it("renders 4-char indent + └ prefix with comma-separated IDs", () => {
+    const result = formatBlockerSubline(["H-CA-1", "H-CA-3"], 40, false);
+    const text = stripAnsi(result);
+    expect(text).toBe("    └ H-CA-1, H-CA-3");
+  });
+
+  it("wraps output in DIM for normal mode", () => {
+    const result = formatBlockerSubline(["H-CA-1"], 40, false);
+    expect(result).toBe(`${DIM}    └ H-CA-1${RESET}`);
+  });
+
+  it("wraps output in DIM for queued mode", () => {
+    const result = formatBlockerSubline(["H-CA-1"], 40, true);
+    expect(result).toBe(`${DIM}    └ H-CA-1${RESET}`);
+  });
+
+  it("truncates with ... when IDs exceed titleWidth", () => {
+    // prefix "    └ " is 6 chars, so available = 20 - 6 = 14
+    // "H-CA-1, H-CA-3" is 14 chars — fits exactly at titleWidth 20
+    // "H-CA-1, H-CA-3, H-CA-5" is 23 chars — needs truncation at titleWidth 20
+    const result = formatBlockerSubline(["H-CA-1", "H-CA-3", "H-CA-5"], 20, false);
+    const text = stripAnsi(result);
+    expect(text).toContain("...");
+    expect(text.startsWith("    └ ")).toBe(true);
+    // Total length should not exceed titleWidth
+    expect(text.length).toBeLessThanOrEqual(20);
+  });
+
+  it("handles very narrow titleWidth gracefully", () => {
+    const result = formatBlockerSubline(["H-1"], 4, false);
+    const text = stripAnsi(result);
+    // prefix is 6 chars, available = 4 - 6 = -2, so content is empty
+    expect(text).toBe("    └ ");
+  });
+
+  it("renders single ID without truncation", () => {
+    const result = formatBlockerSubline(["H-1"], 30, false);
+    const text = stripAnsi(result);
+    expect(text).toBe("    └ H-1");
   });
 });
 
