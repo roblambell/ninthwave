@@ -22,6 +22,28 @@ function getTestFiles(): { name: string; content: string; path: string }[] {
     }));
 }
 
+/** Read all .ts and .md project files, excluding non-source directories. */
+function getProjectFiles(): { name: string; content: string; path: string }[] {
+  const projectRoot = join(import.meta.dirname, "..");
+  const excludePrefixes = ["node_modules/", ".worktrees/", "dist/", ".git/"];
+  const files: { name: string; content: string; path: string }[] = [];
+
+  for (const pattern of ["**/*.ts", "**/*.md"]) {
+    const glob = new Bun.Glob(pattern);
+    for (const relPath of glob.scanSync(projectRoot)) {
+      if (excludePrefixes.some((prefix) => relPath.startsWith(prefix))) continue;
+      const fullPath = join(projectRoot, relPath);
+      files.push({
+        name: relPath,
+        content: readFileSync(fullPath, "utf-8"),
+        path: fullPath,
+      });
+    }
+  }
+
+  return files;
+}
+
 /** Check if a line is inside a string literal (heuristic). */
 function isInsideString(line: string, matchIndex: number): boolean {
   const before = line.slice(0, matchIndex);
@@ -254,6 +276,27 @@ function checkNoUnboundedOrchestrateLoop(
   return violations;
 }
 
+function checkNoEmDash(
+  file: { name: string; content: string },
+): Violation[] {
+  const violations: Violation[] = [];
+  const lines = file.content.split("\n");
+  const emDash = "\u2014";
+
+  for (let i = 0; i < lines.length; i++) {
+    if (lines[i]!.includes(emDash) && !isIgnored(lines, i, "no-em-dash")) {
+      violations.push({
+        file: file.name,
+        line: i + 1,
+        rule: "no-em-dash",
+        message: "Em dash (U+2014) found -- use ASCII alternatives (\" -- \", \"-\", or rephrase)",
+      });
+    }
+  }
+
+  return violations;
+}
+
 // ── Run all rules ────────────────────────────────────────────────────
 
 function runAllRules(files: { name: string; content: string }[]): Violation[] {
@@ -286,6 +329,26 @@ describe("test lint rules", () => {
         expect.unreachable(
           `Test lint violations found:\n${report}\n\n` +
             `Fix the violations above or add // lint-ignore: <rule-id> to suppress.`,
+        );
+      }
+    });
+  });
+
+  describe("scan real project files", () => {
+    it("all project files are free of em dashes", () => {
+      const files = getProjectFiles();
+      const violations: Violation[] = [];
+      for (const file of files) {
+        violations.push(...checkNoEmDash(file));
+      }
+
+      if (violations.length > 0) {
+        const report = violations
+          .map((v) => `  ${v.file}:${v.line} ${v.rule}: ${v.message}`)
+          .join("\n");
+        expect.unreachable(
+          `Project lint violations found:\n${report}\n\n` +
+            `Fix the violations above or add // lint-ignore: no-em-dash to suppress.`,
         );
       }
     });
@@ -583,6 +646,59 @@ await orchestrateLoop(orch, ctx, deps, { ...config, maxIterations: 200 });`,
 describe("test", () => { it("works", () => {}); });`,
       };
       const violations = checkNoUnboundedOrchestrateLoop(file);
+      expect(violations.length).toBe(0);
+    });
+  });
+
+  describe("no-em-dash", () => {
+    it("detects em dash in a .ts file", () => {
+      const emDash = "\u2014";
+      const file = {
+        name: "fixture.ts",
+        content: `const msg = "hello ${emDash} world";`,
+      };
+      const violations = checkNoEmDash(file);
+      expect(violations.length).toBeGreaterThan(0);
+      expect(violations[0]!.rule).toBe("no-em-dash");
+    });
+
+    it("detects em dash in a .md file", () => {
+      const emDash = "\u2014";
+      const file = {
+        name: "fixture.md",
+        content: `# Title\n\nSome text ${emDash} more text.`,
+      };
+      const violations = checkNoEmDash(file);
+      expect(violations.length).toBeGreaterThan(0);
+      expect(violations[0]!.rule).toBe("no-em-dash");
+    });
+
+    it("passes when no em dash is present", () => {
+      const file = {
+        name: "fixture.ts",
+        content: `const msg = "hello -- world";`,
+      };
+      const violations = checkNoEmDash(file);
+      expect(violations.length).toBe(0);
+    });
+
+    it("respects lint-ignore suppression", () => {
+      const emDash = "\u2014";
+      const file = {
+        name: "fixture.ts",
+        content: `// lint-ignore: no-em-dash\nconst msg = "hello ${emDash} world";`,
+      };
+      const violations = checkNoEmDash(file);
+      expect(violations.length).toBe(0);
+    });
+
+    it("respects inline lint-ignore suppression", () => {
+      const emDash = "\u2014";
+      const file = {
+        name: "fixture.ts",
+        content: `const msg = "hello ${emDash} world"; // lint-ignore: no-em-dash`,
+      };
+      const violations = checkNoEmDash(file);
       expect(violations.length).toBe(0);
     });
   });
