@@ -124,8 +124,7 @@ The no-op PR template (replace the standard Phase 9 template):
 
 ```bash
 gh label create "domain:YOUR_DOMAIN" --color 0E8A16 --force || true
-gh label create "ninthwave" --color 1D76DB --force || true
-gh pr create --label "domain:YOUR_DOMAIN" --label "ninthwave" --title "chore: close YOUR_TODO_ID — no code change needed" --body "$(cat <<'EOF'
+gh pr create --label "domain:YOUR_DOMAIN" --title "chore: close YOUR_TODO_ID — no code change needed" --body "$(cat <<'EOF'
 ## Summary
 Closes YOUR_TODO_ID: <title>
 
@@ -253,21 +252,20 @@ If `BASE_BRANCH` is **not** set in your system prompt, create the PR normally (n
 
 ### Create labels
 
-Before creating the PR, ensure the domain and ninthwave labels exist. Use `--force` so it doesn't error if the label already exists, and `|| true` so PR creation proceeds even if label creation fails:
+Before creating the PR, ensure the domain label exists. Use `--force` so it doesn't error if the label already exists, and `|| true` so PR creation proceeds even if label creation fails:
 
 ```bash
 gh label create "domain:YOUR_DOMAIN" --color 0E8A16 --force || true
-gh label create "ninthwave" --color 1D76DB --force || true
 ```
 
 Replace `YOUR_DOMAIN` with the domain field from the TODO file (e.g., `tui-status`, `core`, `ci`).
 
 ### PR body template
 
-Create the PR with `gh pr create`. Use a HEREDOC for the body. Include `--label` flags for both labels:
+Create the PR with `gh pr create`. Use a HEREDOC for the body. Include the `--label` flag for the domain label:
 
 ```bash
-gh pr create --label "domain:YOUR_DOMAIN" --label "ninthwave" --title "fix|feat|refactor|test: <description> (YOUR_TODO_ID)" --body "$(cat <<'EOF'
+gh pr create --label "domain:YOUR_DOMAIN" --title "fix|feat|refactor|test: <description> (YOUR_TODO_ID)" --body "$(cat <<'EOF'
 ## Summary
 Implements YOUR_TODO_ID: <title>
 
