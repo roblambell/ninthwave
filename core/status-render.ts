@@ -924,10 +924,9 @@ export function formatStatusTable(
     }
   }
 
-  // Footer
+  // Footer: unified progress line
   lines.push(sep);
-  lines.push(formatBatchProgress(items));
-  lines.push(formatSummary(items));
+  lines.push(formatUnifiedProgress(items, termWidth));
 
   // Metrics panel (DORA-style)
   if (opts.showMetrics) {
@@ -1084,6 +1083,104 @@ export function formatCompactMetrics(
 }
 
 /**
+ * Format a unified single-line progress summary for the footer.
+ * Shows icon-prefixed state counts left-aligned and total count right-aligned.
+ * E.g., "✓ 5 merged  ▸ 2 implementing  ◌ 1 ci-pending                    8 items"
+ *
+ * Uses state ordering and colors from formatBatchProgress, icon style from formatCompactMetrics.
+ */
+export function formatUnifiedProgress(
+  items: StatusItem[],
+  termWidth: number = 80,
+): string {
+  if (items.length === 0) return "";
+
+  const counts = new Map<ItemState, number>();
+  for (const item of items) {
+    counts.set(item.state, (counts.get(item.state) ?? 0) + 1);
+  }
+
+  // Order states for display: merged first, then active states, then bad, then queued
+  const order: ItemState[] = [
+    "merged",
+    "review",
+    "pr-open",
+    "ci-pending",
+    "rebasing",
+    "bootstrapping",
+    "implementing",
+    "in-progress",
+    "ci-failed",
+    "queued",
+  ];
+
+  const parts: string[] = [];
+  for (const state of order) {
+    const count = counts.get(state);
+    if (count && count > 0) {
+      const color = stateColor(state);
+      const icon = stateIcon(state);
+      parts.push(`${color}${icon} ${count} ${stateLabel(state).toLowerCase()}${RESET}`);
+    }
+  }
+
+  const leftSide = parts.join("  ");
+  const totalText = `${items.length} item${items.length !== 1 ? "s" : ""}`;
+
+  // Compute display width of left side (strip ANSI)
+  const leftPlain = stripAnsiForWidth(leftSide);
+  // 2 indent + left + at least 2 spaces gap + total
+  const minWidth = 2 + leftPlain.length + 2 + totalText.length;
+
+  if (termWidth >= minWidth) {
+    const gap = termWidth - 2 - leftPlain.length - totalText.length;
+    return `  ${leftSide}${" ".repeat(gap)}${totalText}`;
+  }
+  // Narrow terminal: just put total after left with 2-space gap
+  return `  ${leftSide}  ${totalText}`;
+}
+
+/**
+ * Format the title line with right-aligned Lead/Thru metrics (dimmed).
+ * Falls back to plain title when no metrics available or terminal is too narrow (< 60 chars).
+ * E.g., "ninthwave status                              Lead: 7m  Thru: 20.9/hr"
+ */
+export function formatTitleMetrics(
+  items: StatusItem[],
+  termWidth: number = 80,
+  sessionStartedAt?: string,
+): string {
+  const title = `${BOLD}ninthwave status${RESET}`;
+  const titlePlain = "ninthwave status";
+
+  // Compute metrics
+  const metrics = computeSessionMetrics(items, sessionStartedAt);
+  const metricParts: string[] = [];
+  if (metrics.leadTimeMedianMs !== null) {
+    metricParts.push(`Lead: ${formatAge(metrics.leadTimeMedianMs)}`);
+  }
+  if (metrics.throughputPerHour !== null) {
+    metricParts.push(`Thru: ${metrics.throughputPerHour.toFixed(1)}/hr`);
+  }
+
+  // No metrics or terminal too narrow — plain title
+  if (metricParts.length === 0 || termWidth < 60) {
+    return title;
+  }
+
+  const metricsStr = metricParts.join("  ");
+  // Need: titlePlain.length + at least 4 spaces gap + metricsStr.length
+  const minWidth = titlePlain.length + 4 + metricsStr.length;
+
+  if (termWidth >= minWidth) {
+    const gap = termWidth - titlePlain.length - metricsStr.length;
+    return `${title}${" ".repeat(gap)}${DIM}${metricsStr}${RESET}`;
+  }
+  // Not enough room — plain title
+  return title;
+}
+
+/**
  * Build a FrameLayout from StatusItems, splitting the table into
  * header (column headers + summary), item rows, and footer (metrics + shortcuts).
  *
@@ -1142,8 +1239,8 @@ export function buildStatusLayout(
     return pad(name, daemonColWidth);
   }
 
-  // Header: title + column headers + separator
-  headerLines.push(`${BOLD}ninthwave status${RESET}`);
+  // Header: title (with right-aligned metrics when available) + column headers + separator
+  headerLines.push(formatTitleMetrics(items, termWidth, opts.sessionStartedAt));
   headerLines.push("");
   // Crew status panel (above item table)
   if (opts.crewStatus) {
@@ -1217,18 +1314,14 @@ export function buildStatusLayout(
     }
   }
 
-  // Footer: separator, progress, summary, optional metrics/help, shortcuts
+  // Footer: separator, unified progress line, optional metrics, shortcuts
   footerLines.push(sep);
-  footerLines.push(formatBatchProgress(items));
-  footerLines.push(formatSummary(items));
+  footerLines.push(formatUnifiedProgress(items, termWidth));
 
   if (opts.showMetrics) {
     const metrics = computeSessionMetrics(items, opts.sessionStartedAt);
     footerLines.push(formatMetricsPanel(metrics));
   }
-
-  // Compact metrics line
-  footerLines.push(formatCompactMetrics(items, opts.sessionStartedAt));
 
   // Always show keyboard shortcuts in full-screen mode, with countdown on the right
   const shortcuts = `q quit  m metrics  d deps  ↑/↓ scroll  ? help`;

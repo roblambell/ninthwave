@@ -387,25 +387,26 @@ describe("formatStatusTable", () => {
     expect(output).toContain("ninthwave start <ID>");
   });
 
-  it("includes batch progress line", () => {
+  it("includes unified progress line", () => {
     const items = [
       makeItem("A-1", "merged"),
       makeItem("A-2", "implementing"),
     ];
     const output = stripAnsi(formatStatusTable(items));
-    expect(output).toContain("Progress:");
     expect(output).toContain("merged");
     expect(output).toContain("implementing");
+    expect(output).toContain("2 items");
   });
 
-  it("includes summary line", () => {
+  it("unified progress replaces old Progress/Total lines", () => {
     const items = [
       makeItem("A-1", "merged"),
       makeItem("A-2", "implementing"),
       makeItem("A-3", "ci-failed"),
     ];
     const output = stripAnsi(formatStatusTable(items));
-    expect(output).toContain("Total:");
+    expect(output).not.toContain("Progress:");
+    expect(output).not.toContain("Total:");
     expect(output).toContain("3 items");
   });
 
@@ -1505,14 +1506,15 @@ describe("formatStatusTable blocked-by rendering", () => {
     expect(plain).toContain("A-3");
   });
 
-  it("includes progress and summary in blocked-by mode", () => {
+  it("includes unified progress in blocked-by mode", () => {
     const items = [
       makeItem("A-1", "merged", "Root"),
       makeItem("A-2", "implementing", "Child", null, 3600000, ["A-1"]),
     ];
     const output = stripAnsi(formatStatusTable(items, 80));
-    expect(output).toContain("Progress:");
-    expect(output).toContain("Total:");
+    expect(output).toContain("merged");
+    expect(output).toContain("implementing");
+    expect(output).toContain("2 items");
   });
 });
 

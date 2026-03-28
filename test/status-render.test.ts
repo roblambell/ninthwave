@@ -35,6 +35,8 @@ import {
   renderFullScreenFrame,
   clampScrollOffset,
   formatCompactMetrics,
+  formatUnifiedProgress,
+  formatTitleMetrics,
   MIN_FULLSCREEN_ROWS,
   type StatusItem,
   type ItemState,
@@ -614,11 +616,14 @@ describe("formatStatusTable", () => {
     expect(table).toContain("1/4 WIP slots active");
   });
 
-  it("renders footer progress line", () => {
+  it("renders unified footer progress line", () => {
     const items = [makeStatusItem({ state: "merged" })];
     const table = stripAnsi(formatStatusTable(items, 80));
-    expect(table).toContain("Progress:");
-    expect(table).toContain("Total:");
+    expect(table).toContain("merged");
+    expect(table).toContain("1 item");
+    // Old-style lines should not appear
+    expect(table).not.toContain("Progress:");
+    expect(table).not.toContain("Total:");
   });
 
   it("handles various terminal widths without crashing", () => {
@@ -1646,9 +1651,10 @@ describe("buildStatusLayout", () => {
     expect(itemText).toContain("A-2");
     expect(itemText).toContain("A-3");
 
-    // Footer should include progress, summary, keyboard shortcuts
+    // Footer should include unified progress line and keyboard shortcuts
     const footerText = layout.footerLines.map(stripAnsi).join("\n");
-    expect(footerText).toContain("Progress:");
+    expect(footerText).toContain("implementing");
+    expect(footerText).toContain("3 items");
     expect(footerText).toContain("scroll");
     expect(footerText).toContain("quit");
   });
@@ -1661,7 +1667,7 @@ describe("buildStatusLayout", () => {
     expect(headerText).toContain("No active items");
   });
 
-  it("includes compact metrics in footer", () => {
+  it("includes unified progress in footer", () => {
     const items = [
       makeStatusItem({ id: "A-1", state: "merged" }),
       makeStatusItem({ id: "A-2", state: "implementing" }),
@@ -1669,7 +1675,45 @@ describe("buildStatusLayout", () => {
     const layout = buildStatusLayout(items, 80);
     const footerText = layout.footerLines.map(stripAnsi).join("\n");
     expect(footerText).toContain("merged");
-    expect(footerText).toContain("active");
+    expect(footerText).toContain("implementing");
+    expect(footerText).toContain("2 items");
+  });
+
+  it("footer has 1 progress line instead of 3 (saves 2 vertical lines)", () => {
+    const items = [
+      makeStatusItem({ id: "A-1", state: "merged" }),
+      makeStatusItem({ id: "A-2", state: "implementing" }),
+      makeStatusItem({ id: "A-3", state: "ci-pending" }),
+    ];
+    const layout = buildStatusLayout(items, 80);
+    const footerText = layout.footerLines.map(stripAnsi).join("\n");
+    // Should NOT contain old-style Progress:/Total: lines
+    expect(footerText).not.toContain("Progress:");
+    expect(footerText).not.toContain("Total:");
+    // Should contain unified progress with icons and state counts
+    expect(footerText).toContain("merged");
+    expect(footerText).toContain("implementing");
+    expect(footerText).toContain("ci pending");
+    expect(footerText).toContain("3 items");
+  });
+
+  it("title line shows right-aligned Lead/Thru when metrics available", () => {
+    const now = Date.now();
+    const items = [
+      makeStatusItem({
+        id: "A-1",
+        state: "merged",
+        startedAt: new Date(now - 600_000).toISOString(),
+        endedAt: new Date(now - 300_000).toISOString(),
+      }),
+    ];
+    const layout = buildStatusLayout(items, 80, undefined, false, {
+      sessionStartedAt: new Date(now - 3_600_000).toISOString(),
+    });
+    const headerText = layout.headerLines.map(stripAnsi).join("\n");
+    expect(headerText).toContain("ninthwave status");
+    expect(headerText).toContain("Lead:");
+    expect(headerText).toContain("Thru:");
   });
 
   it("includes keyboard shortcuts in footer", () => {
@@ -1808,6 +1852,153 @@ describe("formatCompactMetrics", () => {
     const text = stripAnsi(formatCompactMetrics(items, new Date(now - 3_600_000).toISOString()));
     expect(text).toContain("Lead:");
     expect(text).toContain("Thru:");
+  });
+});
+
+describe("formatUnifiedProgress", () => {
+  it("returns empty string for no items", () => {
+    expect(formatUnifiedProgress([], 80)).toBe("");
+  });
+
+  it("shows all merged with icon and total count", () => {
+    const items = [
+      makeStatusItem({ id: "A-1", state: "merged" }),
+      makeStatusItem({ id: "A-2", state: "merged" }),
+      makeStatusItem({ id: "A-3", state: "merged" }),
+    ];
+    const text = stripAnsi(formatUnifiedProgress(items, 80));
+    expect(text).toContain("✓ 3 merged");
+    expect(text).toContain("3 items");
+  });
+
+  it("shows mixed active states with icons", () => {
+    const items = [
+      makeStatusItem({ id: "A-1", state: "merged" }),
+      makeStatusItem({ id: "A-2", state: "implementing" }),
+      makeStatusItem({ id: "A-3", state: "ci-pending" }),
+    ];
+    const text = stripAnsi(formatUnifiedProgress(items, 100));
+    expect(text).toContain("✓ 1 merged");
+    expect(text).toContain("▸ 1 implementing");
+    expect(text).toContain("◌ 1 ci pending");
+    expect(text).toContain("3 items");
+  });
+
+  it("shows single active state", () => {
+    const items = [
+      makeStatusItem({ id: "A-1", state: "implementing" }),
+    ];
+    const text = stripAnsi(formatUnifiedProgress(items, 80));
+    expect(text).toContain("▸ 1 implementing");
+    expect(text).toContain("1 item");
+    // Singular "item" not "items"
+    expect(text).not.toContain("1 items");
+  });
+
+  it("shows queued items", () => {
+    const items = [
+      makeStatusItem({ id: "A-1", state: "merged" }),
+      makeStatusItem({ id: "A-2", state: "implementing" }),
+      makeStatusItem({ id: "A-3", state: "queued" }),
+      makeStatusItem({ id: "A-4", state: "queued" }),
+    ];
+    const text = stripAnsi(formatUnifiedProgress(items, 100));
+    expect(text).toContain("✓ 1 merged");
+    expect(text).toContain("▸ 1 implementing");
+    expect(text).toContain("· 2 queued");
+    expect(text).toContain("4 items");
+  });
+
+  it("right-aligns total count at end of line", () => {
+    const items = [
+      makeStatusItem({ id: "A-1", state: "implementing" }),
+    ];
+    const text = stripAnsi(formatUnifiedProgress(items, 80));
+    // Total count should be at the right edge
+    expect(text.trimEnd()).toMatch(/1 item$/);
+  });
+
+  it("handles narrow terminal gracefully", () => {
+    const items = [
+      makeStatusItem({ id: "A-1", state: "merged" }),
+      makeStatusItem({ id: "A-2", state: "implementing" }),
+    ];
+    // Very narrow — should still contain the data
+    const text = stripAnsi(formatUnifiedProgress(items, 30));
+    expect(text).toContain("merged");
+    expect(text).toContain("implementing");
+    expect(text).toContain("2 items");
+  });
+});
+
+describe("formatTitleMetrics", () => {
+  it("shows plain title when no metrics available", () => {
+    const items = [makeStatusItem({ id: "A-1", state: "implementing" })];
+    const text = stripAnsi(formatTitleMetrics(items, 80));
+    expect(text).toBe("ninthwave status");
+  });
+
+  it("shows right-aligned Lead/Thru when metrics available", () => {
+    const now = Date.now();
+    const items = [
+      makeStatusItem({
+        id: "A-1",
+        state: "merged",
+        startedAt: new Date(now - 600_000).toISOString(),
+        endedAt: new Date(now - 300_000).toISOString(),
+      }),
+    ];
+    const text = stripAnsi(formatTitleMetrics(items, 80, new Date(now - 3_600_000).toISOString()));
+    expect(text).toContain("ninthwave status");
+    expect(text).toContain("Lead:");
+    expect(text).toContain("Thru:");
+  });
+
+  it("falls back to plain title when terminal is too narrow (< 60)", () => {
+    const now = Date.now();
+    const items = [
+      makeStatusItem({
+        id: "A-1",
+        state: "merged",
+        startedAt: new Date(now - 600_000).toISOString(),
+        endedAt: new Date(now - 300_000).toISOString(),
+      }),
+    ];
+    const text = stripAnsi(formatTitleMetrics(items, 50, new Date(now - 3_600_000).toISOString()));
+    expect(text).toBe("ninthwave status");
+    expect(text).not.toContain("Lead:");
+  });
+
+  it("falls back to plain title when terminal width insufficient for gap", () => {
+    const now = Date.now();
+    const items = [
+      makeStatusItem({
+        id: "A-1",
+        state: "merged",
+        startedAt: new Date(now - 600_000).toISOString(),
+        endedAt: new Date(now - 300_000).toISOString(),
+      }),
+    ];
+    // Width of 60 — right at the threshold, should still show metrics if they fit
+    const text60 = stripAnsi(formatTitleMetrics(items, 60, new Date(now - 3_600_000).toISOString()));
+    expect(text60).toContain("ninthwave status");
+  });
+
+  it("shows only Lead when throughput is null", () => {
+    const now = Date.now();
+    const items = [
+      makeStatusItem({
+        id: "A-1",
+        state: "merged",
+        startedAt: new Date(now - 600_000).toISOString(),
+        endedAt: new Date(now - 300_000).toISOString(),
+      }),
+    ];
+    // No sessionStartedAt → throughput is null, but lead time should be present
+    const text = stripAnsi(formatTitleMetrics(items, 80));
+    expect(text).toContain("ninthwave status");
+    expect(text).toContain("Lead:");
+    expect(text).not.toContain("Thru:");
   });
 });
 
