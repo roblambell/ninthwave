@@ -28,7 +28,7 @@ vi.mock("../core/git.ts", () => ({
 // functions to this mock, update the comment in git.test.ts lines 5-11.
 
 
-import { detectAiTool, cmdStart, launchSingleItem, launchAiSession, launchReviewWorker, sanitizeTitle, extractTodoText, cleanStaleBranchForReuse } from "../core/commands/start.ts";
+import { detectAiTool, cmdStart, launchSingleItem, launchAiSession, launchReviewWorker, sanitizeTitle, extractTodoText, cleanStaleBranchForReuse } from "../core/commands/launch.ts";
 import { parseTodos } from "../core/parser.ts";
 import { fetchOrigin, ffMerge, createWorktree, branchExists, deleteBranch, findWorktreeForBranch, removeWorktree } from "../core/git.ts";
 

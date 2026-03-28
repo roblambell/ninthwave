@@ -89,7 +89,7 @@ User runs /work
       └─→ calls ninthwave start <IDs>
             ├─ git worktree create .worktrees/todo-<ID>
             ├─ allocate partition (port/DB isolation) via core/partitions.ts
-            ├─ seed agent files into worktree (core/commands/start.ts seedAgentFiles)
+            ├─ seed agent files into worktree (core/commands/launch.ts seedAgentFiles)
             └─ launch AI session in multiplexer workspace, send worker prompt
 
 Worker session (per TODO)
@@ -103,13 +103,13 @@ ninthwave orchestrate (event loop, ~10s poll)
   ├─ poll multiplexer for worker liveness (core/mux.ts readScreen)
   ├─ run processTransitions (pure state machine → list of Actions)
   ├─ executeAction for each action:
-  │   ├─ launch   → start.ts launchSingleItem
+  │   ├─ launch   → launch.ts launchSingleItem
   │   ├─ merge    → gh.ts prMerge
   │   ├─ notify-ci-failure  → mux.sendMessage to worker
   │   ├─ notify-review      → mux.sendMessage to worker
   │   ├─ rebase   → git.ts daemonRebase
   │   ├─ clean    → clean.ts cleanSingleWorktree
-  │   └─ launch-review → start.ts launchReviewWorker
+  │   └─ launch-review → launch.ts launchReviewWorker
 
 Post-merge
   ├─ worktree and workspace cleaned up
@@ -118,7 +118,7 @@ Post-merge
   └─ version bump deferred until all items done
 ```
 
-Key files: [`core/parser.ts`](core/parser.ts) (read todos), [`core/commands/start.ts`](core/commands/start.ts) (launch), [`core/commands/orchestrate.ts`](core/commands/orchestrate.ts) (event loop), [`core/commands/clean.ts`](core/commands/clean.ts) (cleanup).
+Key files: [`core/parser.ts`](core/parser.ts) (read todos), [`core/commands/launch.ts`](core/commands/launch.ts) (launch), [`core/commands/orchestrate.ts`](core/commands/orchestrate.ts) (event loop), [`core/commands/clean.ts`](core/commands/clean.ts) (cleanup).
 
 ---
 
@@ -184,7 +184,7 @@ Each TODO item gets an isolated AI coding session managed as follows:
 
 ### Launch
 
-`launchSingleItem()` in [`core/commands/start.ts`](core/commands/start.ts):
+`launchSingleItem()` in [`core/commands/launch.ts`](core/commands/launch.ts):
 
 1. `git worktree add .worktrees/todo-<ID> -b todo/<ID>` — isolated checkout.
 2. `allocatePartition(id)` — assigns a unique port range and DB prefix for test isolation.

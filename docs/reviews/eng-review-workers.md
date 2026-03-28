@@ -3,12 +3,12 @@
 # Engineering Review: Worker Lifecycle and Communication
 
 **Reviewed:** 2026-03-24
-**Modules:** `core/commands/start.ts`, `core/mux.ts`, `core/cmux.ts`, `core/send-message.ts`, `core/commands/clean.ts`, `core/commands/reconcile.ts`
-**Related tests:** `test/start.test.ts`, `test/mux.test.ts`, `test/clean.test.ts`, `test/reconcile.test.ts`, `test/cmux.test.ts`
+**Modules:** `core/commands/launch.ts`, `core/mux.ts`, `core/cmux.ts`, `core/send-message.ts`, `core/commands/clean.ts`, `core/commands/reconcile.ts`
+**Related tests:** `test/launch.test.ts`, `test/mux.test.ts`, `test/clean.test.ts`, `test/reconcile.test.ts`, `test/cmux.test.ts`
 
 ---
 
-## 1. Worker Launch (`core/commands/start.ts`)
+## 1. Worker Launch (`core/commands/launch.ts`)
 
 ### 1.1 AI Tool Detection
 
@@ -263,13 +263,13 @@ CmuxAdapter workspaces include the TODO title (via the `cmd` string), making the
 
 | ID | Severity | Module | Summary |
 |----|----------|--------|---------|
-| W-1 | Medium | start.ts | Process tree walk is platform-fragile |
-| W-2 | Low | start.ts | `which` fallback may detect wrong tool |
-| W-3 | Medium | start.ts | Silent swallow of fetch/merge failures |
-| W-4 | Low | start.ts | Branch collision deletes without confirmation |
-| W-5 | Low | start.ts | Prompt file is world-readable in tmpdir |
-| W-6 | Medium | start.ts | `waitForReady` timeout still sends prompt |
-| W-7 | Medium | start.ts | Shell injection via TODO title in command construction |
+| W-1 | Medium | launch.ts | Process tree walk is platform-fragile |
+| W-2 | Low | launch.ts | `which` fallback may detect wrong tool |
+| W-3 | Medium | launch.ts | Silent swallow of fetch/merge failures |
+| W-4 | Low | launch.ts | Branch collision deletes without confirmation |
+| W-5 | Low | launch.ts | Prompt file is world-readable in tmpdir |
+| W-6 | Medium | launch.ts | `waitForReady` timeout still sends prompt |
+| W-7 | Medium | launch.ts | Shell injection via TODO title in command construction |
 | W-8 | Low | mux.ts | TmuxAdapter counter resets on restart |
 | W-9 | Medium | mux.ts | TmuxAdapter `splitPane` returns wrong pane_id |
 | W-10 | Low | mux.ts | TmuxAdapter `sendMessage` has keystroke timing issues |
@@ -300,7 +300,7 @@ CmuxAdapter workspaces include the TODO title (via the `cmd` string), making the
 
 | Module | Coverage | Notable Gaps |
 |--------|----------|--------------|
-| `start.ts` | Medium | `extractTodoText` untested, `launchAiSession` command construction untested |
+| `launch.ts` | Medium | `extractTodoText` untested, `launchAiSession` command construction untested |
 | `mux.ts` | Medium-High | `TmuxAdapter` has zero test coverage |
 | `send-message.ts` | High | Strong DI-based test coverage |
 | `clean.ts` | Medium-High | Cross-repo cleanup path untested |
