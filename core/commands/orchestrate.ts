@@ -31,7 +31,7 @@ import { prMerge, prComment, checkPrMergeable, getRepoOwner, applyGithubToken, f
 import { fetchOrigin, ffMerge, hasChanges, getStagedFiles, gitAdd, gitCommit, gitPush, gitReset, daemonRebase } from "../git.ts";
 import { type Multiplexer, getMux } from "../mux.ts";
 import { reconcile } from "./reconcile.ts";
-import { die, warn, info } from "../output.ts";
+import { die, warn, info, ALT_SCREEN_ON, ALT_SCREEN_OFF } from "../output.ts";
 import { confirmPrompt } from "../prompt.ts";
 import { shouldEnterInteractive, runInteractiveFlow } from "../interactive.ts";
 import type { WorkItem } from "../types.ts";
@@ -2459,6 +2459,16 @@ export async function cmdOrchestrate(
     cleanupKeyboard = setupKeyboardShortcuts(abortController, log, process.stdin, tuiState);
   }
 
+  // Enter alternate screen buffer so TUI renders don't pollute terminal scrollback.
+  // The matching ALT_SCREEN_OFF is in the finally block below + a process.on('exit') safety net.
+  if (tuiMode) {
+    process.stdout.write(ALT_SCREEN_ON);
+  }
+  const exitAltScreen = () => {
+    if (tuiMode) process.stdout.write(ALT_SCREEN_OFF);
+  };
+  process.on("exit", exitAltScreen);
+
   // Write PID file for foreground mode too (prevents duplicate instances)
   if (!isDaemonChild) {
     writePidFile(projectRoot, process.pid);
@@ -2498,6 +2508,10 @@ export async function cmdOrchestrate(
         count: closedWorkspaces.length,
       });
     }
+
+    // Leave alternate screen buffer before restoring terminal state
+    exitAltScreen();
+    process.removeListener("exit", exitAltScreen);
 
     // Restore terminal state (disable raw mode)
     cleanupKeyboard();

@@ -2,7 +2,7 @@
 
 import { existsSync, readdirSync, readFileSync, statSync } from "fs";
 import { join, basename } from "path";
-import { BOLD, DIM, RESET } from "../output.ts";
+import { BOLD, DIM, RESET, ALT_SCREEN_ON, ALT_SCREEN_OFF } from "../output.ts";
 import { run } from "../shell.ts";
 import { ID_PATTERN_GLOBAL, ID_IN_FILENAME } from "../types.ts";
 import {
@@ -356,6 +356,15 @@ export async function cmdStatusWatch(
     wake();
   }
 
+  // Enter alternate screen buffer so TUI renders don't pollute terminal scrollback
+  if (isTTY) {
+    process.stdout.write(ALT_SCREEN_ON);
+  }
+  const exitAltScreen = () => {
+    if (isTTY) process.stdout.write(ALT_SCREEN_OFF);
+  };
+  process.on("exit", exitAltScreen);
+
   // Enter raw mode for TTY so individual keypresses are received
   if (isTTY) {
     process.stdin.setRawMode(true);
@@ -366,6 +375,10 @@ export async function cmdStatusWatch(
   }
 
   function cleanup() {
+    // Leave alternate screen buffer first, then restore terminal state
+    exitAltScreen();
+    process.removeListener("exit", exitAltScreen);
+
     if (isTTY) {
       process.stdin.removeListener("data", handleKey);
       process.stdout.removeListener("resize", handleResize);
