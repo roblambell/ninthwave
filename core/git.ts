@@ -1,7 +1,7 @@
 import { run } from "./shell.ts";
 import type { RunResult } from "./types.ts";
 
-/** Shell runner signature — injectable for testing. */
+/** Shell runner signature -- injectable for testing. */
 type ShellRunner = (cmd: string, args: string[]) => RunResult;
 
 function git(repoRoot: string, args: string[]): string {
@@ -350,7 +350,7 @@ export function getCleanRemoteWorkItemFiles(
   ]);
 
   if (lsTree.exitCode !== 0) {
-    // origin/main doesn't exist — graceful degradation
+    // origin/main doesn't exist -- graceful degradation
     return null;
   }
 
@@ -372,7 +372,7 @@ export function getCleanRemoteWorkItemFiles(
   ]);
 
   if (diff.exitCode !== 0) {
-    // Diff failed — return remote set without exclusions (safe fallback)
+    // Diff failed -- return remote set without exclusions (safe fallback)
     return remoteFiles;
   }
 

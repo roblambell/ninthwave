@@ -102,7 +102,7 @@ export function parseScheduleFile(filePath: string): ScheduledTask | null {
     return null; // Malformed schedule expression → skip
   }
 
-  // Extract body text (prompt) — everything after the metadata block
+  // Extract body text (prompt) -- everything after the metadata block
   const prompt = extractPrompt(lines);
 
   return {
@@ -144,7 +144,7 @@ export function listScheduledTasks(scheduleDir: string): ScheduledTask[] {
 
 // ── Helpers ──────────────────────────────────────────────────────────
 
-/** Metadata line prefixes — used to detect end of metadata block. */
+/** Metadata line prefixes -- used to detect end of metadata block. */
 const METADATA_PREFIXES = [
   "**Schedule:**",
   "**Priority:**",

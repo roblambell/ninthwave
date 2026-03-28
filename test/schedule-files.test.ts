@@ -1,4 +1,4 @@
-// Tests for core/schedule-files.ts — schedule file parsing and listing.
+// Tests for core/schedule-files.ts -- schedule file parsing and listing.
 
 import { describe, it, expect, afterEach } from "vitest";
 import { mkdtempSync, mkdirSync, writeFileSync, existsSync, rmSync } from "fs";

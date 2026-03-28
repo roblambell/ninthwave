@@ -1,4 +1,4 @@
-// Tests for core/schedule-eval.ts — schedule expression parsing and cron evaluation.
+// Tests for core/schedule-eval.ts -- schedule expression parsing and cron evaluation.
 
 import { describe, it, expect } from "vitest";
 import {
@@ -128,13 +128,13 @@ describe("matchesCronField", () => {
 
 describe("matchesCron day-of-week OR semantics", () => {
   it("matches when both dom and dow are wildcard", () => {
-    // "0 9 * * *" — 9:00 AM every day
+    // "0 9 * * *" -- 9:00 AM every day
     const date = new Date(2026, 2, 28, 9, 0); // Saturday March 28, 2026
     expect(matchesCron("0 9 * * *", date)).toBe(true);
   });
 
   it("matches when only dom is non-wildcard", () => {
-    // "0 9 15 * *" — 9:00 AM on the 15th of every month
+    // "0 9 15 * *" -- 9:00 AM on the 15th of every month
     const date15 = new Date(2026, 2, 15, 9, 0);
     const date16 = new Date(2026, 2, 16, 9, 0);
     expect(matchesCron("0 9 15 * *", date15)).toBe(true);
@@ -142,7 +142,7 @@ describe("matchesCron day-of-week OR semantics", () => {
   });
 
   it("matches when only dow is non-wildcard", () => {
-    // "0 9 * * 1" — 9:00 AM every Monday
+    // "0 9 * * 1" -- 9:00 AM every Monday
     const monday = new Date(2026, 2, 23, 9, 0); // Monday March 23, 2026
     const tuesday = new Date(2026, 2, 24, 9, 0);
     expect(matchesCron("0 9 * * 1", monday)).toBe(true);
@@ -150,16 +150,16 @@ describe("matchesCron day-of-week OR semantics", () => {
   });
 
   it("OR semantics when both dom and dow are non-wildcard", () => {
-    // "0 9 15 * 1" — 9:00 AM on the 15th OR any Monday
-    // March 15, 2026 is a Sunday — matches dom
+    // "0 9 15 * 1" -- 9:00 AM on the 15th OR any Monday
+    // March 15, 2026 is a Sunday -- matches dom
     const march15 = new Date(2026, 2, 15, 9, 0);
     expect(matchesCron("0 9 15 * 1", march15)).toBe(true);
 
-    // March 23, 2026 is a Monday — matches dow
+    // March 23, 2026 is a Monday -- matches dow
     const march23 = new Date(2026, 2, 23, 9, 0);
     expect(matchesCron("0 9 15 * 1", march23)).toBe(true);
 
-    // March 24, 2026 is a Tuesday, not the 15th — matches neither
+    // March 24, 2026 is a Tuesday, not the 15th -- matches neither
     const march24 = new Date(2026, 2, 24, 9, 0);
     expect(matchesCron("0 9 15 * 1", march24)).toBe(false);
   });
@@ -279,7 +279,7 @@ describe("nextRunTime", () => {
   });
 
   it("starts from the next minute, not the current one", () => {
-    // "0 9 * * *" — at exactly 9:00, next should be tomorrow 9:00
+    // "0 9 * * *" -- at exactly 9:00, next should be tomorrow 9:00
     const after = new Date(2026, 2, 28, 9, 0, 0);
     const next = nextRunTime("0 9 * * *", after);
     expect(next).not.toBeNull();

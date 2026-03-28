@@ -245,8 +245,8 @@ export function writeWorkItemFiles(repo: string, itemsContent: string): string {
  * initial commit pushed to origin/main. Returns the local repo path.
  *
  * Structure:
- *   <tmpdir>/local  — working repo with `origin` pointing to the bare remote
- *   <tmpdir>/bare   — bare remote
+ *   <tmpdir>/local  -- working repo with `origin` pointing to the bare remote
+ *   <tmpdir>/bare   -- bare remote
  */
 export function setupTempRepoWithRemote(): string {
   const parent = mkdtempSync(join(tmpdir(), "nw-test-remote-"));

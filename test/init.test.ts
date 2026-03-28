@@ -2128,7 +2128,7 @@ describe("initProject -- preserves existing files", () => {
       getEnv: () => undefined,
     };
 
-    // First init — creates the schedules dir and example
+    // First init -- creates the schedules dir and example
     initProject(projectDir, bundleDir, deps);
 
     // User creates their own schedule file

@@ -1,15 +1,15 @@
 // Schedule expression parsing and cron evaluation.
-// No external dependencies — pure functions for cron matching and natural language conversion.
+// No external dependencies -- pure functions for cron matching and natural language conversion.
 
 /**
  * Parse a natural language schedule expression into a 5-field cron string.
  *
  * Supported patterns:
- *   - "every Nh"  / "every Nm"   — anchored to midnight (e.g., "every 2h" → "0 *​/2 * * *")
- *   - "every day at HH:MM"       — daily at a specific time
- *   - "every weekday at HH:MM"   — Mon–Fri at a specific time
- *   - "every <weekday> at HH:MM" — specific day of week
- *   - "cron: <5-field>"          — raw cron passthrough
+ *   - "every Nh"  / "every Nm"   -- anchored to midnight (e.g., "every 2h" → "0 *​/2 * * *")
+ *   - "every day at HH:MM"       -- daily at a specific time
+ *   - "every weekday at HH:MM"   -- Mon–Fri at a specific time
+ *   - "every <weekday> at HH:MM" -- specific day of week
+ *   - "cron: <5-field>"          -- raw cron passthrough
  *
  * Returns the 5-field cron string, or throws on unrecognized input.
  */
@@ -26,7 +26,7 @@ export function parseScheduleExpression(expr: string): string {
     return fields.join(" ");
   }
 
-  // "every Nm" — e.g., "every 15m", "every 30m"
+  // "every Nm" -- e.g., "every 15m", "every 30m"
   const minuteMatch = trimmed.match(/^every\s+(\d+)\s*m$/i);
   if (minuteMatch) {
     const n = parseInt(minuteMatch[1]!, 10);
@@ -34,7 +34,7 @@ export function parseScheduleExpression(expr: string): string {
     return `*/${n} * * * *`;
   }
 
-  // "every Nh" — e.g., "every 2h", "every 6h"
+  // "every Nh" -- e.g., "every 2h", "every 6h"
   const hourMatch = trimmed.match(/^every\s+(\d+)\s*h$/i);
   if (hourMatch) {
     const n = parseInt(hourMatch[1]!, 10);
@@ -150,7 +150,7 @@ export function matchesCronField(field: string, value: number): boolean {
  * Check if all 5 cron fields match a given Date.
  *
  * Day-of-week OR semantics: when both day-of-month (field 3) and day-of-week
- * (field 5) are non-wildcard, the cron spec says they are OR'd — the date
+ * (field 5) are non-wildcard, the cron spec says they are OR'd -- the date
  * matches if EITHER field matches.
  */
 export function matchesCron(cronExpr: string, date: Date): boolean {
@@ -174,13 +174,13 @@ export function matchesCron(cronExpr: string, date: Date): boolean {
   const dowIsWild = dowF === "*";
 
   if (domIsWild && dowIsWild) {
-    return true; // Both wildcards — always matches
+    return true; // Both wildcards -- always matches
   }
   if (!domIsWild && !dowIsWild) {
     // OR semantics: either day-of-month or day-of-week can match
     return matchesCronField(domF, dom) || matchesCronField(dowF, dow);
   }
-  // One is wildcard, the other is not — match the non-wildcard
+  // One is wildcard, the other is not -- match the non-wildcard
   if (!domIsWild && !matchesCronField(domF, dom)) return false;
   if (!dowIsWild && !matchesCronField(dowF, dow)) return false;
 

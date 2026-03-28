@@ -58,6 +58,9 @@ stateDiagram-v2
     ci_passed --> reviewing : review worker launched
     reviewing --> ci_passed : approved
     reviewing --> ci_failed : CI regression
+    reviewing --> review_pending : request-changes
+    review_pending --> ci_pending : implementer pushes fix
+    review_pending --> reviewing : re-review after CI passes
     ci_failed --> ci_pending : worker notified, retrying
     ci_failed --> stuck : maxCiRetries exceeded
     merging --> merged : gh merge succeeded
