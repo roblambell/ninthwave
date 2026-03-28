@@ -16,12 +16,18 @@ import {
   cleanOrphanedWorktrees,
   parseWatchArgs,
   validateItemIds,
+  pushLogBuffer,
+  filterLogsByLevel,
+  LOG_BUFFER_MAX,
   type LogEntry,
+  type LogLevelFilter,
   type OrchestrateLoopDeps,
   type CleanOrphanedDeps,
   type ParsedWatchArgs,
   type TuiState,
 } from "../core/commands/orchestrate.ts";
+import type { LogEntry as PanelLogEntry } from "../core/status-render.ts";
+import { MIN_SPLIT_ROWS } from "../core/status-render.ts";
 import {
   Orchestrator,
   type OrchestratorItem,
@@ -3546,5 +3552,381 @@ describe("cmdOrchestrate passthrough path", () => {
 
     const unknown = validateItemIds(parsed.itemIds, workItemMap);
     expect(unknown).toEqual(["H-UNKNOWN-99"]);
+  });
+});
+
+// ── Ring buffer tests ────────────────────────────────────────────────
+
+describe("pushLogBuffer (ring buffer)", () => {
+  function makeEntry(i: number, level?: string): PanelLogEntry {
+    const msg = level ? `[${level}] event-${i}` : `event-${i}`;
+    return { timestamp: `2026-01-01T00:00:${String(i).padStart(2, "0")}Z`, itemId: `I-${i}`, message: msg };
+  }
+
+  it("push 600 entries, verify length is 500 and oldest are dropped", () => {
+    const buffer: PanelLogEntry[] = [];
+    for (let i = 0; i < 600; i++) {
+      pushLogBuffer(buffer, makeEntry(i));
+    }
+    expect(buffer.length).toBe(LOG_BUFFER_MAX);
+    // Oldest 100 entries (0-99) should be dropped; first entry should be #100
+    expect(buffer[0]!.message).toBe("event-100");
+    expect(buffer[buffer.length - 1]!.message).toBe("event-599");
+  });
+
+  it("does not drop entries when under capacity", () => {
+    const buffer: PanelLogEntry[] = [];
+    for (let i = 0; i < 10; i++) {
+      pushLogBuffer(buffer, makeEntry(i));
+    }
+    expect(buffer.length).toBe(10);
+    expect(buffer[0]!.message).toBe("event-0");
+  });
+
+  it("drops exactly one entry at capacity+1", () => {
+    const buffer: PanelLogEntry[] = [];
+    for (let i = 0; i < LOG_BUFFER_MAX; i++) {
+      pushLogBuffer(buffer, makeEntry(i));
+    }
+    expect(buffer.length).toBe(LOG_BUFFER_MAX);
+    pushLogBuffer(buffer, makeEntry(LOG_BUFFER_MAX));
+    expect(buffer.length).toBe(LOG_BUFFER_MAX);
+    expect(buffer[0]!.message).toBe("event-1");
+  });
+});
+
+describe("filterLogsByLevel", () => {
+  function makeEntry(level: string, i: number): PanelLogEntry {
+    return {
+      timestamp: `2026-01-01T00:00:${String(i).padStart(2, "0")}Z`,
+      itemId: `I-${i}`,
+      message: `[${level}] event-${i}`,
+    };
+  }
+
+  const mixed: PanelLogEntry[] = [
+    makeEntry("info", 0),
+    makeEntry("warn", 1),
+    makeEntry("error", 2),
+    makeEntry("info", 3),
+    makeEntry("error", 4),
+    makeEntry("warn", 5),
+    { timestamp: "2026-01-01T00:00:06Z", itemId: "I-6", message: "no-prefix event" }, // defaults to info
+  ];
+
+  it("filter 'all' returns everything", () => {
+    const result = filterLogsByLevel(mixed, "all");
+    expect(result.length).toBe(mixed.length);
+  });
+
+  it("filter 'error' returns only error entries", () => {
+    const result = filterLogsByLevel(mixed, "error");
+    expect(result.length).toBe(2);
+    expect(result.every((e) => e.message.includes("[error]"))).toBe(true);
+  });
+
+  it("filter 'warn' returns warn and error entries", () => {
+    const result = filterLogsByLevel(mixed, "warn");
+    expect(result.length).toBe(4); // 2 warn + 2 error
+    expect(result.every((e) => e.message.includes("[warn]") || e.message.includes("[error]"))).toBe(true);
+  });
+
+  it("filter 'info' returns info, warn, and error entries (all with level >= info)", () => {
+    const result = filterLogsByLevel(mixed, "info");
+    // All 7 entries have level >= info (no-prefix defaults to info)
+    expect(result.length).toBe(7);
+  });
+});
+
+// ── Panel mode cycling via keyboard shortcuts ────────────────────────
+
+describe("panel mode cycling (Tab key)", () => {
+  function mockStdin() {
+    const listeners: Record<string, Function[]> = {};
+    return {
+      isTTY: true as const,
+      setRawMode: vi.fn(),
+      resume: vi.fn(),
+      pause: vi.fn(),
+      setEncoding: vi.fn(),
+      on: vi.fn((event: string, cb: Function) => { (listeners[event] ??= []).push(cb); }),
+      removeListener: vi.fn((event: string, cb: Function) => {
+        const arr = listeners[event];
+        if (arr) { const idx = arr.indexOf(cb); if (idx >= 0) arr.splice(idx, 1); }
+      }),
+      _emit(event: string, data: any) { for (const cb of (listeners[event] ?? [])) cb(data); },
+    } as unknown as NodeJS.ReadStream;
+  }
+
+  function baseTuiState(overrides?: Partial<TuiState>): TuiState {
+    return {
+      scrollOffset: 0,
+      viewOptions: {},
+      mergeStrategy: "auto",
+      bypassEnabled: false,
+      ctrlCPending: false,
+      ctrlCTimestamp: 0,
+      showHelp: false,
+      panelMode: "split",
+      logBuffer: [],
+      logScrollOffset: 0,
+      logLevelFilter: "all",
+      ...overrides,
+    };
+  }
+
+  it("Tab cycles split -> logs-only -> status-only -> split (large terminal)", () => {
+    const ac = new AbortController();
+    const stdin = mockStdin();
+    const tuiState = baseTuiState({ panelMode: "split" });
+
+    // Mock getTerminalHeight to return large terminal
+    const origColumns = process.stdout.columns;
+    const origRows = process.stdout.rows;
+    process.stdout.columns = 120;
+    process.stdout.rows = 50;
+    try {
+      setupKeyboardShortcuts(ac, () => {}, stdin, tuiState);
+
+      (stdin as any)._emit("data", "\t"); // split -> logs-only
+      expect(tuiState.panelMode).toBe("logs-only");
+
+      (stdin as any)._emit("data", "\t"); // logs-only -> status-only
+      expect(tuiState.panelMode).toBe("status-only");
+
+      (stdin as any)._emit("data", "\t"); // status-only -> split
+      expect(tuiState.panelMode).toBe("split");
+    } finally {
+      process.stdout.columns = origColumns;
+      process.stdout.rows = origRows;
+    }
+  });
+
+  it("Tab cycles logs-only -> status-only in small terminal (< MIN_SPLIT_ROWS)", () => {
+    const ac = new AbortController();
+    const stdin = mockStdin();
+    const tuiState = baseTuiState({ panelMode: "logs-only" });
+
+    const origRows = process.stdout.rows;
+    process.stdout.rows = 20; // < 35 (MIN_SPLIT_ROWS)
+    try {
+      setupKeyboardShortcuts(ac, () => {}, stdin, tuiState);
+
+      (stdin as any)._emit("data", "\t"); // logs-only -> status-only
+      expect(tuiState.panelMode).toBe("status-only");
+
+      (stdin as any)._emit("data", "\t"); // status-only -> logs-only (wraps, no split)
+      expect(tuiState.panelMode).toBe("logs-only");
+    } finally {
+      process.stdout.rows = origRows;
+    }
+  });
+});
+
+// ── j/k scroll and G jump ───────────────────────────────────────────
+
+describe("log panel scroll (j/k/G keys)", () => {
+  function mockStdin() {
+    const listeners: Record<string, Function[]> = {};
+    return {
+      isTTY: true as const,
+      setRawMode: vi.fn(),
+      resume: vi.fn(),
+      pause: vi.fn(),
+      setEncoding: vi.fn(),
+      on: vi.fn((event: string, cb: Function) => { (listeners[event] ??= []).push(cb); }),
+      removeListener: vi.fn((event: string, cb: Function) => {
+        const arr = listeners[event];
+        if (arr) { const idx = arr.indexOf(cb); if (idx >= 0) arr.splice(idx, 1); }
+      }),
+      _emit(event: string, data: any) { for (const cb of (listeners[event] ?? [])) cb(data); },
+    } as unknown as NodeJS.ReadStream;
+  }
+
+  function baseTuiState(overrides?: Partial<TuiState>): TuiState {
+    return {
+      scrollOffset: 0,
+      viewOptions: {},
+      mergeStrategy: "auto",
+      bypassEnabled: false,
+      ctrlCPending: false,
+      ctrlCTimestamp: 0,
+      showHelp: false,
+      panelMode: "split",
+      logBuffer: [],
+      logScrollOffset: 0,
+      logLevelFilter: "all",
+      ...overrides,
+    };
+  }
+
+  it("j increments logScrollOffset", () => {
+    const ac = new AbortController();
+    const stdin = mockStdin();
+    const tuiState = baseTuiState();
+
+    setupKeyboardShortcuts(ac, () => {}, stdin, tuiState);
+
+    (stdin as any)._emit("data", "j");
+    expect(tuiState.logScrollOffset).toBe(1);
+
+    (stdin as any)._emit("data", "j");
+    expect(tuiState.logScrollOffset).toBe(2);
+  });
+
+  it("k decrements logScrollOffset, clamped at 0", () => {
+    const ac = new AbortController();
+    const stdin = mockStdin();
+    const tuiState = baseTuiState({ logScrollOffset: 3 });
+
+    setupKeyboardShortcuts(ac, () => {}, stdin, tuiState);
+
+    (stdin as any)._emit("data", "k");
+    expect(tuiState.logScrollOffset).toBe(2);
+
+    // Scroll to 0
+    (stdin as any)._emit("data", "k");
+    (stdin as any)._emit("data", "k");
+    expect(tuiState.logScrollOffset).toBe(0);
+
+    // Should not go below 0
+    (stdin as any)._emit("data", "k");
+    expect(tuiState.logScrollOffset).toBe(0);
+  });
+
+  it("G jumps to end (follow mode)", () => {
+    const ac = new AbortController();
+    const stdin = mockStdin();
+
+    const entries: PanelLogEntry[] = [];
+    for (let i = 0; i < 100; i++) {
+      entries.push({ timestamp: "2026-01-01T00:00:00Z", itemId: `I-${i}`, message: `event-${i}` });
+    }
+
+    const origRows = process.stdout.rows;
+    process.stdout.rows = 40;
+    try {
+      const tuiState = baseTuiState({
+        logBuffer: entries,
+        logScrollOffset: 0,
+      });
+
+      setupKeyboardShortcuts(ac, () => {}, stdin, tuiState);
+
+      (stdin as any)._emit("data", "G");
+
+      // G should set logScrollOffset = max(0, buffer.length - viewportHeight)
+      // viewportHeight ~= termRows - 10 = 30
+      const expectedOffset = Math.max(0, entries.length - 30);
+      expect(tuiState.logScrollOffset).toBe(expectedOffset);
+    } finally {
+      process.stdout.rows = origRows;
+    }
+  });
+});
+
+// ── Log level filter cycling (l key) ────────────────────────────────
+
+describe("log level filter cycling (l key)", () => {
+  function mockStdin() {
+    const listeners: Record<string, Function[]> = {};
+    return {
+      isTTY: true as const,
+      setRawMode: vi.fn(),
+      resume: vi.fn(),
+      pause: vi.fn(),
+      setEncoding: vi.fn(),
+      on: vi.fn((event: string, cb: Function) => { (listeners[event] ??= []).push(cb); }),
+      removeListener: vi.fn((event: string, cb: Function) => {
+        const arr = listeners[event];
+        if (arr) { const idx = arr.indexOf(cb); if (idx >= 0) arr.splice(idx, 1); }
+      }),
+      _emit(event: string, data: any) { for (const cb of (listeners[event] ?? [])) cb(data); },
+    } as unknown as NodeJS.ReadStream;
+  }
+
+  function baseTuiState(overrides?: Partial<TuiState>): TuiState {
+    return {
+      scrollOffset: 0,
+      viewOptions: {},
+      mergeStrategy: "auto",
+      bypassEnabled: false,
+      ctrlCPending: false,
+      ctrlCTimestamp: 0,
+      showHelp: false,
+      panelMode: "split",
+      logBuffer: [],
+      logScrollOffset: 0,
+      logLevelFilter: "all",
+      ...overrides,
+    };
+  }
+
+  it("l cycles info -> warn -> error -> all", () => {
+    const ac = new AbortController();
+    const stdin = mockStdin();
+    // Start at "info" (first in cycle after initial "all" if we start from a specific position)
+    const tuiState = baseTuiState({ logLevelFilter: "info" });
+
+    setupKeyboardShortcuts(ac, () => {}, stdin, tuiState);
+
+    (stdin as any)._emit("data", "l"); // info -> warn
+    expect(tuiState.logLevelFilter).toBe("warn");
+
+    (stdin as any)._emit("data", "l"); // warn -> error
+    expect(tuiState.logLevelFilter).toBe("error");
+
+    (stdin as any)._emit("data", "l"); // error -> all
+    expect(tuiState.logLevelFilter).toBe("all");
+
+    (stdin as any)._emit("data", "l"); // all -> info (wraps)
+    expect(tuiState.logLevelFilter).toBe("info");
+  });
+
+  it("l resets logScrollOffset to 0 on filter change", () => {
+    const ac = new AbortController();
+    const stdin = mockStdin();
+    const tuiState = baseTuiState({ logLevelFilter: "all", logScrollOffset: 42 });
+
+    setupKeyboardShortcuts(ac, () => {}, stdin, tuiState);
+
+    (stdin as any)._emit("data", "l");
+    expect(tuiState.logScrollOffset).toBe(0);
+  });
+});
+
+// ── Integration: log closure populates both file and buffer ──────────
+
+describe("log closure ring buffer integration", () => {
+  it("mock log closure pushes entries to logBuffer and file", () => {
+    // Simulate what cmdOrchestrate does: create a log closure that writes to both file and buffer
+    const logBuffer: PanelLogEntry[] = [];
+    const fileEntries: string[] = [];
+
+    // Mock appendFileSync behavior
+    const log = (entry: LogEntry) => {
+      fileEntries.push(JSON.stringify(entry));
+      const levelTag = entry.level !== "info" ? `[${entry.level}] ` : "";
+      pushLogBuffer(logBuffer, {
+        timestamp: entry.ts,
+        itemId: (entry.itemId as string) ?? (entry.id as string) ?? "",
+        message: `${levelTag}${entry.event}${entry.message ? ": " + entry.message : ""}`,
+      });
+    };
+
+    // Push some log entries
+    log({ ts: "2026-01-01T00:00:00Z", level: "info", event: "poll_start" });
+    log({ ts: "2026-01-01T00:00:01Z", level: "warn", event: "slow_poll", message: "took 5s" });
+    log({ ts: "2026-01-01T00:00:02Z", level: "error", event: "ci_failed", itemId: "H-1" });
+
+    // Both file and buffer should have 3 entries
+    expect(fileEntries.length).toBe(3);
+    expect(logBuffer.length).toBe(3);
+
+    // Verify buffer entries
+    expect(logBuffer[0]!.message).toBe("poll_start");
+    expect(logBuffer[1]!.message).toBe("[warn] slow_poll: took 5s");
+    expect(logBuffer[2]!.message).toBe("[error] ci_failed");
+    expect(logBuffer[2]!.itemId).toBe("H-1");
   });
 });

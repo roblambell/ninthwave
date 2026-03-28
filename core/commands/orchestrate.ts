@@ -75,10 +75,15 @@ import {
   renderFullScreenFrame,
   renderHelpOverlay,
   clampScrollOffset,
+  buildPanelLayout,
+  renderPanelFrame,
   MIN_FULLSCREEN_ROWS,
+  MIN_SPLIT_ROWS,
   type StatusItem,
   type ViewOptions,
   type CrewStatusInfo,
+  type PanelMode,
+  type LogEntry as PanelLogEntry,
 } from "../status-render.ts";
 import type { CrewBroker, CrewStatus, SyncItem } from "../crew.ts";
 import { WebSocketCrewBroker, getOrCreateDaemonId, resolveOperatorId } from "../crew.ts";
@@ -116,6 +121,62 @@ export interface LogEntry {
 
 export function structuredLog(entry: LogEntry): void {
   console.log(JSON.stringify(entry));
+}
+
+// ── Log ring buffer ────────────────────────────────────────────────
+
+/** Maximum number of log entries retained in the ring buffer for the TUI log panel. */
+export const LOG_BUFFER_MAX = 500;
+
+/** Log level filter cycle order for the `l` keyboard shortcut. */
+export type LogLevelFilter = "info" | "warn" | "error" | "all";
+
+/** The cycle order for log level filter. */
+const LOG_LEVEL_CYCLE: LogLevelFilter[] = ["info", "warn", "error", "all"];
+
+/** Severity ordering for log level filtering. */
+const LOG_LEVEL_SEVERITY: Record<string, number> = {
+  error: 3,
+  warn: 2,
+  info: 1,
+  debug: 0,
+};
+
+/**
+ * Push a log entry into the ring buffer, dropping the oldest entry when at capacity.
+ * Mutates the buffer in-place for efficiency.
+ */
+export function pushLogBuffer(buffer: PanelLogEntry[], entry: PanelLogEntry): void {
+  buffer.push(entry);
+  if (buffer.length > LOG_BUFFER_MAX) {
+    buffer.splice(0, buffer.length - LOG_BUFFER_MAX);
+  }
+}
+
+/**
+ * Filter log entries by level.
+ * "all" returns everything. Otherwise returns entries at or above the given severity.
+ */
+export function filterLogsByLevel(buffer: PanelLogEntry[], filter: LogLevelFilter): PanelLogEntry[] {
+  if (filter === "all") return buffer;
+  const minSeverity = LOG_LEVEL_SEVERITY[filter] ?? 0;
+  // PanelLogEntry doesn't have a level field -- we encode it in the message prefix.
+  // We'll match by checking if the message starts with a level tag like "[error]" or "[warn]".
+  // If no tag is found, assume "info" level.
+  return buffer.filter((entry) => {
+    const level = extractLogLevel(entry.message);
+    return (LOG_LEVEL_SEVERITY[level] ?? 1) >= minSeverity;
+  });
+}
+
+/**
+ * Extract the log level from a message string.
+ * Messages may be prefixed with [error], [warn], [info], [debug].
+ * Falls back to "info" if no prefix found.
+ */
+function extractLogLevel(message: string): string {
+  const match = message.match(/^\[(error|warn|info|debug)\]\s*/);
+  return match ? match[1]! : "info";
 }
 
 // ── TUI mode helpers ────────────────────────────────────────────────
@@ -198,6 +259,176 @@ export function renderTuiFrame(
   }
 
   write("\x1B[J");
+}
+
+/**
+ * Render a panel-aware TUI frame with split/logs-only/status-only support.
+ * Uses buildPanelLayout + renderPanelFrame from status-render.ts.
+ * Falls back to renderTuiFrame when the help overlay is active.
+ */
+export function renderTuiPanelFrame(
+  items: OrchestratorItem[],
+  wipLimit: number | undefined,
+  tuiState: TuiState,
+  write: (s: string) => void = (s) => process.stdout.write(s),
+  crewDaemonName?: string,
+): void {
+  const statusItems = orchestratorItemsToStatusItems(items, crewDaemonName);
+  const termWidth = getTerminalWidth();
+  const termRows = getTerminalHeight();
+
+  write("\x1B[H");
+
+  if (tuiState.viewOptions.showHelp) {
+    // Render help overlay instead of the panel frame
+    const helpLines = renderHelpOverlay(termWidth, termRows);
+    const content = helpLines.join("\n");
+    write(content.replace(/\n/g, "\x1B[K\n") + "\x1B[K");
+  } else {
+    const filteredLogs = filterLogsByLevel(tuiState.logBuffer, tuiState.logLevelFilter);
+    const panelLayout = buildPanelLayout(
+      tuiState.panelMode,
+      statusItems,
+      filteredLogs,
+      termWidth,
+      termRows,
+      {
+        wipLimit,
+        viewOptions: tuiState.viewOptions,
+        logScrollOffset: tuiState.logScrollOffset,
+        statusScrollOffset: tuiState.scrollOffset,
+      },
+    );
+    const frameLines = renderPanelFrame(panelLayout, termRows, termWidth, tuiState.scrollOffset);
+    const content = frameLines.join("\n");
+    write(content.replace(/\n/g, "\x1B[K\n") + "\x1B[K");
+  }
+
+  write("\x1B[J");
+}
+
+// ── Reusable TUI runner ─────────────────────────────────────────────
+
+/** Options for runTUI -- the reusable TUI lifecycle runner. */
+export interface RunTUIOptions {
+  /** Provide status items and optional wip limit for each render cycle. */
+  getItems: () => { items: StatusItem[]; wipLimit?: number; sessionStartedAt?: string };
+  /** Provide log entries for the log panel. If omitted, logBuffer is empty. */
+  getLogEntries?: () => PanelLogEntry[];
+  /** Poll interval in ms (default: 2000). */
+  intervalMs?: number;
+  /** External abort signal to stop the TUI loop. */
+  signal?: AbortSignal;
+  /** Starting panel mode (default: split). */
+  panelMode?: PanelMode;
+}
+
+/**
+ * Run a panel-aware TUI loop.
+ *
+ * Sets up the alternate screen buffer, keyboard shortcuts (Tab, j/k, l, G, q, d, ?, ↑/↓),
+ * and a poll-render loop. Returns when the user presses `q` or the signal is aborted.
+ *
+ * Designed for read-only mode: status.ts can call this to get the full panel TUI
+ * without needing the orchestrate event loop.
+ */
+export async function runTUI(opts: RunTUIOptions): Promise<void> {
+  const { getItems, getLogEntries, intervalMs = 2000, signal, panelMode = "split" } = opts;
+  const isTTY = process.stdin.isTTY === true;
+  if (!isTTY) return;
+
+  const abortController = new AbortController();
+  const combinedSignal = signal
+    ? (() => { signal.addEventListener("abort", () => abortController.abort()); return abortController.signal; })()
+    : abortController.signal;
+
+  const logBuffer: PanelLogEntry[] = [];
+  const tuiState: TuiState = {
+    scrollOffset: 0,
+    viewOptions: { showBlockerDetail: true },
+    mergeStrategy: "auto",
+    bypassEnabled: false,
+    ctrlCPending: false,
+    ctrlCTimestamp: 0,
+    showHelp: false,
+    panelMode,
+    logBuffer,
+    logScrollOffset: 0,
+    logLevelFilter: "all",
+    onUpdate: () => {
+      try { render(); } catch { /* non-fatal */ }
+    },
+  };
+
+  // Noop log for keyboard shortcuts (read-only mode has no orchestrator log)
+  const noopLog = (_entry: LogEntry) => {};
+
+  function render() {
+    const data = getItems();
+    if (data.sessionStartedAt) {
+      tuiState.viewOptions.sessionStartedAt = data.sessionStartedAt;
+    }
+    // Refresh log entries from provider
+    if (getLogEntries) {
+      const entries = getLogEntries();
+      logBuffer.length = 0;
+      logBuffer.push(...entries);
+    }
+    // Build a minimal set of OrchestratorItem-like objects for rendering
+    // Since we have StatusItem[], we render directly via panel layout
+    const termWidth = getTerminalWidth();
+    const termRows = getTerminalHeight();
+    const write = (s: string) => process.stdout.write(s);
+
+    write("\x1B[H");
+
+    if (tuiState.viewOptions.showHelp) {
+      const helpLines = renderHelpOverlay(termWidth, termRows);
+      const content = helpLines.join("\n");
+      write(content.replace(/\n/g, "\x1B[K\n") + "\x1B[K");
+    } else {
+      const filteredLogs = filterLogsByLevel(logBuffer, tuiState.logLevelFilter);
+      const panelLayout = buildPanelLayout(
+        tuiState.panelMode,
+        data.items,
+        filteredLogs,
+        termWidth,
+        termRows,
+        {
+          wipLimit: data.wipLimit,
+          viewOptions: tuiState.viewOptions,
+          logScrollOffset: tuiState.logScrollOffset,
+          statusScrollOffset: tuiState.scrollOffset,
+        },
+      );
+      const frameLines = renderPanelFrame(panelLayout, termRows, termWidth, tuiState.scrollOffset);
+      const content = frameLines.join("\n");
+      write(content.replace(/\n/g, "\x1B[K\n") + "\x1B[K");
+    }
+
+    write("\x1B[J");
+  }
+
+  process.stdout.write(ALT_SCREEN_ON);
+  const exitAltScreen = () => process.stdout.write(ALT_SCREEN_OFF);
+  process.on("exit", exitAltScreen);
+
+  const cleanupKeyboard = setupKeyboardShortcuts(abortController, noopLog, process.stdin, tuiState);
+
+  try {
+    while (!combinedSignal.aborted) {
+      render();
+      await new Promise<void>((resolve) => {
+        const timer = setTimeout(resolve, intervalMs);
+        const onAbort = () => { clearTimeout(timer); resolve(); };
+        combinedSignal.addEventListener("abort", onAbort, { once: true });
+      });
+    }
+  } finally {
+    cleanupKeyboard();
+    exitAltScreen();
+    process.removeListener("exit", exitAltScreen);
+  }
 }
 
 // ── Worktree commit tracking ──────────────────────────────────────
@@ -1895,6 +2126,14 @@ export interface TuiState {
   ctrlCTimestamp: number;
   /** Whether the help overlay is visible. */
   showHelp: boolean;
+  /** Active panel mode: split (default), logs-only, or status-only. */
+  panelMode: PanelMode;
+  /** Ring buffer of log entries for the TUI log panel (max LOG_BUFFER_MAX). */
+  logBuffer: PanelLogEntry[];
+  /** Scroll offset within the log panel. */
+  logScrollOffset: number;
+  /** Current log level filter. */
+  logLevelFilter: LogLevelFilter;
   /** Called when the user cycles the merge strategy via Shift+Tab. */
   onStrategyChange?: (strategy: MergeStrategy) => void;
   /** Called after any key that should trigger an immediate re-render. */
@@ -2004,6 +2243,37 @@ export function setupKeyboardShortcuts(
       case "\x1b[B": // Down arrow
         tuiState.scrollOffset += 1;
         break;
+      case "\t": { // Tab -- cycle panel mode (split -> logs-only -> status-only -> split)
+        const termRows = getTerminalHeight();
+        const modes: PanelMode[] = termRows < MIN_SPLIT_ROWS
+          ? ["logs-only", "status-only"]  // Small terminal: no split, cycle full-screen views
+          : ["split", "logs-only", "status-only"];
+        const currentIdx = modes.indexOf(tuiState.panelMode);
+        const nextIdx = (currentIdx + 1) % modes.length;
+        tuiState.panelMode = modes[nextIdx]!;
+        break;
+      }
+      case "j": // Scroll log panel down
+        tuiState.logScrollOffset += 1;
+        break;
+      case "k": // Scroll log panel up
+        tuiState.logScrollOffset = Math.max(0, tuiState.logScrollOffset - 1);
+        break;
+      case "l": { // Cycle log level filter (info -> warn -> error -> all)
+        const currentIdx = LOG_LEVEL_CYCLE.indexOf(tuiState.logLevelFilter);
+        const nextIdx = (currentIdx + 1) % LOG_LEVEL_CYCLE.length;
+        tuiState.logLevelFilter = LOG_LEVEL_CYCLE[nextIdx]!;
+        // Reset scroll when filter changes
+        tuiState.logScrollOffset = 0;
+        break;
+      }
+      case "G": { // Jump to end of log (re-enable follow mode)
+        const filtered = filterLogsByLevel(tuiState.logBuffer, tuiState.logLevelFilter);
+        const termRows = getTerminalHeight();
+        const viewportHeight = Math.max(1, termRows - 10); // approximate
+        tuiState.logScrollOffset = Math.max(0, filtered.length - viewportHeight);
+        break;
+      }
       case "\x1B[Z": { // Shift+Tab -- cycle merge strategy
         const strategies: MergeStrategy[] = tuiState.bypassEnabled
           ? ["auto", "manual", "bypass"]
@@ -2036,6 +2306,9 @@ export function setupKeyboardShortcuts(
       const termRows = getTerminalHeight();
       const viewportHeight = Math.max(1, termRows - 10); // approximate
       tuiState.scrollOffset = clampScrollOffset(tuiState.scrollOffset, 999, viewportHeight);
+      // Also clamp log scroll offset on resize
+      const filtered = filterLogsByLevel(tuiState.logBuffer, tuiState.logLevelFilter);
+      tuiState.logScrollOffset = clampScrollOffset(tuiState.logScrollOffset, filtered.length, viewportHeight);
       tuiState.onUpdate?.();
     }
   };
@@ -2425,7 +2698,12 @@ export async function cmdOrchestrate(
   // Enabled when stdout is a TTY and neither --json nor --_daemon-child is set.
   const tuiMode = detectTuiMode(isDaemonChild, jsonFlag, process.stdout.isTTY === true);
 
+  // Shared log ring buffer for the TUI log panel.
+  // Created here so the log closure can push entries before tuiState is constructed.
+  const logBuffer: PanelLogEntry[] = [];
+
   // In TUI mode, redirect structured logs to the log file instead of stdout.
+  // Also push each entry to the ring buffer for the live log panel.
   let log: (entry: LogEntry) => void = structuredLog;
   if (tuiMode) {
     const stateDir = userStateDir(projectRoot);
@@ -2433,6 +2711,13 @@ export async function cmdOrchestrate(
     const tuiLogPath = logFilePath(projectRoot);
     log = (entry: LogEntry) => {
       appendFileSync(tuiLogPath, JSON.stringify(entry) + "\n");
+      // Push to ring buffer for live TUI log panel
+      const levelTag = entry.level !== "info" ? `[${entry.level}] ` : "";
+      pushLogBuffer(logBuffer, {
+        timestamp: entry.ts,
+        itemId: (entry.itemId as string) ?? (entry.id as string) ?? "",
+        message: `${levelTag}${entry.event}${entry.message ? ": " + entry.message : ""}`,
+      });
     };
   }
 
@@ -2761,6 +3046,10 @@ export async function cmdOrchestrate(
     ctrlCPending: false,
     ctrlCTimestamp: 0,
     showHelp: false,
+    panelMode: "split",
+    logBuffer,
+    logScrollOffset: 0,
+    logLevelFilter: "all",
     onStrategyChange: (strategy) => {
       orch.setMergeStrategy(strategy);
     },
@@ -2768,7 +3057,7 @@ export async function cmdOrchestrate(
     onUpdate: () => {
       if (tuiMode) {
         try {
-          renderTuiFrame(lastTuiItems, wipLimit, undefined, tuiState.viewOptions, tuiState.scrollOffset, resolvedCrewName);
+          renderTuiPanelFrame(lastTuiItems, wipLimit, tuiState, undefined, resolvedCrewName);
         } catch {
           // Non-fatal
         }
@@ -2800,7 +3089,7 @@ export async function cmdOrchestrate(
     } catch {
       // Non-fatal -- state persistence failure shouldn't block the orchestrator
     }
-    // TUI mode: render live status table to stdout after each poll cycle
+    // TUI mode: render panel frame to stdout after each poll cycle
     if (tuiMode) {
       // Populate schedule worker status for TUI display
       if (scheduleLoopDeps) {
@@ -2815,7 +3104,7 @@ export async function cmdOrchestrate(
         }
       }
       try {
-        renderTuiFrame(items, wipLimit, undefined, tuiState.viewOptions, tuiState.scrollOffset, resolvedCrewName);
+        renderTuiPanelFrame(items, wipLimit, tuiState, undefined, resolvedCrewName);
       } catch {
         // Non-fatal -- TUI render failure shouldn't block the orchestrator
       }
