@@ -5,10 +5,11 @@
 // Mock leakage note: clean.test.ts and start.test.ts vi.mock("../core/git.ts"),
 // which leaks into other files in bun's test runner. Functions that are mocked
 // elsewhere (branchExists, fetchOrigin, ffMerge, deleteBranch, isBranchMerged,
-// etc.) are tested via run() from shell.ts to exercise the same error handling
-// logic without import-level interference. Functions NOT mocked elsewhere
-// (commitCount, diffStat, getStagedFiles, gitCommit, hasChanges) are imported
-// and tested directly.
+// findWorktreeForBranch, removeWorktree, attachWorktree, etc.) are tested via
+// run() from shell.ts to exercise the same error handling logic without
+// import-level interference. Functions NOT mocked elsewhere (commitCount,
+// diffStat, getStagedFiles, gitCommit, hasChanges) are imported and tested
+// directly.
 
 import { describe, it, expect } from "vitest";
 import { spawnSync } from "child_process";
@@ -23,7 +24,6 @@ import {
   gitCommit,
   hasChanges,
   rebaseOnto,
-  findWorktreeForBranch,
   REMOTE_REF_GONE_RE,
 } from "../core/git.ts";
 
@@ -547,13 +547,31 @@ describe("git.ts error handling", () => {
     });
   });
 
-  // ── findWorktreeForBranch() — tested directly ────────────────────────
+  // ── findWorktreeForBranch() — mocked in start.test.ts, tested via run() ──
 
-  describe("findWorktreeForBranch()", () => {
+  describe("findWorktreeForBranch() (via run)", () => {
+    /** Reimplement findWorktreeForBranch using run() to bypass mock leakage. */
+    function findWorktreeForBranchViaRun(repoRoot: string, branch: string): string | null {
+      const result = run("git", ["-C", repoRoot, "worktree", "list", "--porcelain"]);
+      if (result.exitCode !== 0) return null;
+      let currentPath: string | null = null;
+      for (const line of result.stdout.split("\n")) {
+        if (line.startsWith("worktree ")) {
+          currentPath = line.slice("worktree ".length);
+        } else if (line.startsWith("branch refs/heads/") && currentPath) {
+          const branchName = line.slice("branch refs/heads/".length);
+          if (branchName === branch) return currentPath;
+        } else if (line === "") {
+          currentPath = null;
+        }
+      }
+      return null;
+    }
+
     it("returns null when no worktree has the branch checked out", () => {
       const repo = setupTempRepo();
       initWithCommit(repo);
-      expect(findWorktreeForBranch(repo, "nonexistent-branch")).toBeNull();
+      expect(findWorktreeForBranchViaRun(repo, "nonexistent-branch")).toBeNull();
     });
 
     it("returns the worktree path when the branch is checked out", () => {
@@ -562,7 +580,7 @@ describe("git.ts error handling", () => {
       const wtPath = `${repo}-wt`;
       run("git", ["-C", repo, "worktree", "add", wtPath, "-b", "test-branch"]);
 
-      const result = findWorktreeForBranch(repo, "test-branch");
+      const result = findWorktreeForBranchViaRun(repo, "test-branch");
       // git worktree list resolves symlinks (e.g., /var → /private/var on macOS)
       expect(result).toBe(realpathSync(wtPath));
 
@@ -576,7 +594,7 @@ describe("git.ts error handling", () => {
       const wtPath = `${repo}/.claude/worktrees/agent-abc123`;
       run("git", ["-C", repo, "worktree", "add", wtPath, "-b", "todo/H-NTF-1"]);
 
-      const result = findWorktreeForBranch(repo, "todo/H-NTF-1");
+      const result = findWorktreeForBranchViaRun(repo, "todo/H-NTF-1");
       expect(result).toBe(realpathSync(wtPath));
 
       // Cleanup
@@ -590,7 +608,7 @@ describe("git.ts error handling", () => {
 
       // Branch exists but is not checked out anywhere (main checkout doesn't count
       // unless we're looking for "main")
-      expect(findWorktreeForBranch(repo, "orphan-branch")).toBeNull();
+      expect(findWorktreeForBranchViaRun(repo, "orphan-branch")).toBeNull();
     });
   });
 

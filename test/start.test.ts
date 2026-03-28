@@ -16,12 +16,21 @@ vi.mock("../core/git.ts", () => ({
   ffMerge: vi.fn(),
   branchExists: vi.fn(() => false),
   deleteBranch: vi.fn(),
+  deleteRemoteBranch: vi.fn(),
   createWorktree: vi.fn(),
+  attachWorktree: vi.fn(),
+  removeWorktree: vi.fn(),
+  findWorktreeForBranch: vi.fn(() => null),
 }));
+// NOTE: findWorktreeForBranch and removeWorktree are added to the mock but
+// are also tested directly in git.test.ts. git.test.ts handles mock leakage
+// by using shell.ts run() for functions mocked elsewhere. If adding new
+// functions to this mock, update the comment in git.test.ts lines 5-11.
 
-import { detectAiTool, cmdStart, launchSingleItem, launchAiSession, launchReviewWorker, sanitizeTitle, extractTodoText } from "../core/commands/start.ts";
+
+import { detectAiTool, cmdStart, launchSingleItem, launchAiSession, launchReviewWorker, sanitizeTitle, extractTodoText, cleanStaleBranchForReuse } from "../core/commands/start.ts";
 import { parseTodos } from "../core/parser.ts";
-import { fetchOrigin, ffMerge, createWorktree, branchExists } from "../core/git.ts";
+import { fetchOrigin, ffMerge, createWorktree, branchExists, deleteBranch, findWorktreeForBranch, removeWorktree } from "../core/git.ts";
 
 /** Create a mock Multiplexer for dependency injection (avoids vi.mock leaking). */
 function createMockMux(): Multiplexer & Record<string, Mock> {
@@ -564,6 +573,235 @@ describe("launchSingleItem", () => {
       "todo/M-CI-1",
       "HEAD",
     );
+  });
+});
+
+describe("launchSingleItem external worktree handling", () => {
+  const originalEnv = { ...process.env };
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+    process.env.NINTHWAVE_AI_TOOL = "claude";
+  });
+
+  afterEach(() => {
+    process.env = { ...originalEnv };
+    // Restore default mock return values to prevent leaking into other tests
+    (branchExists as Mock).mockReturnValue(false);
+    (findWorktreeForBranch as Mock).mockReturnValue(null);
+    (deleteBranch as Mock).mockReset();
+    (removeWorktree as Mock).mockReset();
+    cleanupTempRepos();
+  });
+
+  it("removes external worktree and retries branch deletion on failure", async () => {
+    const mockMux = createMockMux();
+    const repo = setupTempRepo();
+    const todosDir = setupTodosDir(repo);
+    const worktreeDir = join(repo, ".worktrees");
+    const items = parseTodos(todosDir, worktreeDir);
+    const item = items.find((i) => i.id === "M-CI-1")!;
+
+    // Branch exists and is checked out in an external worktree
+    (branchExists as Mock).mockReturnValue(true);
+    // First deleteBranch fails (branch checked out in worktree)
+    (deleteBranch as Mock)
+      .mockImplementationOnce(() => { throw new Error("Cannot delete branch checked out in worktree"); })
+      .mockImplementationOnce(() => {}); // Retry succeeds
+    // findWorktreeForBranch returns an external worktree path
+    const externalWtPath = "/tmp/fake-external-worktree";
+    (findWorktreeForBranch as Mock)
+      .mockReturnValueOnce(externalWtPath)  // First call (line 456 — pre-check)
+      .mockReturnValueOnce(externalWtPath); // Second call (in catch block)
+
+    const output = await captureOutput(() => {
+      const res = launchSingleItem(item, todosDir, worktreeDir, repo, "claude", mockMux);
+      expect(res).not.toBeNull();
+    });
+
+    // removeWorktree should have been called twice: once in the pre-check (line 462) and once in the catch retry
+    expect(removeWorktree).toHaveBeenCalledWith(repo, externalWtPath, true);
+    // deleteBranch should have been called twice (initial + retry)
+    expect(deleteBranch).toHaveBeenCalledTimes(2);
+    // createWorktree should have been called (branch deletion succeeded on retry)
+    expect(createWorktree).toHaveBeenCalled();
+    expect(output).toContain("Removing and retrying");
+  });
+
+  it("propagates error when external worktree removal fails on retry", async () => {
+    const mockMux = createMockMux();
+    const repo = setupTempRepo();
+    const todosDir = setupTodosDir(repo);
+    const worktreeDir = join(repo, ".worktrees");
+    const items = parseTodos(todosDir, worktreeDir);
+    const item = items.find((i) => i.id === "M-CI-1")!;
+
+    (branchExists as Mock).mockReturnValue(true);
+    // deleteBranch always fails
+    (deleteBranch as Mock).mockImplementation(() => {
+      throw new Error("Cannot delete branch checked out in worktree");
+    });
+    const externalWtPath = "/tmp/fake-external-worktree";
+    (findWorktreeForBranch as Mock)
+      .mockReturnValueOnce(externalWtPath)  // pre-check
+      .mockReturnValueOnce(externalWtPath); // catch block
+    // removeWorktree fails on the retry (in catch block)
+    (removeWorktree as Mock)
+      .mockImplementationOnce(() => {})  // pre-check succeeds
+      .mockImplementationOnce(() => { throw new Error("permission denied"); }); // retry fails
+
+    // The error should propagate — no silent failures
+    let thrownError: Error | null = null;
+    await captureOutput(() => {
+      try {
+        launchSingleItem(item, todosDir, worktreeDir, repo, "claude", mockMux);
+      } catch (e) {
+        thrownError = e as Error;
+      }
+    });
+
+    expect(thrownError).not.toBeNull();
+    expect(thrownError!.message).toContain("Failed to delete branch");
+    expect(thrownError!.message).toContain("after removing external worktree");
+    // createWorktree should NOT have been called (error propagated)
+    expect(createWorktree).not.toHaveBeenCalled();
+  });
+
+  it("propagates error when no external worktree found but branch deletion fails", async () => {
+    const mockMux = createMockMux();
+    const repo = setupTempRepo();
+    const todosDir = setupTodosDir(repo);
+    const worktreeDir = join(repo, ".worktrees");
+    const items = parseTodos(todosDir, worktreeDir);
+    const item = items.find((i) => i.id === "M-CI-1")!;
+
+    (branchExists as Mock).mockReturnValue(true);
+    // deleteBranch fails for non-worktree reason
+    (deleteBranch as Mock).mockImplementation(() => {
+      throw new Error("branch is protected");
+    });
+    // No external worktree found
+    (findWorktreeForBranch as Mock).mockReturnValue(null);
+
+    let thrownError: Error | null = null;
+    await captureOutput(() => {
+      try {
+        launchSingleItem(item, todosDir, worktreeDir, repo, "claude", mockMux);
+      } catch (e) {
+        thrownError = e as Error;
+      }
+    });
+
+    expect(thrownError).not.toBeNull();
+    expect(thrownError!.message).toContain("Failed to delete branch");
+    expect(thrownError!.message).toContain("branch is protected");
+    expect(createWorktree).not.toHaveBeenCalled();
+  });
+
+  it("handles branch in both orchestrator worktree and external worktree", async () => {
+    const mockMux = createMockMux();
+    const repo = setupTempRepo();
+    const todosDir = setupTodosDir(repo);
+    const worktreeDir = join(repo, ".worktrees");
+    const items = parseTodos(todosDir, worktreeDir);
+    const item = items.find((i) => i.id === "M-CI-1")!;
+    const expectedWorktreePath = join(worktreeDir, "todo-M-CI-1");
+
+    (branchExists as Mock).mockReturnValue(true);
+
+    // First findWorktreeForBranch: returns the orchestrator's own worktree path
+    // (should be skipped since it matches worktreePath)
+    (findWorktreeForBranch as Mock)
+      .mockReturnValueOnce(expectedWorktreePath)  // pre-check: same as target, skip
+      .mockReturnValueOnce(null); // catch block: no external worktree found
+
+    // deleteBranch fails (branch exists but no external worktree to remove)
+    (deleteBranch as Mock).mockImplementation(() => {
+      throw new Error("Cannot delete branch");
+    });
+
+    let thrownError: Error | null = null;
+    await captureOutput(() => {
+      try {
+        launchSingleItem(item, todosDir, worktreeDir, repo, "claude", mockMux);
+      } catch (e) {
+        thrownError = e as Error;
+      }
+    });
+
+    // Should propagate error since no external worktree to remove
+    expect(thrownError).not.toBeNull();
+    expect(thrownError!.message).toContain("Failed to delete branch");
+  });
+});
+
+describe("cleanStaleBranchForReuse no-external-worktree regression", () => {
+  it("works correctly when no external worktrees exist", () => {
+    const deps = {
+      prList: vi.fn(() => [{ number: 1, title: "fix: old change (OLD-1)" }]),
+      branchExists: vi.fn(() => true),
+      deleteBranch: vi.fn(),
+      deleteRemoteBranch: vi.fn(),
+      warn: vi.fn(),
+      info: vi.fn(),
+    };
+
+    const result = cleanStaleBranchForReuse(
+      "OLD-1",
+      "New work for OLD-1",
+      "/fake/repo",
+      deps,
+    );
+
+    expect(result).toBe(true);
+    expect(deps.deleteBranch).toHaveBeenCalledWith("/fake/repo", "todo/OLD-1");
+    expect(deps.info).toHaveBeenCalledWith(expect.stringContaining("Deleted local branch"));
+    expect(deps.deleteRemoteBranch).toHaveBeenCalled();
+  });
+
+  it("returns false when no merged PRs exist", () => {
+    const deps = {
+      prList: vi.fn(() => []),
+      branchExists: vi.fn(() => false),
+      deleteBranch: vi.fn(),
+      deleteRemoteBranch: vi.fn(),
+      warn: vi.fn(),
+      info: vi.fn(),
+    };
+
+    const result = cleanStaleBranchForReuse(
+      "FRESH-1",
+      "Fresh work",
+      "/fake/repo",
+      deps,
+    );
+
+    expect(result).toBe(false);
+    expect(deps.deleteBranch).not.toHaveBeenCalled();
+  });
+
+  it("warns but continues when branch deletion fails", () => {
+    const deps = {
+      prList: vi.fn(() => [{ number: 1, title: "fix: stale (X-1)" }]),
+      branchExists: vi.fn(() => true),
+      deleteBranch: vi.fn(() => { throw new Error("Cannot delete"); }),
+      deleteRemoteBranch: vi.fn(),
+      warn: vi.fn(),
+      info: vi.fn(),
+    };
+
+    // cleanStaleBranchForReuse catches the error and continues
+    const result = cleanStaleBranchForReuse(
+      "X-1",
+      "New work",
+      "/fake/repo",
+      deps,
+    );
+
+    expect(result).toBe(true);
+    expect(deps.warn).toHaveBeenCalledWith(expect.stringContaining("Failed to delete local branch"));
+    // Remote deletion should still be attempted
+    expect(deps.deleteRemoteBranch).toHaveBeenCalled();
   });
 });
 

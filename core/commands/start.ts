@@ -489,11 +489,31 @@ export function launchSingleItem(
         try {
           deleteBranch(targetRepo, branchName);
         } catch (e) {
-          // If deletion still fails, the createWorktree below will fail with
-          // a clear error rather than a silent launch-failed.
-          warn(
-            `Failed to delete branch ${branchName}: ${e instanceof Error ? e.message : e}`,
-          );
+          // Branch deletion failed — likely still checked out in a worktree.
+          // This can happen if the external worktree removal above failed, or
+          // if the worktree appeared between the earlier check and now (race).
+          // Retry: find the blocking worktree, remove it, and try again.
+          const blockingWt = findWorktreeForBranch(targetRepo, branchName);
+          if (blockingWt && blockingWt !== worktreePath) {
+            warn(
+              `Branch ${branchName} still checked out in worktree: ${blockingWt}. Removing and retrying.`,
+            );
+            try {
+              removeWorktree(targetRepo, blockingWt, /* force */ true);
+              deleteBranch(targetRepo, branchName);
+            } catch (retryErr) {
+              throw new Error(
+                `Failed to delete branch ${branchName} after removing external worktree ${blockingWt}: ${retryErr instanceof Error ? retryErr.message : retryErr}`,
+              );
+            }
+          } else {
+            // No external worktree found — the branch deletion failure was for
+            // another reason. Propagate the error instead of silently continuing
+            // (which would cause createWorktree to fail with a cryptic message).
+            throw new Error(
+              `Failed to delete branch ${branchName}: ${e instanceof Error ? e.message : e}`,
+            );
+          }
         }
       }
     }
