@@ -312,7 +312,7 @@ export interface OrchestratorDeps {
    * Launch a review worker for a PR. Returns a workspace reference on success.
    * Actual logic lives in H-RVW-3; stub for now.
    */
-  launchReview?: (itemId: string, prNumber: number, repoRoot: string) => { workspaceRef: string; verdictPath: string } | null;
+  launchReview?: (itemId: string, prNumber: number, repoRoot: string, implementerWorktreePath?: string) => { workspaceRef: string; verdictPath: string } | null;
   /**
    * Clean up a review worker session and workspace.
    * Actual logic lives in H-RVW-3; stub for now.
@@ -2371,7 +2371,7 @@ export class Orchestrator {
 
     const repoRoot = item.resolvedRepoRoot ?? ctx.projectRoot;
     try {
-      const result = deps.launchReview(item.id, prNum, repoRoot);
+      const result = deps.launchReview(item.id, prNum, repoRoot, item.worktreePath);
       if (result) {
         item.reviewWorkspaceRef = result.workspaceRef;
         item.reviewVerdictPath = result.verdictPath;

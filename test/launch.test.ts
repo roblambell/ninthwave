@@ -1373,6 +1373,47 @@ describe("launchReviewWorker", () => {
     const { deleteBranch } = require("../core/git.ts");
     expect(deleteBranch).toHaveBeenCalledWith(repo, "review/H-RVW-1");
   });
+
+  it("off mode uses implementerWorktreePath when provided, does not create a new directory", async () => {
+    const mockMux = createMockMux();
+    const repo = setupTempRepo();
+    const implWorktree = join(repo, ".worktrees", "ninthwave-H-RVW-1");
+    mkdirSync(implWorktree, { recursive: true });
+
+    await captureOutput(() => {
+      const res = launchReviewWorker(42, "H-RVW-1", "off", repo, "claude", mockMux, {
+        implementerWorktreePath: implWorktree,
+      });
+      expect(res).not.toBeNull();
+      expect(res!.worktreePath).toBeNull();
+    });
+
+    // Should NOT create a worktree (no createWorktree call)
+    expect(createWorktree).not.toHaveBeenCalled();
+    // Should NOT call fetchOrigin
+    expect(fetchOrigin).not.toHaveBeenCalled();
+    // The review-{id} directory should NOT have been created
+    const { existsSync } = require("fs");
+    expect(existsSync(join(repo, ".worktrees", "review-H-RVW-1"))).toBe(false);
+    // The launch should have been called with the implementer's worktree as workDir
+    const launchCall = mockMux.launchWorkspace.mock.calls[0];
+    expect(launchCall[0]).toBe(implWorktree);
+  });
+
+  it("off mode without implementerWorktreePath falls back to creating plain directory", async () => {
+    const mockMux = createMockMux();
+    const repo = setupTempRepo();
+
+    await captureOutput(() => {
+      const res = launchReviewWorker(42, "H-RVW-1", "off", repo, "claude", mockMux);
+      expect(res).not.toBeNull();
+      expect(res!.worktreePath).toBeNull();
+    });
+
+    // Should have launched from the review-{id} directory (fallback behavior)
+    const launchCall = mockMux.launchWorkspace.mock.calls[0];
+    expect(launchCall[0]).toContain("review-H-RVW-1");
+  });
 });
 
 // ── WORK_ITEM_ID_CLI_PATTERN tests ───────────────────────────────────────

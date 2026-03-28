@@ -688,18 +688,24 @@ export function launchReviewWorker(
   repoRoot: string,
   aiTool: string,
   mux: Multiplexer = getMux(),
-  options: { baseBranch?: string; reviewType?: "todo" | "external" } = {},
+  options: { baseBranch?: string; reviewType?: "todo" | "external"; implementerWorktreePath?: string } = {},
 ): ReviewLaunchResult | null {
   let worktreePath: string | null = null;
   let workDir: string;
 
   if (autoFixMode === "off") {
     // No git worktree needed -- review worker reads diff via gh and posts comments.
-    // Use a directory under the project root so it inherits workspace trust
-    // (launching in /tmp triggers Claude Code's interactive trust prompt).
-    workDir = join(repoRoot, ".worktrees", `review-${itemId}`);
-    mkdirSync(workDir, { recursive: true });
-    ensureWorktreeExcluded(repoRoot);
+    // Use the implementer's existing worktree for git context isolation so that
+    // git commands from the reviewer don't affect the main repo checkout.
+    if (options.implementerWorktreePath) {
+      workDir = options.implementerWorktreePath;
+    } else {
+      // Fallback: create a plain directory under the project root so it inherits
+      // workspace trust (launching in /tmp triggers Claude Code's interactive trust prompt).
+      workDir = join(repoRoot, ".worktrees", `review-${itemId}`);
+      mkdirSync(workDir, { recursive: true });
+      ensureWorktreeExcluded(repoRoot);
+    }
   } else {
     // direct or pr: create worktree from existing ninthwave/{id} branch
     const branchName = `ninthwave/${itemId}`;
