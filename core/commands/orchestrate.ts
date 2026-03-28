@@ -82,7 +82,11 @@ import {
   MIN_FULLSCREEN_ROWS,
   type StatusItem,
   type ViewOptions,
+  type CrewStatusInfo,
 } from "../status-render.ts";
+import type { CrewBroker, CrewStatus } from "../crew.ts";
+import { WebSocketCrewBroker, getOrCreateDaemonId } from "../crew.ts";
+import { MockBroker } from "../mock-broker.ts";
 
 // ── Structured logging ─────────────────────────────────────────────
 
@@ -111,8 +115,12 @@ export function detectTuiMode(isDaemonChild: boolean, jsonFlag: boolean, isTTY: 
 /**
  * Convert OrchestratorItem[] to StatusItem[] for TUI rendering.
  * Mirrors the logic in daemonStateToStatusItems but works directly from live orchestrator state.
+ * When crewDaemonName is provided, sets daemonName on items ("local" for self, daemon name for claimed, "--" for unclaimed).
  */
-export function orchestratorItemsToStatusItems(items: OrchestratorItem[]): StatusItem[] {
+export function orchestratorItemsToStatusItems(
+  items: OrchestratorItem[],
+  crewDaemonName?: string,
+): StatusItem[] {
   return items.map((item) => ({
     id: item.id,
     title: item.todo.title,
@@ -126,6 +134,10 @@ export function orchestratorItemsToStatusItems(items: OrchestratorItem[]): Statu
     endedAt: item.endedAt,
     exitCode: item.exitCode,
     stderrTail: item.stderrTail,
+    ...(crewDaemonName !== undefined ? {
+      daemonName: crewDaemonName === "local" ? "local" :
+        (item.workspaceRef ? crewDaemonName : "--"),
+    } : {}),
   }));
 }
 
@@ -144,8 +156,9 @@ export function renderTuiFrame(
   write: (s: string) => void = (s) => process.stdout.write(s),
   viewOptions?: ViewOptions,
   scrollOffset: number = 0,
+  crewDaemonName?: string,
 ): void {
-  const statusItems = orchestratorItemsToStatusItems(items);
+  const statusItems = orchestratorItemsToStatusItems(items, crewDaemonName);
   const termWidth = getTerminalWidth();
   const termRows = getTerminalHeight();
 
@@ -1227,6 +1240,8 @@ export interface OrchestrateLoopDeps {
   externalReviewDeps?: ExternalReviewDeps;
   /** Scan for TODO files. Required for watch mode — re-scans the todos directory to discover new items. */
   scanTodos?: () => TodoItem[];
+  /** Crew coordination broker. When present, crew mode is active — claim before launch, complete after merge. */
+  crewBroker?: CrewBroker;
 }
 
 export interface OrchestrateLoopConfig {
@@ -1415,13 +1430,69 @@ export async function orchestrateLoop(
       });
     }
 
+    // Crew mode: sync active TODOs to broker (fire-and-forget, before snapshot)
+    if (deps.crewBroker) {
+      try {
+        const activeIds = orch.getAllItems()
+          .filter((i) => i.state !== "done" && i.state !== "stuck")
+          .map((i) => i.id);
+        deps.crewBroker.sync(activeIds);
+      } catch { /* best-effort — sync failure doesn't block the orchestrator */ }
+    }
+
     // Build snapshot from external state
     const snapshot = deps.buildSnapshot(orch, ctx.projectRoot, ctx.worktreeDir);
     __lastSnapshot = snapshot;
 
     // Process transitions (pure state machine)
-    const actions = orch.processTransitions(snapshot);
+    let actions = orch.processTransitions(snapshot);
     __lastActions = actions;
+
+    // Crew mode: claim/filter launch actions through the broker
+    if (deps.crewBroker) {
+      const launchActions = actions.filter((a) => a.type === "launch");
+      if (launchActions.length > 0) {
+        if (!deps.crewBroker.isConnected()) {
+          // Block ALL launches when disconnected — prevents stall detection
+          for (const action of launchActions) {
+            orch.setState(action.itemId, "ready");
+          }
+          actions = actions.filter((a) => a.type !== "launch");
+          log({
+            ts: new Date().toISOString(),
+            level: "warn",
+            event: "crew_launches_blocked",
+            reason: "disconnected",
+            blockedCount: launchActions.length,
+          });
+        } else {
+          // Claim from broker for each launch action
+          const claimedIds = new Set<string>();
+          for (const _action of launchActions) {
+            try {
+              const claimed = await deps.crewBroker.claim();
+              if (claimed) claimedIds.add(claimed);
+            } catch { /* claim failure = not assigned */ }
+          }
+          // Filter: only keep launch actions for items we claimed
+          const denied = launchActions.filter((a) => !claimedIds.has(a.itemId));
+          for (const action of denied) {
+            orch.setState(action.itemId, "ready");
+          }
+          actions = actions.filter((a) => a.type !== "launch" || claimedIds.has(a.itemId));
+          if (denied.length > 0) {
+            log({
+              ts: new Date().toISOString(),
+              level: "info",
+              event: "crew_launches_filtered",
+              claimedCount: claimedIds.size,
+              deniedCount: denied.length,
+              deniedIds: denied.map((a) => a.itemId),
+            });
+          }
+        }
+      }
+    }
 
     // Log state transitions
     let __hadTransition = false;
@@ -1454,6 +1525,20 @@ export async function orchestrateLoop(
     // Execute actions
     for (const action of actions) {
       handleActionExecution(action, orch, ctx, deps, log, costData);
+    }
+
+    // Crew mode: notify broker of completed items (merge/done)
+    if (deps.crewBroker) {
+      for (const action of actions) {
+        if (action.type === "merge" || action.type === "clean") {
+          const orchItem = orch.getItem(action.itemId);
+          if (orchItem && (orchItem.state === "done" || orchItem.state === "merged")) {
+            try {
+              deps.crewBroker.complete(action.itemId);
+            } catch { /* best-effort */ }
+          }
+        }
+      }
     }
 
     // Sync cmux sidebar display for active workers
@@ -1680,6 +1765,10 @@ export async function cmdOrchestrate(
   let watchIntervalSecs: number | undefined;
   let jsonFlag = false;
   let skipPreflight = false;
+  let crewCode: string | undefined;
+  let crewCreate = false;
+  let crewPort = 0;
+  let crewName: string | undefined;
 
   // Parse args
   let i = 0;
@@ -1765,6 +1854,22 @@ export async function cmdOrchestrate(
       case "--skip-preflight":
         skipPreflight = true;
         i += 1;
+        break;
+      case "--crew":
+        crewCode = args[i + 1];
+        i += 2;
+        break;
+      case "--crew-create":
+        crewCreate = true;
+        i += 1;
+        break;
+      case "--crew-port":
+        crewPort = parseInt(args[i + 1] ?? "0", 10);
+        i += 2;
+        break;
+      case "--crew-name":
+        crewName = args[i + 1];
+        i += 2;
         break;
       default:
         die(`Unknown option: ${args[i]}`);
@@ -2052,10 +2157,50 @@ export async function cmdOrchestrate(
     },
   };
 
+  // ── Crew mode setup ──────────────────────────────────────────────
+  let crewBroker: CrewBroker | undefined;
+  let mockBrokerInstance: MockBroker | undefined;
+
+  if (crewCreate) {
+    // Start mock broker in-process
+    mockBrokerInstance = new MockBroker({ port: crewPort || 0 });
+    const brokerPort = mockBrokerInstance.start();
+
+    // Create a crew
+    const res = await fetch(`http://localhost:${brokerPort}/api/crews`, { method: "POST" });
+    const body = (await res.json()) as { code: string };
+    crewCode = body.code;
+    crewPort = brokerPort;
+
+    info(`Crew created: ${crewCode}`);
+    info(`  Port: ${brokerPort}`);
+    info(`  Join: ninthwave orchestrate --crew ${crewCode} --crew-port ${brokerPort} ...`);
+  }
+
+  let resolvedCrewName: string | undefined;
+  if (crewCode) {
+    if (!crewPort) {
+      die("--crew-port is required when using --crew");
+    }
+    resolvedCrewName = crewName ?? (await import("os")).hostname();
+    const broker = new WebSocketCrewBroker(projectRoot, crewPort, crewCode, {
+      log: (level, msg) => log({ ts: new Date().toISOString(), level, event: "crew_client", message: msg }),
+    }, resolvedCrewName);
+
+    try {
+      await broker.connect();
+      info(`Connected to crew ${crewCode} as "${resolvedCrewName}"`);
+    } catch (err) {
+      die(`Failed to connect to crew server: ${(err as Error).message}`);
+    }
+    crewBroker = broker;
+  }
+
   // Graceful SIGINT handling
   const abortController = new AbortController();
   const sigintHandler = () => {
     log({ ts: new Date().toISOString(), level: "info", event: "sigint_received" });
+    crewBroker?.disconnect();
     abortController.abort();
   };
   process.on("SIGINT", sigintHandler);
@@ -2063,6 +2208,7 @@ export async function cmdOrchestrate(
   // Graceful SIGTERM handling (used by daemon mode for clean shutdown)
   const sigtermHandler = () => {
     log({ ts: new Date().toISOString(), level: "info", event: "sigterm_received" });
+    crewBroker?.disconnect();
     abortController.abort();
   };
   process.on("SIGTERM", sigtermHandler);
@@ -2115,7 +2261,7 @@ export async function cmdOrchestrate(
           if (tuiState.nextRefreshAt != null) {
             tuiState.viewOptions.countdownText = computeCountdownText(tuiState.nextRefreshAt);
           }
-          renderTuiFrame(lastTuiItems, wipLimit, undefined, tuiState.viewOptions, tuiState.scrollOffset);
+          renderTuiFrame(lastTuiItems, wipLimit, undefined, tuiState.viewOptions, tuiState.scrollOffset, resolvedCrewName);
         } catch {
           // Non-fatal
         }
@@ -2128,6 +2274,18 @@ export async function cmdOrchestrate(
     // Update countdown target for next poll cycle
     if (pollIntervalMs != null) {
       tuiState.nextRefreshAt = Date.now() + pollIntervalMs;
+    }
+    // Update crew status from broker
+    if (crewBroker && crewCode) {
+      const cs = crewBroker.getCrewStatus();
+      tuiState.viewOptions.crewStatus = {
+        crewCode: cs?.crewCode ?? crewCode,
+        daemonCount: cs?.daemonCount ?? 0,
+        availableCount: cs?.availableCount ?? 0,
+        claimedCount: cs?.claimedCount ?? 0,
+        completedCount: cs?.completedCount ?? 0,
+        connected: crewBroker.isConnected(),
+      };
     }
     try {
       const state = serializeOrchestratorState(items, process.pid, daemonStartedAt, {
@@ -2145,7 +2303,7 @@ export async function cmdOrchestrate(
         if (tuiState.nextRefreshAt != null) {
           tuiState.viewOptions.countdownText = computeCountdownText(tuiState.nextRefreshAt);
         }
-        renderTuiFrame(items, wipLimit, undefined, tuiState.viewOptions, tuiState.scrollOffset);
+        renderTuiFrame(items, wipLimit, undefined, tuiState.viewOptions, tuiState.scrollOffset, resolvedCrewName);
       } catch {
         // Non-fatal — TUI render failure shouldn't block the orchestrator
       }
@@ -2204,6 +2362,7 @@ export async function cmdOrchestrate(
     syncDisplay: (o, snap) => syncWorkerDisplay(o, snap, mux),
     externalReviewDeps,
     ...(watchMode ? { scanTodos: () => parseTodos(todosDir, worktreeDir) } : {}),
+    ...(crewBroker ? { crewBroker } : {}),
   };
 
   // Resolve repo URL for PR URL construction in completion event
@@ -2295,6 +2454,14 @@ export async function cmdOrchestrate(
 
     // Restore terminal state (disable raw mode)
     cleanupKeyboard();
+
+    // Clean up crew broker and mock broker
+    if (crewBroker) {
+      try { crewBroker.disconnect(); } catch { /* best-effort */ }
+    }
+    if (mockBrokerInstance) {
+      try { mockBrokerInstance.stop(); } catch { /* best-effort */ }
+    }
 
     // Always clean up state file on exit (written in both daemon and interactive mode)
     cleanStateFile(projectRoot);

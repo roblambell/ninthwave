@@ -74,6 +74,55 @@ function waitForMessage<T = unknown>(ws: WebSocket, timeoutMs = 2000): Promise<T
   });
 }
 
+/** Wait for a message of a specific type, skipping other message types (e.g., crew_update). */
+function waitForMessageByType<T = unknown>(ws: WebSocket, type: string, timeoutMs = 2000): Promise<T> {
+  return new Promise((resolve, reject) => {
+    const timer = setTimeout(() => reject(new Error(`Timeout waiting for message type: ${type}`)), timeoutMs);
+    const handler = (e: MessageEvent) => {
+      const data = JSON.parse(String(e.data));
+      if (data.type === type) {
+        clearTimeout(timer);
+        ws.removeEventListener("message", handler);
+        resolve(data as T);
+      }
+      // else keep waiting (skip crew_update and other broadcast messages)
+    };
+    ws.addEventListener("message", handler);
+  });
+}
+
+/** Send sync and wait for sync_ack. */
+async function sendSync(ws: WebSocket, daemonId: string, todoIds: string[]): Promise<void> {
+  ws.send(JSON.stringify({ type: "sync", daemonId, activeTodoIds: todoIds }));
+  await waitForMessageByType(ws, "sync_ack");
+}
+
+/** Send claim and wait for claim_response. Returns todoId or null. */
+async function sendClaim(ws: WebSocket, daemonId: string): Promise<{ todoId: string | null; requestId: string }> {
+  const requestId = `req-${Math.random().toString(36).slice(2, 8)}`;
+  ws.send(JSON.stringify({ type: "claim", requestId, daemonId }));
+  const resp = await waitForMessageByType<{ type: string; requestId: string; todoId: string | null }>(ws, "claim_response");
+  return { todoId: resp.todoId, requestId: resp.requestId };
+}
+
+/** Send complete and wait for complete_ack or error. Skips crew_update broadcasts. */
+async function sendComplete(ws: WebSocket, daemonId: string, todoId: string): Promise<{ type: string; todoId?: string; message?: string }> {
+  ws.send(JSON.stringify({ type: "complete", todoId, daemonId }));
+  // Wait for either complete_ack or error, skipping crew_update broadcasts
+  return new Promise((resolve, reject) => {
+    const timer = setTimeout(() => reject(new Error("Timeout waiting for complete response")), 2000);
+    const handler = (e: MessageEvent) => {
+      const data = JSON.parse(String(e.data));
+      if (data.type === "complete_ack" || data.type === "error") {
+        clearTimeout(timer);
+        ws.removeEventListener("message", handler);
+        resolve(data);
+      }
+    };
+    ws.addEventListener("message", handler);
+  });
+}
+
 function readEventLog(path: string): CrewEvent[] {
   if (!existsSync(path)) return [];
   return readFileSync(path, "utf-8")
@@ -161,38 +210,18 @@ describe("mock-broker", () => {
       const ws2 = await connectWs(port, code, "d2", "worker-2");
 
       // d1 syncs TODO-A and TODO-B
-      ws1.send(JSON.stringify({
-        type: "sync",
-        todos: [
-          { path: "todo-A", priority: 1 },
-          { path: "todo-B", priority: 1 },
-        ],
-      }));
-      await tick();
+      await sendSync(ws1, "d1", ["todo-A", "todo-B"]);
 
       // d2 syncs TODO-C and TODO-D
-      ws2.send(JSON.stringify({
-        type: "sync",
-        todos: [
-          { path: "todo-C", priority: 1 },
-          { path: "todo-D", priority: 1 },
-        ],
-      }));
-      await tick();
+      await sendSync(ws2, "d2", ["todo-C", "todo-D"]);
 
       // d1 claims — should get its own TODO first (creator affinity)
-      ws1.send(JSON.stringify({ type: "claim_request" }));
-      const claim1 = await waitForMessage<{ type: string; todoPath: string; affinity: string }>(ws1);
-      expect(claim1.type).toBe("claimed");
-      expect(["todo-A", "todo-B"]).toContain(claim1.todoPath);
-      expect(claim1.affinity).toBe("creator");
+      const claim1 = await sendClaim(ws1, "d1");
+      expect(["todo-A", "todo-B"]).toContain(claim1.todoId);
 
       // d2 claims — should get its own TODO first
-      ws2.send(JSON.stringify({ type: "claim_request" }));
-      const claim2 = await waitForMessage<{ type: string; todoPath: string; affinity: string }>(ws2);
-      expect(claim2.type).toBe("claimed");
-      expect(["todo-C", "todo-D"]).toContain(claim2.todoPath);
-      expect(claim2.affinity).toBe("creator");
+      const claim2 = await sendClaim(ws2, "d2");
+      expect(["todo-C", "todo-D"]).toContain(claim2.todoId);
 
       ws1.close();
       ws2.close();
@@ -206,30 +235,18 @@ describe("mock-broker", () => {
       const ws2 = await connectWs(port, code, "d2", "worker-2");
 
       // d1 syncs 1 TODO
-      ws1.send(JSON.stringify({
-        type: "sync",
-        todos: [{ path: "todo-A", priority: 1 }],
-      }));
-      await tick();
+      await sendSync(ws1, "d1", ["todo-A"]);
 
       // d2 syncs 1 TODO
-      ws2.send(JSON.stringify({
-        type: "sync",
-        todos: [{ path: "todo-B", priority: 1 }],
-      }));
-      await tick();
+      await sendSync(ws2, "d2", ["todo-B"]);
 
       // d1 claims its own TODO
-      ws1.send(JSON.stringify({ type: "claim_request" }));
-      const claim1 = await waitForMessage<{ type: string; todoPath: string; affinity: string }>(ws1);
-      expect(claim1.todoPath).toBe("todo-A");
-      expect(claim1.affinity).toBe("creator");
+      const claim1 = await sendClaim(ws1, "d1");
+      expect(claim1.todoId).toBe("todo-A");
 
       // d1 claims again — should get todo-B from pool
-      ws1.send(JSON.stringify({ type: "claim_request" }));
-      const claim2 = await waitForMessage<{ type: string; todoPath: string; affinity: string }>(ws1);
-      expect(claim2.todoPath).toBe("todo-B");
-      expect(claim2.affinity).toBe("pool");
+      const claim2 = await sendClaim(ws1, "d1");
+      expect(claim2.todoId).toBe("todo-B");
 
       ws1.close();
       ws2.close();
@@ -240,52 +257,36 @@ describe("mock-broker", () => {
       const code = await createCrew(port);
       const ws = await connectWs(port, code, "d1", "worker-1");
 
-      // Sync TODOs with different priorities
-      ws.send(JSON.stringify({
-        type: "sync",
-        todos: [
-          { path: "low-pri", priority: 3 },
-          { path: "high-pri", priority: 0 },
-          { path: "med-pri", priority: 2 },
-        ],
-      }));
-      await tick();
+      // Sync all TODOs (priority comes from default; order is stable by syncedAt)
+      await sendSync(ws, "d1", ["low-pri", "high-pri", "med-pri"]);
 
-      // Claim should return highest priority first
-      ws.send(JSON.stringify({ type: "claim_request" }));
-      const claim1 = await waitForMessage<{ type: string; todoPath: string }>(ws);
-      expect(claim1.todoPath).toBe("high-pri");
+      // All have same default priority (1), so claim order is by syncedAt (insertion order)
+      const claim1 = await sendClaim(ws, "d1");
+      expect(claim1.todoId).toBe("low-pri");
 
-      ws.send(JSON.stringify({ type: "claim_request" }));
-      const claim2 = await waitForMessage<{ type: string; todoPath: string }>(ws);
-      expect(claim2.todoPath).toBe("med-pri");
+      const claim2 = await sendClaim(ws, "d1");
+      expect(claim2.todoId).toBe("high-pri");
 
-      ws.send(JSON.stringify({ type: "claim_request" }));
-      const claim3 = await waitForMessage<{ type: string; todoPath: string }>(ws);
-      expect(claim3.todoPath).toBe("low-pri");
+      const claim3 = await sendClaim(ws, "d1");
+      expect(claim3.todoId).toBe("med-pri");
 
       ws.close();
     });
 
-    it("returns no_work when all TODOs are claimed", async () => {
+    it("returns null todoId when all TODOs are claimed", async () => {
       const { port } = startBroker();
       const code = await createCrew(port);
       const ws = await connectWs(port, code, "d1", "worker-1");
 
-      ws.send(JSON.stringify({
-        type: "sync",
-        todos: [{ path: "todo-A", priority: 1 }],
-      }));
-      await tick();
+      await sendSync(ws, "d1", ["todo-A"]);
 
       // Claim the only TODO
-      ws.send(JSON.stringify({ type: "claim_request" }));
-      await waitForMessage(ws);
+      const claim1 = await sendClaim(ws, "d1");
+      expect(claim1.todoId).toBe("todo-A");
 
-      // Try again — should get no_work
-      ws.send(JSON.stringify({ type: "claim_request" }));
-      const noWork = await waitForMessage<{ type: string }>(ws);
-      expect(noWork.type).toBe("no_work");
+      // Try again — should get null (no work)
+      const claim2 = await sendClaim(ws, "d1");
+      expect(claim2.todoId).toBeNull();
 
       ws.close();
     });
@@ -300,25 +301,22 @@ describe("mock-broker", () => {
       const ws2 = await connectWs(port, code, "d2", "worker-2");
 
       // d1 syncs 5 TODOs, d2 syncs 5 TODOs
-      const d1Todos = Array.from({ length: 5 }, (_, i) => ({ path: `d1-todo-${i}`, priority: 1 }));
-      const d2Todos = Array.from({ length: 5 }, (_, i) => ({ path: `d2-todo-${i}`, priority: 1 }));
+      const d1TodoIds = Array.from({ length: 5 }, (_, i) => `d1-todo-${i}`);
+      const d2TodoIds = Array.from({ length: 5 }, (_, i) => `d2-todo-${i}`);
 
-      ws1.send(JSON.stringify({ type: "sync", todos: d1Todos }));
-      ws2.send(JSON.stringify({ type: "sync", todos: d2Todos }));
-      await tick();
+      await sendSync(ws1, "d1", d1TodoIds);
+      await sendSync(ws2, "d2", d2TodoIds);
 
       const d1Claims: string[] = [];
       const d2Claims: string[] = [];
 
       // Alternate claims between the two daemons
       for (let i = 0; i < 5; i++) {
-        ws1.send(JSON.stringify({ type: "claim_request" }));
-        const c1 = await waitForMessage<{ type: string; todoPath?: string }>(ws1);
-        if (c1.type === "claimed" && c1.todoPath) d1Claims.push(c1.todoPath);
+        const c1 = await sendClaim(ws1, "d1");
+        if (c1.todoId) d1Claims.push(c1.todoId);
 
-        ws2.send(JSON.stringify({ type: "claim_request" }));
-        const c2 = await waitForMessage<{ type: string; todoPath?: string }>(ws2);
-        if (c2.type === "claimed" && c2.todoPath) d2Claims.push(c2.todoPath);
+        const c2 = await sendClaim(ws2, "d2");
+        if (c2.todoId) d2Claims.push(c2.todoId);
       }
 
       // Verify zero overlap
@@ -338,27 +336,20 @@ describe("mock-broker", () => {
       const code = await createCrew(port);
       const ws = await connectWs(port, code, "d1", "worker-1");
 
-      ws.send(JSON.stringify({
-        type: "sync",
-        todos: [{ path: "todo-A", priority: 1 }],
-      }));
-      await tick();
+      await sendSync(ws, "d1", ["todo-A"]);
 
       // Claim it
-      ws.send(JSON.stringify({ type: "claim_request" }));
-      const claimed = await waitForMessage<{ type: string; todoPath: string }>(ws);
-      expect(claimed.type).toBe("claimed");
+      const claim = await sendClaim(ws, "d1");
+      expect(claim.todoId).toBe("todo-A");
 
       // Complete it
-      ws.send(JSON.stringify({ type: "complete", todoPath: "todo-A" }));
-      const ack = await waitForMessage<{ type: string; todoPath: string }>(ws);
+      const ack = await sendComplete(ws, "d1", "todo-A");
       expect(ack.type).toBe("complete_ack");
-      expect(ack.todoPath).toBe("todo-A");
+      expect((ack as any).todoId).toBe("todo-A");
 
       // Completed TODO should not be available for claim
-      ws.send(JSON.stringify({ type: "claim_request" }));
-      const noWork = await waitForMessage<{ type: string }>(ws);
-      expect(noWork.type).toBe("no_work");
+      const noWork = await sendClaim(ws, "d1");
+      expect(noWork.todoId).toBeNull();
 
       ws.close();
     });
@@ -377,19 +368,12 @@ describe("mock-broker", () => {
       const ws2 = await connectWs(port, code, "d2", "worker-2");
 
       // d1 syncs and claims a TODO
-      ws1.send(JSON.stringify({
-        type: "sync",
-        todos: [{ path: "todo-A", priority: 1 }],
-      }));
-      await tick();
-
-      ws1.send(JSON.stringify({ type: "claim_request" }));
-      const claimed = await waitForMessage<{ type: string; todoPath: string }>(ws1);
-      expect(claimed.todoPath).toBe("todo-A");
+      await sendSync(ws1, "d1", ["todo-A"]);
+      const claimed = await sendClaim(ws1, "d1");
+      expect(claimed.todoId).toBe("todo-A");
 
       // d2 syncs so it exists in the crew
-      ws2.send(JSON.stringify({ type: "sync", todos: [] }));
-      await tick();
+      await sendSync(ws2, "d2", []);
 
       // d1 disconnects
       ws1.close();
@@ -398,10 +382,8 @@ describe("mock-broker", () => {
       await tick(350);
 
       // d2 should now be able to claim the released TODO
-      ws2.send(JSON.stringify({ type: "claim_request" }));
-      const reClaim = await waitForMessage<{ type: string; todoPath?: string }>(ws2);
-      expect(reClaim.type).toBe("claimed");
-      expect(reClaim.todoPath).toBe("todo-A");
+      const reClaim = await sendClaim(ws2, "d2");
+      expect(reClaim.todoId).toBe("todo-A");
 
       ws2.close();
     });
@@ -416,17 +398,10 @@ describe("mock-broker", () => {
       const ws1 = await connectWs(port, code, "d1", "worker-1");
       const ws2 = await connectWs(port, code, "d2", "worker-2");
 
-      ws1.send(JSON.stringify({
-        type: "sync",
-        todos: [{ path: "todo-A", priority: 1 }],
-      }));
-      await tick();
+      await sendSync(ws1, "d1", ["todo-A"]);
+      await sendClaim(ws1, "d1");
 
-      ws1.send(JSON.stringify({ type: "claim_request" }));
-      await waitForMessage(ws1);
-
-      ws2.send(JSON.stringify({ type: "sync", todos: [] }));
-      await tick();
+      await sendSync(ws2, "d2", []);
 
       // d1 disconnects
       ws1.close();
@@ -435,16 +410,15 @@ describe("mock-broker", () => {
       await tick(200);
 
       // d2 should NOT be able to claim (still in grace period)
-      ws2.send(JSON.stringify({ type: "claim_request" }));
-      const noWork = await waitForMessage<{ type: string }>(ws2);
-      expect(noWork.type).toBe("no_work");
+      const noWork = await sendClaim(ws2, "d2");
+      expect(noWork.todoId).toBeNull();
 
       ws2.close();
     });
   });
 
   describe("reconnect", () => {
-    it("sends reconnect_state with correct claimed/released lists", async () => {
+    it("sends reconnect_state with correct resumed/released lists", async () => {
       const { port, broker } = startBroker({
         heartbeatTimeoutMs: 50,
         gracePeriodMs: 50,
@@ -454,19 +428,9 @@ describe("mock-broker", () => {
       const ws1 = await connectWs(port, code, "d1", "worker-1");
 
       // Sync and claim 2 TODOs
-      ws1.send(JSON.stringify({
-        type: "sync",
-        todos: [
-          { path: "todo-A", priority: 1 },
-          { path: "todo-B", priority: 2 },
-        ],
-      }));
-      await tick();
-
-      ws1.send(JSON.stringify({ type: "claim_request" }));
-      await waitForMessage(ws1);
-      ws1.send(JSON.stringify({ type: "claim_request" }));
-      await waitForMessage(ws1);
+      await sendSync(ws1, "d1", ["todo-A", "todo-B"]);
+      await sendClaim(ws1, "d1");
+      await sendClaim(ws1, "d1");
 
       // Disconnect d1
       ws1.close();
@@ -476,28 +440,27 @@ describe("mock-broker", () => {
 
       // Connect d2 and claim one of the released TODOs
       const ws2 = await connectWs(port, code, "d2", "worker-2");
-      ws2.send(JSON.stringify({ type: "claim_request" }));
-      const d2Claim = await waitForMessage<{ type: string; todoPath: string }>(ws2);
-      expect(d2Claim.type).toBe("claimed");
-      const reclaimedPath = d2Claim.todoPath;
+      const d2Claim = await sendClaim(ws2, "d2");
+      expect(d2Claim.todoId).toBeTruthy();
+      const reclaimedPath = d2Claim.todoId!;
 
       // Reconnect d1 — should get reconnect_state
       const ws1b = await connectWs(port, code, "d1", "worker-1");
       const state = await waitForMessage<{
         type: string;
-        claimed: string[];
+        resumed: string[];
         released: string[];
-        reClaimed: string[];
+        reclaimed: string[];
       }>(ws1b);
 
       expect(state.type).toBe("reconnect_state");
-      // Both TODOs were released (grace expired), one was re-claimed by d2
-      expect(state.reClaimed).toContain(reclaimedPath);
+      // Both TODOs were released (grace expired), one was reclaimed by d2
+      expect(state.reclaimed).toContain(reclaimedPath);
       // The other should be in released
       const otherPath = reclaimedPath === "todo-A" ? "todo-B" : "todo-A";
       expect(state.released).toContain(otherPath);
-      // Nothing should be still claimed by d1
-      expect(state.claimed).toHaveLength(0);
+      // Nothing should be still resumed by d1
+      expect(state.resumed).toHaveLength(0);
 
       ws1b.close();
       ws2.close();
@@ -512,14 +475,8 @@ describe("mock-broker", () => {
 
       const ws1 = await connectWs(port, code, "d1", "worker-1");
 
-      ws1.send(JSON.stringify({
-        type: "sync",
-        todos: [{ path: "todo-A", priority: 1 }],
-      }));
-      await tick();
-
-      ws1.send(JSON.stringify({ type: "claim_request" }));
-      await waitForMessage(ws1);
+      await sendSync(ws1, "d1", ["todo-A"]);
+      await sendClaim(ws1, "d1");
 
       // Disconnect
       ws1.close();
@@ -529,15 +486,15 @@ describe("mock-broker", () => {
       const ws1b = await connectWs(port, code, "d1", "worker-1");
       const state = await waitForMessage<{
         type: string;
-        claimed: string[];
+        resumed: string[];
         released: string[];
-        reClaimed: string[];
+        reclaimed: string[];
       }>(ws1b);
 
       expect(state.type).toBe("reconnect_state");
-      expect(state.claimed).toContain("todo-A");
+      expect(state.resumed).toContain("todo-A");
       expect(state.released).toHaveLength(0);
-      expect(state.reClaimed).toHaveLength(0);
+      expect(state.reclaimed).toHaveLength(0);
 
       ws1b.close();
     });
@@ -553,30 +510,19 @@ describe("mock-broker", () => {
 
       // Connect and sync
       const ws1 = await connectWs(port, code, "d1", "worker-1");
-      ws1.send(JSON.stringify({
-        type: "sync",
-        todos: [{ path: "todo-A", priority: 1 }],
-      }));
-      await tick();
+      await sendSync(ws1, "d1", ["todo-A"]);
 
       // Claim
-      ws1.send(JSON.stringify({ type: "claim_request" }));
-      await waitForMessage(ws1);
+      await sendClaim(ws1, "d1");
 
       // Complete
-      ws1.send(JSON.stringify({ type: "complete", todoPath: "todo-A" }));
-      await waitForMessage(ws1);
+      await sendComplete(ws1, "d1", "todo-A");
 
       // Sync another TODO
-      ws1.send(JSON.stringify({
-        type: "sync",
-        todos: [{ path: "todo-B", priority: 1 }],
-      }));
-      await tick();
+      await sendSync(ws1, "d1", ["todo-B"]);
 
       // Claim and then disconnect
-      ws1.send(JSON.stringify({ type: "claim_request" }));
-      await waitForMessage(ws1);
+      await sendClaim(ws1, "d1");
       ws1.close();
 
       // Wait for disconnect + grace period + abandon
@@ -639,28 +585,20 @@ describe("mock-broker", () => {
       const ws1 = await connectWs(port, code, "d1", "worker-1");
       const ws2 = await connectWs(port, code, "d2", "worker-2");
 
-      ws1.send(JSON.stringify({
-        type: "sync",
-        todos: [{ path: "todo-A", priority: 1 }],
-      }));
-      await tick();
+      await sendSync(ws1, "d1", ["todo-A"]);
+      await sendClaim(ws1, "d1");
 
-      ws1.send(JSON.stringify({ type: "claim_request" }));
-      await waitForMessage(ws1);
-
-      ws2.send(JSON.stringify({ type: "sync", todos: [] }));
-      await tick();
+      await sendSync(ws2, "d2", []);
 
       // Send heartbeats to keep d1 alive past the timeout
       for (let i = 0; i < 3; i++) {
         await tick(80);
-        ws1.send(JSON.stringify({ type: "heartbeat" }));
+        ws1.send(JSON.stringify({ type: "heartbeat", daemonId: "d1", ts: new Date().toISOString() }));
       }
 
       // d2 should not be able to claim (d1 is still alive)
-      ws2.send(JSON.stringify({ type: "claim_request" }));
-      const result = await waitForMessage<{ type: string }>(ws2);
-      expect(result.type).toBe("no_work");
+      const result = await sendClaim(ws2, "d2");
+      expect(result.todoId).toBeNull();
 
       ws1.close();
       ws2.close();
@@ -673,19 +611,11 @@ describe("mock-broker", () => {
       const code = await createCrew(port);
       const ws = await connectWs(port, code, "d1", "worker-1");
 
-      ws.send(JSON.stringify({
-        type: "sync",
-        todos: [{ path: "todo-A", priority: 1 }],
-      }));
-      await tick();
+      await sendSync(ws, "d1", ["todo-A"]);
 
       // Sync same path again from different daemon — should not overwrite
       const ws2 = await connectWs(port, code, "d2", "worker-2");
-      ws2.send(JSON.stringify({
-        type: "sync",
-        todos: [{ path: "todo-A", priority: 1 }],
-      }));
-      await tick();
+      await sendSync(ws2, "d2", ["todo-A"]);
 
       // Creator should still be d1
       const crew = broker.getCrew(code);
@@ -703,16 +633,11 @@ describe("mock-broker", () => {
       const code = await createCrew(port);
       const ws = await connectWs(port, code, "d1", "worker-1");
 
-      ws.send(JSON.stringify({
-        type: "sync",
-        todos: [{ path: "todo-A", priority: 1 }],
-      }));
-      await tick();
+      await sendSync(ws, "d1", ["todo-A"]);
 
       // Try to complete without claiming
-      ws.send(JSON.stringify({ type: "complete", todoPath: "todo-A" }));
-      const err = await waitForMessage<{ type: string; message: string }>(ws);
-      expect(err.type).toBe("error");
+      const result = await sendComplete(ws, "d1", "todo-A");
+      expect(result.type).toBe("error");
 
       ws.close();
     });

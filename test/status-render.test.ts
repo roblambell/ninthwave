@@ -21,6 +21,7 @@ import {
   formatBatchProgress,
   formatSummary,
   formatStatusTable,
+  formatCrewStatusPanel,
   computeBlockedBy,
   sortByBlockedThenId,
   computeSessionMetrics,
@@ -1935,5 +1936,97 @@ describe("countdown text in footer", () => {
     });
     const footerText = stripAnsi(layout.footerLines.join("\n"));
     expect(footerText).toContain("Refreshing...");
+  });
+});
+
+// ── Crew mode TUI tests ──────────────────────────────────────────────
+
+describe("crew mode TUI rendering", () => {
+  it("formatCrewStatusPanel shows connected crew status", () => {
+    const output = formatCrewStatusPanel({
+      crewCode: "A7K-M2P",
+      daemonCount: 2,
+      availableCount: 3,
+      claimedCount: 5,
+      completedCount: 2,
+      connected: true,
+    });
+    const text = stripAnsi(output);
+    expect(text).toContain("Crew: A7K-M2P");
+    expect(text).toContain("Daemons: 2");
+    expect(text).toContain("Avail: 3");
+    expect(text).toContain("Claimed: 5");
+    expect(text).toContain("Done: 2");
+  });
+
+  it("formatCrewStatusPanel shows OFFLINE when disconnected", () => {
+    const output = formatCrewStatusPanel({
+      crewCode: "A7K-M2P",
+      daemonCount: 0,
+      availableCount: 0,
+      claimedCount: 0,
+      completedCount: 0,
+      connected: false,
+    });
+    const text = stripAnsi(output);
+    expect(text).toContain("OFFLINE");
+    expect(text).toContain("reconnecting");
+  });
+
+  it("formatStatusTable includes crew status panel when crewStatus is set", () => {
+    const items: StatusItem[] = [
+      { ...makeStatusItem(), daemonName: "laptop" },
+    ];
+    const output = formatStatusTable(items, 120, undefined, false, {
+      crewStatus: {
+        crewCode: "X1Y-Z2W",
+        daemonCount: 1,
+        availableCount: 0,
+        claimedCount: 1,
+        completedCount: 0,
+        connected: true,
+      },
+    });
+    const text = stripAnsi(output);
+    expect(text).toContain("Crew: X1Y-Z2W");
+    expect(text).toContain("DAEMON");
+    expect(text).toContain("laptop");
+  });
+
+  it("formatStatusTable shows DAEMON column with correct values", () => {
+    const items: StatusItem[] = [
+      { ...makeStatusItem({ id: "T-1", state: "implementing" }), daemonName: "mac-1" },
+      { ...makeStatusItem({ id: "T-2", state: "queued" }), daemonName: "--" },
+    ];
+    const output = formatStatusTable(items, 120, 5, false, {
+      crewStatus: {
+        crewCode: "ABC-DEF",
+        daemonCount: 2,
+        availableCount: 1,
+        claimedCount: 1,
+        completedCount: 0,
+        connected: true,
+      },
+    });
+    const text = stripAnsi(output);
+    expect(text).toContain("mac-1");
+    expect(text).toContain("--");
+  });
+
+  it("buildStatusLayout includes crew status in header", () => {
+    const items: StatusItem[] = [makeStatusItem()];
+    const layout = buildStatusLayout(items, 100, undefined, false, {
+      crewStatus: {
+        crewCode: "ABC-DEF",
+        daemonCount: 2,
+        availableCount: 3,
+        claimedCount: 1,
+        completedCount: 0,
+        connected: true,
+      },
+    });
+    const headerText = stripAnsi(layout.headerLines.join("\n"));
+    expect(headerText).toContain("Crew: ABC-DEF");
+    expect(headerText).toContain("DAEMON");
   });
 });
