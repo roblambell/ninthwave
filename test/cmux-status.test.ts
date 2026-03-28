@@ -67,12 +67,12 @@ describe("setProgressImpl", () => {
   it("calls cmux set-progress with correct args including label", () => {
     const runner = vi.fn(() => ok());
 
-    const result = setProgressImpl("workspace:1", 75, "3/4 tests", runner);
+    const result = setProgressImpl("workspace:1", 0.75, "3/4 tests", runner);
 
     expect(result).toBe(true);
     expect(runner).toHaveBeenCalledWith("cmux", [
       "set-progress",
-      "75",
+      "0.75",
       "--label",
       "3/4 tests",
       "--workspace",
@@ -83,12 +83,12 @@ describe("setProgressImpl", () => {
   it("omits --label when label is not provided", () => {
     const runner = vi.fn(() => ok());
 
-    const result = setProgressImpl("workspace:1", 50, undefined, runner);
+    const result = setProgressImpl("workspace:1", 0.5, undefined, runner);
 
     expect(result).toBe(true);
     expect(runner).toHaveBeenCalledWith("cmux", [
       "set-progress",
-      "50",
+      "0.5",
       "--workspace",
       "workspace:1",
     ]);
@@ -97,7 +97,7 @@ describe("setProgressImpl", () => {
   it("returns false on non-zero exit code", () => {
     const runner = vi.fn(() => fail("socket error"));
 
-    const result = setProgressImpl("workspace:3", 100, "Done", runner);
+    const result = setProgressImpl("workspace:3", 1, "Done", runner);
 
     expect(result).toBe(false);
   });

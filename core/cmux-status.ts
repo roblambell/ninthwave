@@ -36,7 +36,7 @@ export function setStatusImpl(
 }
 
 /**
- * Set progress value (0–100) and optional label for a cmux workspace.
+ * Set progress value (0.0–1.0) and optional label for a cmux workspace.
  * Best-effort — returns true on success, false on failure.
  *
  * Wraps: `cmux set-progress <value> [--label <label>] --workspace <ref>`

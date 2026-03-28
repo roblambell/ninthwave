@@ -33,7 +33,7 @@ export interface Multiplexer {
   closeWorkspace(ref: string): boolean;
   /** Set status text, icon, and color for a workspace. Best-effort — returns boolean success. */
   setStatus(ref: string, key: string, text: string, icon: string, color: string): boolean;
-  /** Set progress value (0–100) and optional label for a workspace. Best-effort — returns boolean success. */
+  /** Set progress value (0.0–1.0) and optional label for a workspace. Best-effort — returns boolean success. */
   setProgress(ref: string, value: number, label?: string): boolean;
 }
 

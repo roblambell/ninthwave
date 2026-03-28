@@ -423,15 +423,15 @@ export function syncWorkerDisplay(
 
     try {
       if (workerActiveStates.has(item.state)) {
-        // Worker is active: use heartbeat progress/label, default to 0% with no label
+        // Worker is active: use heartbeat progress/label, default to 0 with no label
         if (heartbeat) {
-          mux.setProgress(item.workspaceRef, Math.round(heartbeat.progress * 100), heartbeat.label);
+          mux.setProgress(item.workspaceRef, heartbeat.progress, heartbeat.label);
         } else {
           mux.setProgress(item.workspaceRef, 0);
         }
       } else {
-        // Worker is idle: 100%, no label — status pill carries the message
-        mux.setProgress(item.workspaceRef, 100);
+        // Worker is idle: 1.0 (complete), no label — status pill carries the message
+        mux.setProgress(item.workspaceRef, 1);
       }
     } catch { /* best-effort */ }
   }

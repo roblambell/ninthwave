@@ -2111,12 +2111,12 @@ describe("syncWorkerDisplay", () => {
     expect(mux.progressCalls).toHaveLength(1);
     expect(mux.progressCalls[0]).toEqual({
       ref: "workspace:1",
-      value: 70,
+      value: 0.7,
       label: "Almost done",
     });
   });
 
-  it("calls setProgress with 100 and no label for ci-pending state", () => {
+  it("calls setProgress with 1 and no label for ci-pending state", () => {
     const orch = new Orchestrator();
     orch.addItem(makeTodo("H-1-1"));
     orch.setState("H-1-1", "ci-pending");
@@ -2134,12 +2134,12 @@ describe("syncWorkerDisplay", () => {
     expect(mux.progressCalls).toHaveLength(1);
     expect(mux.progressCalls[0]).toEqual({
       ref: "workspace:1",
-      value: 100,
+      value: 1,
       label: undefined,
     });
   });
 
-  it("calls setProgress with 100 and no label for review-pending state", () => {
+  it("calls setProgress with 1 and no label for review-pending state", () => {
     const orch = new Orchestrator();
     orch.addItem(makeTodo("H-1-1"));
     orch.setState("H-1-1", "review-pending");
@@ -2156,12 +2156,12 @@ describe("syncWorkerDisplay", () => {
     expect(mux.progressCalls).toHaveLength(1);
     expect(mux.progressCalls[0]).toEqual({
       ref: "workspace:1",
-      value: 100,
+      value: 1,
       label: undefined,
     });
   });
 
-  it("calls setProgress with 100 and no label for merging state", () => {
+  it("calls setProgress with 1 and no label for merging state", () => {
     const orch = new Orchestrator();
     orch.addItem(makeTodo("H-1-1"));
     orch.setState("H-1-1", "merging");
@@ -2178,12 +2178,12 @@ describe("syncWorkerDisplay", () => {
     expect(mux.progressCalls).toHaveLength(1);
     expect(mux.progressCalls[0]).toEqual({
       ref: "workspace:1",
-      value: 100,
+      value: 1,
       label: undefined,
     });
   });
 
-  it("calls setProgress with 100 and no label for pr-open state", () => {
+  it("calls setProgress with 1 and no label for pr-open state", () => {
     const orch = new Orchestrator();
     orch.addItem(makeTodo("H-1-1"));
     orch.setState("H-1-1", "pr-open");
@@ -2200,7 +2200,7 @@ describe("syncWorkerDisplay", () => {
     expect(mux.progressCalls).toHaveLength(1);
     expect(mux.progressCalls[0]).toEqual({
       ref: "workspace:1",
-      value: 100,
+      value: 1,
       label: undefined,
     });
   });
