@@ -43,6 +43,7 @@ import {
   collectRunMetrics,
   writeRunMetrics,
   commitAnalyticsFiles,
+  commitFrictionFiles,
   parseCostSummary,
   parseWorkerTelemetry,
   type AnalyticsIO,
@@ -1033,6 +1034,41 @@ function handleRunComplete(
         ts: new Date().toISOString(),
         level: "warn",
         event: "analytics_commit_error",
+        error: msg,
+      });
+    }
+  }
+
+  // Friction: auto-commit friction entries to current branch
+  if (deps.analyticsCommit) {
+    try {
+      const frictionRelPath = ".ninthwave/friction";
+      const result = commitFrictionFiles(
+        ctx.projectRoot,
+        frictionRelPath,
+        deps.analyticsCommit,
+      );
+      if (result.committed) {
+        log({
+          ts: new Date().toISOString(),
+          level: "info",
+          event: "friction_committed",
+        });
+      } else {
+        log({
+          ts: new Date().toISOString(),
+          level: "debug",
+          event: "friction_commit_skipped",
+          reason: result.reason,
+        });
+      }
+    } catch (e: unknown) {
+      // Non-fatal — commit failure shouldn't block the orchestrator
+      const msg = e instanceof Error ? e.message : String(e);
+      log({
+        ts: new Date().toISOString(),
+        level: "warn",
+        event: "friction_commit_error",
         error: msg,
       });
     }
