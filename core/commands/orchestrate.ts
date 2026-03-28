@@ -1659,6 +1659,16 @@ export async function orchestrateLoop(
 export interface TuiState {
   scrollOffset: number;
   viewOptions: ViewOptions;
+  /** Current merge strategy (per-daemon, cycled via Shift+Tab). */
+  mergeStrategy: MergeStrategy;
+  /** Whether bypass is available in the cycle (from --dangerously-bypass). */
+  bypassEnabled: boolean;
+  /** First Ctrl+C pressed — waiting for confirmation. */
+  ctrlCPending: boolean;
+  /** Timestamp of the first Ctrl+C press (for 2s timeout). */
+  ctrlCTimestamp: number;
+  /** Called when the user cycles the merge strategy via Shift+Tab. */
+  onStrategyChange?: (strategy: MergeStrategy) => void;
   /** Called after any key that should trigger an immediate re-render. */
   onUpdate?: () => void;
 }
@@ -1690,14 +1700,55 @@ export function setupKeyboardShortcuts(
   stdin.resume();
   stdin.setEncoding("utf8");
 
+  // Timer for Ctrl+C double-tap timeout (clear ctrlCPending after ~2s)
+  let ctrlCTimer: ReturnType<typeof setTimeout> | null = null;
+
   const onData = (key: string) => {
-    if (key === "q" || key === "\x03") {
-      log({ ts: new Date().toISOString(), level: "info", event: "keyboard_quit", key: key === "\x03" ? "ctrl-c" : "q" });
+    // q still exits immediately (discoverable via ? help overlay)
+    if (key === "q") {
+      log({ ts: new Date().toISOString(), level: "info", event: "keyboard_quit", key: "q" });
+      abortController.abort();
+      return;
+    }
+
+    // Ctrl+C: double-tap to exit
+    if (key === "\x03") {
+      if (tuiState?.ctrlCPending && Date.now() - tuiState.ctrlCTimestamp < 2000) {
+        // Second press within 2s — exit
+        if (ctrlCTimer) clearTimeout(ctrlCTimer);
+        log({ ts: new Date().toISOString(), level: "info", event: "keyboard_quit", key: "ctrl-c" });
+        abortController.abort();
+        return;
+      }
+      if (tuiState) {
+        // First press — show confirmation footer
+        tuiState.ctrlCPending = true;
+        tuiState.ctrlCTimestamp = Date.now();
+        tuiState.viewOptions.ctrlCPending = true;
+        tuiState.onUpdate?.();
+        // Clear after ~2s
+        if (ctrlCTimer) clearTimeout(ctrlCTimer);
+        ctrlCTimer = setTimeout(() => {
+          tuiState.ctrlCPending = false;
+          tuiState.viewOptions.ctrlCPending = false;
+          tuiState.onUpdate?.();
+        }, 2000);
+        return;
+      }
+      // No tuiState — fall through to immediate abort
+      log({ ts: new Date().toISOString(), level: "info", event: "keyboard_quit", key: "ctrl-c" });
       abortController.abort();
       return;
     }
 
     if (!tuiState) return;
+
+    // Any non-Ctrl+C key clears the ctrlCPending state
+    if (tuiState.ctrlCPending) {
+      tuiState.ctrlCPending = false;
+      tuiState.viewOptions.ctrlCPending = false;
+      if (ctrlCTimer) { clearTimeout(ctrlCTimer); ctrlCTimer = null; }
+    }
 
     let handled = true;
     switch (key) {
@@ -1710,6 +1761,25 @@ export function setupKeyboardShortcuts(
       case "\x1b[B": // Down arrow
         tuiState.scrollOffset += 1;
         break;
+      case "\x1B[Z": { // Shift+Tab — cycle merge strategy
+        const strategies: MergeStrategy[] = tuiState.bypassEnabled
+          ? ["auto", "manual", "bypass"]
+          : ["auto", "manual"];
+        const currentIdx = strategies.indexOf(tuiState.mergeStrategy);
+        const nextIdx = (currentIdx + 1) % strategies.length;
+        const oldStrategy = tuiState.mergeStrategy;
+        tuiState.mergeStrategy = strategies[nextIdx]!;
+        tuiState.viewOptions.mergeStrategy = tuiState.mergeStrategy;
+        log({
+          ts: new Date().toISOString(),
+          level: "info",
+          event: "strategy_cycle",
+          oldStrategy,
+          newStrategy: tuiState.mergeStrategy,
+        });
+        tuiState.onStrategyChange?.(tuiState.mergeStrategy);
+        break;
+      }
       default:
         handled = false;
     }
@@ -1731,6 +1801,7 @@ export function setupKeyboardShortcuts(
   process.stdout.on("resize", onResize);
 
   return () => {
+    if (ctrlCTimer) clearTimeout(ctrlCTimer);
     stdin.removeListener("data", onData);
     process.stdout.removeListener("resize", onResize);
     if (stdin.isTTY && stdin.setRawMode) {
@@ -2450,6 +2521,14 @@ export async function cmdOrchestrate(
     viewOptions: {
       showBlockerDetail: false,
       sessionStartedAt: daemonStartedAt,
+      mergeStrategy: orch.config.mergeStrategy,
+    },
+    mergeStrategy: orch.config.mergeStrategy,
+    bypassEnabled: orch.config.bypassEnabled,
+    ctrlCPending: false,
+    ctrlCTimestamp: 0,
+    onStrategyChange: (strategy) => {
+      orch.setMergeStrategy(strategy);
     },
     // Immediate re-render on keypress (doesn't wait for poll cycle)
     onUpdate: () => {

@@ -31,6 +31,7 @@ import {
   buildStatusLayout,
   renderFullScreenFrame,
   clampScrollOffset,
+  strategyIndicator,
   formatCompactMetrics,
   formatUnifiedProgress,
   formatTitleMetrics,
@@ -1559,6 +1560,72 @@ describe("buildStatusLayout", () => {
     // Removed shortcuts should not appear
     expect(footerText).not.toContain("metrics");
     expect(footerText).not.toContain("help");
+  });
+
+  it("renders strategy indicator in footer when mergeStrategy is set", () => {
+    const items = [makeStatusItem({ id: "A-1" })];
+    const layout = buildStatusLayout(items, 80, undefined, false, {
+      mergeStrategy: "auto",
+    });
+    const footerText = layout.footerLines.map(stripAnsi).join("\n");
+    expect(footerText).toContain("› auto");
+    expect(footerText).toContain("shift+tab to cycle");
+    expect(footerText).toContain("? for help");
+    // Old shortcuts should NOT appear
+    expect(footerText).not.toContain("quit");
+    expect(footerText).not.toContain("scroll");
+  });
+
+  it("renders manual strategy with ‖ icon", () => {
+    const items = [makeStatusItem({ id: "A-1" })];
+    const layout = buildStatusLayout(items, 80, undefined, false, {
+      mergeStrategy: "manual",
+    });
+    const footerText = layout.footerLines.map(stripAnsi).join("\n");
+    expect(footerText).toContain("‖ manual");
+    expect(footerText).toContain("shift+tab to cycle");
+  });
+
+  it("renders bypass strategy with » icon", () => {
+    const items = [makeStatusItem({ id: "A-1" })];
+    const layout = buildStatusLayout(items, 80, undefined, false, {
+      mergeStrategy: "bypass",
+    });
+    const footerText = layout.footerLines.map(stripAnsi).join("\n");
+    expect(footerText).toContain("» bypass");
+    expect(footerText).toContain("shift+tab to cycle");
+  });
+
+  it("renders Ctrl+C confirmation footer when ctrlCPending is true", () => {
+    const items = [makeStatusItem({ id: "A-1" })];
+    const layout = buildStatusLayout(items, 80, undefined, false, {
+      mergeStrategy: "auto",
+      ctrlCPending: true,
+    });
+    const footerText = layout.footerLines.map(stripAnsi).join("\n");
+    expect(footerText).toContain("Press Ctrl-C again to exit");
+    // Strategy indicator should NOT appear during Ctrl+C pending
+    expect(footerText).not.toContain("shift+tab");
+  });
+});
+
+describe("strategyIndicator", () => {
+  it("returns correct icon and label for auto", () => {
+    const result = strategyIndicator("auto");
+    const plain = stripAnsi(result);
+    expect(plain).toBe("› auto");
+  });
+
+  it("returns correct icon and label for manual", () => {
+    const result = strategyIndicator("manual");
+    const plain = stripAnsi(result);
+    expect(plain).toBe("‖ manual");
+  });
+
+  it("returns correct icon and label for bypass", () => {
+    const result = strategyIndicator("bypass");
+    const plain = stripAnsi(result);
+    expect(plain).toBe("» bypass");
   });
 });
 

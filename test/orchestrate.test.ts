@@ -20,6 +20,7 @@ import {
   type OrchestrateLoopDeps,
   type CleanOrphanedDeps,
   type ParsedWatchArgs,
+  type TuiState,
 } from "../core/commands/orchestrate.ts";
 import {
   Orchestrator,
@@ -1869,6 +1870,185 @@ describe("setupKeyboardShortcuts", () => {
     const cleanup = setupKeyboardShortcuts(ac, () => {}, stdin);
     cleanup(); // should not throw
     expect(ac.signal.aborted).toBe(false);
+  });
+
+  // ── Shift+Tab strategy cycling ──────────────────────────────────────
+
+  it("Shift+Tab cycles merge strategy auto → manual", () => {
+    const ac = new AbortController();
+    const logs: LogEntry[] = [];
+    const stdin = mockStdin();
+    const changedStrategies: string[] = [];
+    const tuiState: TuiState = {
+      scrollOffset: 0,
+      viewOptions: { mergeStrategy: "auto" },
+      mergeStrategy: "auto",
+      bypassEnabled: false,
+      ctrlCPending: false,
+      ctrlCTimestamp: 0,
+      onStrategyChange: (s) => changedStrategies.push(s),
+    };
+
+    setupKeyboardShortcuts(ac, (e) => logs.push(e), stdin, tuiState);
+    (stdin as any)._emit("data", "\x1B[Z"); // Shift+Tab
+
+    expect(tuiState.mergeStrategy).toBe("manual");
+    expect(tuiState.viewOptions.mergeStrategy).toBe("manual");
+    expect(changedStrategies).toEqual(["manual"]);
+    expect(logs.some((l: any) => l.event === "strategy_cycle" && l.oldStrategy === "auto" && l.newStrategy === "manual")).toBe(true);
+  });
+
+  it("Shift+Tab wraps manual → auto when bypass disabled", () => {
+    const ac = new AbortController();
+    const stdin = mockStdin();
+    const tuiState: TuiState = {
+      scrollOffset: 0,
+      viewOptions: { mergeStrategy: "manual" },
+      mergeStrategy: "manual",
+      bypassEnabled: false,
+      ctrlCPending: false,
+      ctrlCTimestamp: 0,
+    };
+
+    setupKeyboardShortcuts(ac, () => {}, stdin, tuiState);
+    (stdin as any)._emit("data", "\x1B[Z");
+
+    expect(tuiState.mergeStrategy).toBe("auto");
+  });
+
+  it("Shift+Tab cycles through bypass when bypassEnabled", () => {
+    const ac = new AbortController();
+    const stdin = mockStdin();
+    const tuiState: TuiState = {
+      scrollOffset: 0,
+      viewOptions: { mergeStrategy: "auto" },
+      mergeStrategy: "auto",
+      bypassEnabled: true,
+      ctrlCPending: false,
+      ctrlCTimestamp: 0,
+    };
+
+    const cleanup = setupKeyboardShortcuts(ac, () => {}, stdin, tuiState);
+
+    (stdin as any)._emit("data", "\x1B[Z"); // auto → manual
+    expect(tuiState.mergeStrategy).toBe("manual");
+
+    (stdin as any)._emit("data", "\x1B[Z"); // manual → bypass
+    expect(tuiState.mergeStrategy).toBe("bypass");
+
+    (stdin as any)._emit("data", "\x1B[Z"); // bypass → auto (wrap)
+    expect(tuiState.mergeStrategy).toBe("auto");
+
+    cleanup();
+  });
+
+  it("bypass excluded from cycle when bypassEnabled is false", () => {
+    const ac = new AbortController();
+    const stdin = mockStdin();
+    const tuiState: TuiState = {
+      scrollOffset: 0,
+      viewOptions: { mergeStrategy: "auto" },
+      mergeStrategy: "auto",
+      bypassEnabled: false,
+      ctrlCPending: false,
+      ctrlCTimestamp: 0,
+    };
+
+    setupKeyboardShortcuts(ac, () => {}, stdin, tuiState);
+
+    // Cycle through all positions — should only visit auto and manual
+    const visited: string[] = [];
+    for (let i = 0; i < 4; i++) {
+      (stdin as any)._emit("data", "\x1B[Z");
+      visited.push(tuiState.mergeStrategy);
+    }
+    expect(visited).toEqual(["manual", "auto", "manual", "auto"]);
+  });
+
+  // ── Ctrl+C double-tap ──────────────────────────────────────────────
+
+  it("first Ctrl+C sets ctrlCPending, does not abort", () => {
+    const ac = new AbortController();
+    const stdin = mockStdin();
+    const tuiState: TuiState = {
+      scrollOffset: 0,
+      viewOptions: { mergeStrategy: "auto" },
+      mergeStrategy: "auto",
+      bypassEnabled: false,
+      ctrlCPending: false,
+      ctrlCTimestamp: 0,
+    };
+
+    const cleanup = setupKeyboardShortcuts(ac, () => {}, stdin, tuiState);
+
+    (stdin as any)._emit("data", "\x03");
+
+    expect(ac.signal.aborted).toBe(false);
+    expect(tuiState.ctrlCPending).toBe(true);
+    expect(tuiState.viewOptions.ctrlCPending).toBe(true);
+    expect(tuiState.ctrlCTimestamp).toBeGreaterThan(0);
+
+    cleanup();
+  });
+
+  it("second Ctrl+C within 2s exits", () => {
+    const ac = new AbortController();
+    const logs: LogEntry[] = [];
+    const stdin = mockStdin();
+    const tuiState: TuiState = {
+      scrollOffset: 0,
+      viewOptions: { mergeStrategy: "auto" },
+      mergeStrategy: "auto",
+      bypassEnabled: false,
+      ctrlCPending: false,
+      ctrlCTimestamp: 0,
+    };
+
+    const cleanup = setupKeyboardShortcuts(ac, (e) => logs.push(e), stdin, tuiState);
+
+    (stdin as any)._emit("data", "\x03"); // First
+    expect(ac.signal.aborted).toBe(false);
+
+    (stdin as any)._emit("data", "\x03"); // Second
+    expect(ac.signal.aborted).toBe(true);
+    expect(logs.some((l: any) => l.event === "keyboard_quit" && l.key === "ctrl-c")).toBe(true);
+
+    cleanup();
+  });
+
+  it("Ctrl+C without tuiState still aborts immediately", () => {
+    const ac = new AbortController();
+    const logs: LogEntry[] = [];
+    const stdin = mockStdin();
+
+    setupKeyboardShortcuts(ac, (e) => logs.push(e), stdin);
+    (stdin as any)._emit("data", "\x03");
+
+    expect(ac.signal.aborted).toBe(true);
+  });
+
+  it("other key clears ctrlCPending state", () => {
+    const ac = new AbortController();
+    const stdin = mockStdin();
+    const tuiState: TuiState = {
+      scrollOffset: 0,
+      viewOptions: { mergeStrategy: "auto" },
+      mergeStrategy: "auto",
+      bypassEnabled: false,
+      ctrlCPending: false,
+      ctrlCTimestamp: 0,
+    };
+
+    const cleanup = setupKeyboardShortcuts(ac, () => {}, stdin, tuiState);
+
+    (stdin as any)._emit("data", "\x03"); // First Ctrl+C
+    expect(tuiState.ctrlCPending).toBe(true);
+
+    (stdin as any)._emit("data", "d"); // Some other key
+    expect(tuiState.ctrlCPending).toBe(false);
+    expect(tuiState.viewOptions.ctrlCPending).toBe(false);
+
+    cleanup();
   });
 });
 

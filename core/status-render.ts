@@ -12,6 +12,7 @@ import {
   RESET,
 } from "./output.ts";
 import type { DaemonState } from "./daemon.ts";
+import type { MergeStrategy } from "./orchestrator.ts";
 
 // ─── Types ───────────────────────────────────────────────────────────────────
 
@@ -32,6 +33,31 @@ export interface ViewOptions {
   repoUrl?: string;
   /** Crew mode status info. When present, renders crew status panel and DAEMON column. */
   crewStatus?: CrewStatusInfo;
+  /** Current merge strategy — used for footer indicator in TUI mode. */
+  mergeStrategy?: MergeStrategy;
+  /** When true, footer shows "Press Ctrl-C again to exit" instead of strategy indicator. */
+  ctrlCPending?: boolean;
+}
+
+/**
+ * Return the styled icon badge for a merge strategy.
+ * Reused by the TUI footer and the help overlay (M-TUI-5).
+ *
+ * | Strategy | Icon | Color   |
+ * |----------|------|---------|
+ * | auto     | ›    | DIM     |
+ * | manual   | ‖    | YELLOW  |
+ * | bypass   | »    | RED     |
+ */
+export function strategyIndicator(strategy: MergeStrategy): string {
+  switch (strategy) {
+    case "auto":
+      return `${DIM}›${RESET} ${DIM}auto${RESET}`;
+    case "manual":
+      return `${YELLOW}‖${RESET} ${YELLOW}manual${RESET}`;
+    case "bypass":
+      return `${RED}»${RESET} ${RED}bypass${RESET}`;
+  }
 }
 
 export interface SessionMetrics {
@@ -1240,13 +1266,21 @@ export function buildStatusLayout(
     }
   }
 
-  // Footer: separator, unified progress line, shortcuts
+  // Footer: separator, unified progress line, strategy indicator
   footerLines.push(sep);
   footerLines.push(formatUnifiedProgress(items, termWidth));
 
-  // Always show keyboard shortcuts in full-screen mode
-  const shortcuts = `q quit  d deps  ↑/↓ scroll`;
-  footerLines.push(`  ${DIM}${shortcuts}${RESET}`);
+  // Strategy indicator footer (or Ctrl+C confirmation)
+  if (viewOptions?.ctrlCPending) {
+    footerLines.push(`  ${YELLOW}Press Ctrl-C again to exit${RESET}`);
+  } else if (viewOptions?.mergeStrategy) {
+    const badge = strategyIndicator(viewOptions.mergeStrategy);
+    footerLines.push(`  ${badge} ${DIM}(shift+tab to cycle) · ? for help${RESET}`);
+  } else {
+    // Fallback for non-TUI callers (e.g., `nw status`)
+    const shortcuts = `q quit  d deps  ↑/↓ scroll`;
+    footerLines.push(`  ${DIM}${shortcuts}${RESET}`);
+  }
 
   return { headerLines, itemLines, footerLines };
 }
