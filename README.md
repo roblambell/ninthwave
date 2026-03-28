@@ -1,7 +1,7 @@
 <h1 align="center">Ninthwave</h1>
 
 <p align="center">
-  <strong>From spec to merged PRs. Automatically.</strong>
+  <strong>Decompose. Run `nw`. Get merged PRs.</strong>
 </p>
 
 <p align="center">
@@ -16,8 +16,6 @@
 </p>
 
 Ninthwave orchestrates parallel AI coding sessions from markdown work items.
-
-Write specs. Run `nw`. Get merged PRs.
 
 ## How it works
 
