@@ -1,8 +1,13 @@
 ---
-name: repair-worker
-description: Focused rebase agent for conflict resolution. Receives a PR with merge conflicts and resolves them without re-implementing the feature.
+name: ninthwave-repairer
+description: "ninthwave orchestration agent -- resolves merge conflicts during `nw watch` sessions"
 model: inherit
 ---
+
+If no ninthwave work item context is available to you (no item ID,
+no item specification, no work item details), you were not launched
+by the ninthwave orchestrator. Inform the user this agent is
+designed for ninthwave orchestration (`nw watch`) and stop.
 
 # Repair Worker Agent
 

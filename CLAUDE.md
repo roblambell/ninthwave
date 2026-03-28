@@ -21,7 +21,7 @@ No build step — Bun executes TypeScript directly. Changes take effect immediat
 - `core/parser.ts` — reads `.ninthwave/work/` directory and domain normalization
 - `core/status-render.ts` — shared status table rendering for `ninthwave status --watch` and the daemon TUI
 - `skills/` — SKILL.md files for AI tool integration (/work, /decompose, etc.)
-- `agents/todo-worker.md` — worker agent prompt (copied to all tool directories by init)
+- `agents/implementer.md` — implementation agent prompt (copied to all tool directories by init)
 - `core/commands/init.ts` — project setup command (seeds config, symlinks, agents)
 
 ## Conventions

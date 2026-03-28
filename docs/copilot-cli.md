@@ -7,8 +7,8 @@ ninthwave works with GitHub Copilot CLI as a first-class AI tool alongside Claud
 Running `ninthwave setup` (or `nw setup`) automatically configures Copilot CLI support:
 
 1. **Agent files** are symlinked into `.github/agents/` with the `.agent.md` suffix:
-   - `.github/agents/todo-worker.agent.md` — worker agent for TODO implementation
-   - `.github/agents/review-worker.agent.md` — worker agent for PR reviews
+   - `.github/agents/ninthwave-implementer.agent.md` — implementation agent for TODO processing
+   - `.github/agents/ninthwave-reviewer.agent.md` — review agent for PR reviews
 
 2. **`.gitignore`** is updated to exclude the `.github/agents/` directory (these are developer-local symlinks, re-created by `nw setup`).
 
@@ -53,7 +53,7 @@ Copilot CLI receives its initial prompt differently from Claude Code and OpenCod
    #!/bin/bash
    PROMPT=$(cat '/tmp/nw-prompt-{id}-{timestamp}')
    rm -f '/tmp/nw-prompt-{id}-{timestamp}' '/tmp/nw-launch-{id}-{timestamp}.sh'
-   exec copilot --agent=todo-worker --allow-all -i "$PROMPT"
+   exec copilot --agent=ninthwave-implementer --allow-all -i "$PROMPT"
    ```
 4. The `-i` flag passes the prompt as initial input to Copilot CLI
 
@@ -75,14 +75,14 @@ Both temp files are deleted by the launcher script before the session starts —
 |--------|-------------|-------------|
 | **Prompt delivery** | `--append-system-prompt "$(cat file)"` | Launcher script with `-i` flag |
 | **Permissions** | `--permission-mode bypassPermissions` | `--allow-all` |
-| **Agent flag** | `--agent todo-worker` (space) | `--agent=todo-worker` (equals) |
+| **Agent flag** | `--agent ninthwave-implementer` (space) | `--agent=ninthwave-implementer` (equals) |
 | **Agent directory** | `.claude/agents/*.md` | `.github/agents/*.agent.md` |
 | **Session detection** | `CLAUDE_CODE_SESSION` env var | Process tree walk (no env var) |
 | **Post-launch send** | Not needed (prompt embedded) | Not needed (prompt embedded via `-i`) |
 
 ### What's the same
 
-- Workers follow the same agent prompt (`todo-worker.md` / `review-worker.md`)
+- Workers follow the same agent prompt (`implementer.md` / `reviewer.md`)
 - The orchestrator daemon treats all tools identically after launch
 - PR lifecycle, CI monitoring, and merge behavior are tool-agnostic
 - Skills (`/work`, `/decompose`, etc.) work across all tools
@@ -100,7 +100,7 @@ Both temp files are deleted by the launcher script before the session starts —
 
 ### Agent files missing
 
-**Symptom:** Copilot CLI doesn't know about the todo-worker or review-worker agents.
+**Symptom:** Copilot CLI doesn't know about the ninthwave-implementer or ninthwave-reviewer agents.
 
 **Fix:** Run `nw setup` to re-create the agent symlinks in `.github/agents/`.
 
@@ -119,7 +119,7 @@ Both temp files are deleted by the launcher script before the session starts —
 
 **Fix:**
 1. Check that `copilot` is installed and authenticated
-2. Try running the command manually: `copilot --agent=todo-worker --allow-all -i "hello"`
+2. Try running the command manually: `copilot --agent=ninthwave-implementer --allow-all -i "hello"`
 3. Check cmux/tmux logs for error output
 
 ### Init doesn't detect Copilot

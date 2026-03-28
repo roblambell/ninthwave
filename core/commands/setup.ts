@@ -224,14 +224,14 @@ const SKILLS = ["work", "decompose", "ninthwave-upgrade"];
 
 /** Agent source files available in the bundle's agents/ directory. */
 export const AGENT_SOURCES = [
-  "todo-worker.md",
-  "review-worker.md",
+  "implementer.md",
+  "reviewer.md",
 ];
 
 /** Human-readable descriptions for each agent file. */
 export const AGENT_DESCRIPTIONS: Record<string, string> = {
-  "todo-worker.md": "implementation agent for batch TODO processing",
-  "review-worker.md": "PR code review agent",
+  "implementer.md": "implementation agent for batch TODO processing",
+  "reviewer.md": "PR code review agent",
 };
 
 /** AI tool target directories where agent symlinks are created. */
@@ -243,7 +243,7 @@ export const AGENT_TARGET_DIRS = [
 
 /** Agent selection result: which agents to install and which tool directories to target. */
 export interface AgentSelection {
-  /** Agent source filenames to install (e.g., ["todo-worker.md", "review-worker.md"]) */
+  /** Agent source filenames to install (e.g., ["implementer.md", "reviewer.md"]) */
   agents: string[];
   /** Tool target directory indices into AGENT_TARGET_DIRS */
   toolDirs: { dir: string; suffix: string; tool: string }[];
@@ -301,7 +301,7 @@ export function discoverAgentSources(bundleDir: string): string[] {
 
 /** A single planned symlink operation. */
 export interface SymlinkPlan {
-  /** Relative path from project root (e.g., ".claude/agents/todo-worker.md") */
+  /** Relative path from project root (e.g., ".claude/agents/ninthwave-implementer.md") */
   displayPath: string;
   /** Absolute path where the symlink will be created */
   linkPath: string;
@@ -332,7 +332,7 @@ export function buildSymlinkPlan(
       const targetDir = join(projectDir, target.dir);
       const filename =
         target.suffix === ".agent.md"
-          ? `${baseName}.agent.md`
+          ? `ninthwave-${baseName}.agent.md`
           : agentFile;
       const linkPath = join(targetDir, filename);
       const relTarget = relative(targetDir, agentSource);

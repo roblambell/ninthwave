@@ -62,12 +62,12 @@ function createFakeBundle(dir: string): string {
   // Create agents directory
   mkdirSync(join(bundleDir, "agents"), { recursive: true });
   writeFileSync(
-    join(bundleDir, "agents", "todo-worker.md"),
-    "# Todo Worker Agent\n",
+    join(bundleDir, "agents", "implementer.md"),
+    "# Implementer Agent\n",
   );
   writeFileSync(
-    join(bundleDir, "agents", "review-worker.md"),
-    "# Review Worker Agent\n",
+    join(bundleDir, "agents", "reviewer.md"),
+    "# Reviewer Agent\n",
   );
 
   // Create VERSION file
@@ -238,8 +238,8 @@ describe("checkPrerequisites — gh auth warning", () => {
 
 describe("agent configuration", () => {
   it("includes all agent source files", () => {
-    expect(AGENT_SOURCES).toContain("todo-worker.md");
-    expect(AGENT_SOURCES).toContain("review-worker.md");
+    expect(AGENT_SOURCES).toContain("implementer.md");
+    expect(AGENT_SOURCES).toContain("reviewer.md");
   });
 
   it("has descriptions for all agent sources", () => {
@@ -329,8 +329,8 @@ describe("discoverAgentSources", () => {
 
     const agents = discoverAgentSources(bundleDir);
 
-    expect(agents).toContain("todo-worker.md");
-    expect(agents).toContain("review-worker.md");
+    expect(agents).toContain("implementer.md");
+    expect(agents).toContain("reviewer.md");
   });
 
   it("only returns agents that exist on disk", () => {
@@ -338,12 +338,12 @@ describe("discoverAgentSources", () => {
     const bundleDir = createFakeBundle(projectDir + "-bundle-parent");
     // Remove one agent
     const { unlinkSync: rmFile } = require("fs");
-    rmFile(join(bundleDir, "agents", "review-worker.md"));
+    rmFile(join(bundleDir, "agents", "reviewer.md"));
 
     const agents = discoverAgentSources(bundleDir);
 
-    expect(agents).toContain("todo-worker.md");
-    expect(agents).not.toContain("review-worker.md");
+    expect(agents).toContain("implementer.md");
+    expect(agents).not.toContain("reviewer.md");
   });
 });
 
@@ -355,14 +355,14 @@ describe("buildSymlinkPlan", () => {
     const bundleDir = createFakeBundle(projectDir + "-bundle-parent");
 
     const selection: AgentSelection = {
-      agents: ["todo-worker.md"],
+      agents: ["implementer.md"],
       toolDirs: [AGENT_TARGET_DIRS[0]!], // .claude/agents only
     };
 
     const plan = buildSymlinkPlan(projectDir, bundleDir, selection);
 
     expect(plan).toHaveLength(1);
-    expect(plan[0]!.displayPath).toBe(".claude/agents/todo-worker.md");
+    expect(plan[0]!.displayPath).toBe(".claude/agents/implementer.md");
     expect(plan[0]!.status).toBe("create");
   });
 
@@ -374,12 +374,12 @@ describe("buildSymlinkPlan", () => {
     const targetDir = join(projectDir, ".claude/agents");
     mkdirSync(targetDir, { recursive: true });
     const { relative: rel } = require("path");
-    const relTarget = rel(targetDir, join(bundleDir, "agents", "todo-worker.md"));
+    const relTarget = rel(targetDir, join(bundleDir, "agents", "implementer.md"));
     const { symlinkSync: symlink } = require("fs");
-    symlink(relTarget, join(targetDir, "todo-worker.md"));
+    symlink(relTarget, join(targetDir, "implementer.md"));
 
     const selection: AgentSelection = {
-      agents: ["todo-worker.md"],
+      agents: ["implementer.md"],
       toolDirs: [AGENT_TARGET_DIRS[0]!],
     };
 
@@ -396,10 +396,10 @@ describe("buildSymlinkPlan", () => {
     // Pre-create a regular file where symlink should be
     const targetDir = join(projectDir, ".claude/agents");
     mkdirSync(targetDir, { recursive: true });
-    writeFileSync(join(targetDir, "todo-worker.md"), "# Custom content\n");
+    writeFileSync(join(targetDir, "implementer.md"), "# Custom content\n");
 
     const selection: AgentSelection = {
-      agents: ["todo-worker.md"],
+      agents: ["implementer.md"],
       toolDirs: [AGENT_TARGET_DIRS[0]!],
     };
 
@@ -409,19 +409,19 @@ describe("buildSymlinkPlan", () => {
     expect(plan[0]!.status).toBe("replace");
   });
 
-  it("uses .agent.md suffix for GitHub Copilot target", () => {
+  it("uses ninthwave- prefixed .agent.md suffix for GitHub Copilot target", () => {
     const projectDir = setupTempRepo();
     const bundleDir = createFakeBundle(projectDir + "-bundle-parent");
 
     const selection: AgentSelection = {
-      agents: ["todo-worker.md"],
+      agents: ["implementer.md"],
       toolDirs: [AGENT_TARGET_DIRS[2]!], // .github/agents
     };
 
     const plan = buildSymlinkPlan(projectDir, bundleDir, selection);
 
     expect(plan).toHaveLength(1);
-    expect(plan[0]!.displayPath).toBe(".github/agents/todo-worker.agent.md");
+    expect(plan[0]!.displayPath).toBe(".github/agents/ninthwave-implementer.agent.md");
   });
 
   it("creates cross-product of agents × tools", () => {
@@ -429,7 +429,7 @@ describe("buildSymlinkPlan", () => {
     const bundleDir = createFakeBundle(projectDir + "-bundle-parent");
 
     const selection: AgentSelection = {
-      agents: ["todo-worker.md", "review-worker.md"],
+      agents: ["implementer.md", "reviewer.md"],
       toolDirs: [AGENT_TARGET_DIRS[0]!, AGENT_TARGET_DIRS[2]!], // .claude + .github
     };
 
@@ -437,10 +437,10 @@ describe("buildSymlinkPlan", () => {
 
     expect(plan).toHaveLength(4);
     const paths = plan.map((p) => p.displayPath);
-    expect(paths).toContain(".claude/agents/todo-worker.md");
-    expect(paths).toContain(".claude/agents/review-worker.md");
-    expect(paths).toContain(".github/agents/todo-worker.agent.md");
-    expect(paths).toContain(".github/agents/review-worker.agent.md");
+    expect(paths).toContain(".claude/agents/implementer.md");
+    expect(paths).toContain(".claude/agents/reviewer.md");
+    expect(paths).toContain(".github/agents/ninthwave-implementer.agent.md");
+    expect(paths).toContain(".github/agents/ninthwave-reviewer.agent.md");
   });
 });
 
@@ -452,18 +452,18 @@ describe("executeSymlinkPlan", () => {
     const bundleDir = createFakeBundle(projectDir + "-bundle-parent");
 
     const selection: AgentSelection = {
-      agents: ["todo-worker.md"],
+      agents: ["implementer.md"],
       toolDirs: [AGENT_TARGET_DIRS[0]!],
     };
 
     const plan = buildSymlinkPlan(projectDir, bundleDir, selection);
     executeSymlinkPlan(plan);
 
-    const linkPath = join(projectDir, ".claude/agents/todo-worker.md");
+    const linkPath = join(projectDir, ".claude/agents/implementer.md");
     expect(existsSync(linkPath)).toBe(true);
     expect(lstatSync(linkPath).isSymbolicLink()).toBe(true);
     const content = readFileSync(linkPath, "utf-8");
-    expect(content).toBe("# Todo Worker Agent\n");
+    expect(content).toBe("# Implementer Agent\n");
   });
 
   it("replaces regular files with symlinks", () => {
@@ -473,10 +473,10 @@ describe("executeSymlinkPlan", () => {
     // Pre-create a regular file
     const targetDir = join(projectDir, ".claude/agents");
     mkdirSync(targetDir, { recursive: true });
-    writeFileSync(join(targetDir, "todo-worker.md"), "# Custom content\n");
+    writeFileSync(join(targetDir, "implementer.md"), "# Custom content\n");
 
     const selection: AgentSelection = {
-      agents: ["todo-worker.md"],
+      agents: ["implementer.md"],
       toolDirs: [AGENT_TARGET_DIRS[0]!],
     };
 
@@ -485,10 +485,10 @@ describe("executeSymlinkPlan", () => {
 
     executeSymlinkPlan(plan);
 
-    const linkPath = join(projectDir, ".claude/agents/todo-worker.md");
+    const linkPath = join(projectDir, ".claude/agents/implementer.md");
     expect(lstatSync(linkPath).isSymbolicLink()).toBe(true);
     const content = readFileSync(linkPath, "utf-8");
-    expect(content).toBe("# Todo Worker Agent\n");
+    expect(content).toBe("# Implementer Agent\n");
   });
 
   it("skips entries with status 'exists'", () => {
@@ -499,12 +499,12 @@ describe("executeSymlinkPlan", () => {
     const targetDir = join(projectDir, ".claude/agents");
     mkdirSync(targetDir, { recursive: true });
     const { relative: rel } = require("path");
-    const relTarget = rel(targetDir, join(bundleDir, "agents", "todo-worker.md"));
+    const relTarget = rel(targetDir, join(bundleDir, "agents", "implementer.md"));
     const { symlinkSync: symlink } = require("fs");
-    symlink(relTarget, join(targetDir, "todo-worker.md"));
+    symlink(relTarget, join(targetDir, "implementer.md"));
 
     const selection: AgentSelection = {
-      agents: ["todo-worker.md"],
+      agents: ["implementer.md"],
       toolDirs: [AGENT_TARGET_DIRS[0]!],
     };
 
@@ -515,8 +515,8 @@ describe("executeSymlinkPlan", () => {
     executeSymlinkPlan(plan);
 
     // Symlink should still be there and correct
-    expect(lstatSync(join(targetDir, "todo-worker.md")).isSymbolicLink()).toBe(true);
-    expect(readlinkSync(join(targetDir, "todo-worker.md"))).toBe(relTarget);
+    expect(lstatSync(join(targetDir, "implementer.md")).isSymbolicLink()).toBe(true);
+    expect(readlinkSync(join(targetDir, "implementer.md"))).toBe(relTarget);
   });
 });
 
@@ -538,8 +538,8 @@ describe("interactiveAgentSelection", () => {
     });
 
     expect(selection).not.toBeNull();
-    expect(selection!.agents).toContain("todo-worker.md");
-    expect(selection!.agents).toContain("review-worker.md");
+    expect(selection!.agents).toContain("implementer.md");
+    expect(selection!.agents).toContain("reviewer.md");
     // No tools detected → falls back to all tools
     expect(selection!.toolDirs).toHaveLength(AGENT_TARGET_DIRS.length);
   });
@@ -564,8 +564,8 @@ describe("interactiveAgentSelection", () => {
     const projectDir = setupTempRepo();
     const bundleDir = createFakeBundle(projectDir + "-bundle-parent");
 
-    // Only select todo-worker
-    const stubCheckbox: CheckboxPromptFn = async () => ["todo-worker.md"];
+    // Only select implementer
+    const stubCheckbox: CheckboxPromptFn = async () => ["implementer.md"];
     const stubConfirm: ConfirmPromptFn = async () => true;
 
     const selection = await interactiveAgentSelection(projectDir, bundleDir, {
@@ -574,7 +574,7 @@ describe("interactiveAgentSelection", () => {
     });
 
     expect(selection).not.toBeNull();
-    expect(selection!.agents).toEqual(["todo-worker.md"]);
+    expect(selection!.agents).toEqual(["implementer.md"]);
   });
 
   it("uses detected tools when present", async () => {
@@ -610,7 +610,7 @@ describe("interactiveAgentSelection", () => {
         mkdirSync(targetDir, { recursive: true });
         const { relative: rel } = require("path");
         const relTarget = rel(targetDir, join(bundleDir, "agents", agent));
-        const filename = target.suffix === ".agent.md" ? `${baseName}.agent.md` : agent;
+        const filename = target.suffix === ".agent.md" ? `ninthwave-${baseName}.agent.md` : agent;
         const { symlinkSync: symlink } = require("fs");
         symlink(relTarget, join(targetDir, filename));
       }

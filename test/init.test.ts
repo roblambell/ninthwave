@@ -77,12 +77,12 @@ function createFakeBundle(dir: string): string {
   // Create agents directory
   mkdirSync(join(bundleDir, "agents"), { recursive: true });
   writeFileSync(
-    join(bundleDir, "agents", "todo-worker.md"),
-    "# Todo Worker Agent\n",
+    join(bundleDir, "agents", "implementer.md"),
+    "# Implementer Agent\n",
   );
   writeFileSync(
-    join(bundleDir, "agents", "review-worker.md"),
-    "# Review Worker Agent\n",
+    join(bundleDir, "agents", "reviewer.md"),
+    "# Reviewer Agent\n",
   );
 
   // Create VERSION file
@@ -742,13 +742,13 @@ describe("initProject", () => {
 
     // Agents copied
     expect(
-      existsSync(join(projectDir, ".claude/agents/todo-worker.md")),
+      existsSync(join(projectDir, ".claude/agents/implementer.md")),
     ).toBe(true);
     expect(
-      existsSync(join(projectDir, ".opencode/agents/todo-worker.md")),
+      existsSync(join(projectDir, ".opencode/agents/implementer.md")),
     ).toBe(true);
     expect(
-      existsSync(join(projectDir, ".github/agents/todo-worker.agent.md")),
+      existsSync(join(projectDir, ".github/agents/ninthwave-implementer.agent.md")),
     ).toBe(true);
 
     // Detection result returned
@@ -919,7 +919,7 @@ describe("initProject — symlink gitignore entries", () => {
       writeFileSync(join(skillDir, "SKILL.md"), `# ${skill}\n`);
     }
     mkdirSync(join(projectDir, "agents"), { recursive: true });
-    writeFileSync(join(projectDir, "agents", "todo-worker.md"), "# Todo Worker\n");
+    writeFileSync(join(projectDir, "agents", "implementer.md"), "# Implementer\n");
 
     // Initialize the projectDir as a git repo for version tracking
     const { spawnSync } = require("child_process");
@@ -1662,12 +1662,12 @@ describe("initProject — agent selection", () => {
     initProject(projectDir, bundleDir, deps);
 
     // All agents should be in all tool dirs
-    expect(existsSync(join(projectDir, ".claude/agents/todo-worker.md"))).toBe(true);
-    expect(existsSync(join(projectDir, ".opencode/agents/todo-worker.md"))).toBe(true);
-    expect(existsSync(join(projectDir, ".github/agents/todo-worker.agent.md"))).toBe(true);
-    expect(existsSync(join(projectDir, ".claude/agents/review-worker.md"))).toBe(true);
-    expect(existsSync(join(projectDir, ".opencode/agents/review-worker.md"))).toBe(true);
-    expect(existsSync(join(projectDir, ".github/agents/review-worker.agent.md"))).toBe(true);
+    expect(existsSync(join(projectDir, ".claude/agents/implementer.md"))).toBe(true);
+    expect(existsSync(join(projectDir, ".opencode/agents/implementer.md"))).toBe(true);
+    expect(existsSync(join(projectDir, ".github/agents/ninthwave-implementer.agent.md"))).toBe(true);
+    expect(existsSync(join(projectDir, ".claude/agents/reviewer.md"))).toBe(true);
+    expect(existsSync(join(projectDir, ".opencode/agents/reviewer.md"))).toBe(true);
+    expect(existsSync(join(projectDir, ".github/agents/ninthwave-reviewer.agent.md"))).toBe(true);
   });
 
   it("uses opts.agentSelection when provided", () => {
@@ -1681,22 +1681,22 @@ describe("initProject — agent selection", () => {
 
     const opts: InitProjectOpts = {
       agentSelection: {
-        agents: ["todo-worker.md"],
+        agents: ["implementer.md"],
         toolDirs: [AGENT_TARGET_DIRS[0]!], // .claude/agents only
       },
     };
 
     initProject(projectDir, bundleDir, deps, opts);
 
-    // Should have todo-worker in .claude/agents
-    expect(existsSync(join(projectDir, ".claude/agents/todo-worker.md"))).toBe(true);
+    // Should have implementer in .claude/agents
+    expect(existsSync(join(projectDir, ".claude/agents/implementer.md"))).toBe(true);
 
     // Should NOT have agents in other tool dirs
-    expect(existsSync(join(projectDir, ".opencode/agents/todo-worker.md"))).toBe(false);
-    expect(existsSync(join(projectDir, ".github/agents/todo-worker.agent.md"))).toBe(false);
+    expect(existsSync(join(projectDir, ".opencode/agents/implementer.md"))).toBe(false);
+    expect(existsSync(join(projectDir, ".github/agents/ninthwave-implementer.agent.md"))).toBe(false);
 
-    // Should NOT have review-worker
-    expect(existsSync(join(projectDir, ".claude/agents/review-worker.md"))).toBe(false);
+    // Should NOT have reviewer
+    expect(existsSync(join(projectDir, ".claude/agents/reviewer.md"))).toBe(false);
   });
 
   it("installs no agents when selection is empty", () => {
@@ -1738,7 +1738,7 @@ describe("initProject — agent selection", () => {
     for (const agent of AGENT_SOURCES) {
       const baseName = agent.replace(/\.md$/, "");
       for (const target of AGENT_TARGET_DIRS) {
-        const filename = target.suffix === ".agent.md" ? `${baseName}.agent.md` : agent;
+        const filename = target.suffix === ".agent.md" ? `ninthwave-${baseName}.agent.md` : agent;
         const linkPath = join(projectDir, target.dir, filename);
         expect(lstatSync(linkPath).isSymbolicLink()).toBe(true);
 

@@ -188,9 +188,9 @@ Each TODO item gets an isolated AI coding session managed as follows:
 
 1. `git worktree add .worktrees/todo-<ID> -b todo/<ID>` — isolated checkout.
 2. `allocatePartition(id)` — assigns a unique port range and DB prefix for test isolation.
-3. `seedAgentFiles(worktreePath, hubRoot)` — copies `todo-worker.md` to `.claude/agents/`, `.opencode/agents/`, `.github/agents/` inside the worktree.
+3. `seedAgentFiles(worktreePath, hubRoot)` — copies `implementer.md` to `.claude/agents/`, `.opencode/agents/`, `.github/agents/` inside the worktree.
 4. `mux.launchWorkspace(worktreePath, command, todoId)` — spawns the session; returns a workspace ref (e.g., `"workspace:1"` for cmux, `"nw-H-1-1-3"` for tmux).
-5. `sendWithReadyWait(mux, ref, prompt, ...)` — waits for the AI prompt, sends the todo-worker instructions, verifies the worker starts processing.
+5. `sendWithReadyWait(mux, ref, prompt, ...)` — waits for the AI prompt, sends the implementer instructions, verifies the worker starts processing.
 
 The workspace ref is stored in `OrchestratorItem.workspaceRef` for later messaging and cleanup.
 

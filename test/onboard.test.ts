@@ -241,8 +241,8 @@ describe("onboard", () => {
 
     mkdirSync(join(bundleDir, "agents"), { recursive: true });
     writeFileSync(
-      join(bundleDir, "agents", "todo-worker.md"),
-      "# Todo Worker Agent\n",
+      join(bundleDir, "agents", "implementer.md"),
+      "# Implementer Agent\n",
     );
 
     const { spawnSync } = require("child_process");

@@ -990,7 +990,7 @@ describe("extractTodoText", () => {
 describe("launchAiSession agentName", () => {
   afterEach(() => cleanupTempRepos());
 
-  it("defaults agentName to todo-worker when not specified", () => {
+  it("defaults agentName to ninthwave-implementer when not specified", () => {
     const mockMux = createMockMux();
     const repo = setupTempRepo();
     const promptFile = join(repo, "prompt.txt");
@@ -1001,7 +1001,7 @@ describe("launchAiSession agentName", () => {
     const launchCall = mockMux.launchWorkspace.mock.calls[0];
     expect(launchCall).toBeDefined();
     const cmd = launchCall[1] as string;
-    expect(cmd).toContain("--agent todo-worker");
+    expect(cmd).toContain("--agent ninthwave-implementer");
   });
 
   it("passes custom agentName to claude command", () => {
@@ -1011,14 +1011,14 @@ describe("launchAiSession agentName", () => {
     writeFileSync(promptFile, "test prompt");
 
     launchAiSession("claude", repo, "T-1", "Test", promptFile, mockMux, {
-      agentName: "review-worker",
+      agentName: "ninthwave-reviewer",
     });
 
     const launchCall = mockMux.launchWorkspace.mock.calls[0];
     expect(launchCall).toBeDefined();
     const cmd = launchCall[1] as string;
-    expect(cmd).toContain("--agent review-worker");
-    expect(cmd).not.toContain("--agent todo-worker");
+    expect(cmd).toContain("--agent ninthwave-reviewer");
+    expect(cmd).not.toContain("--agent ninthwave-implementer");
   });
 
   it("passes custom agentName to opencode command", () => {
@@ -1028,13 +1028,13 @@ describe("launchAiSession agentName", () => {
     writeFileSync(promptFile, "test prompt");
 
     launchAiSession("opencode", repo, "T-1", "Test", promptFile, mockMux, {
-      agentName: "review-worker",
+      agentName: "ninthwave-reviewer",
     });
 
     const launchCall = mockMux.launchWorkspace.mock.calls[0];
     expect(launchCall).toBeDefined();
     const cmd = launchCall[1] as string;
-    expect(cmd).toContain("--agent review-worker");
+    expect(cmd).toContain("--agent ninthwave-reviewer");
   });
 
   it("passes custom agentName to copilot command", () => {
@@ -1044,7 +1044,7 @@ describe("launchAiSession agentName", () => {
     writeFileSync(promptFile, "test prompt");
 
     launchAiSession("copilot", repo, "T-1", "Test", promptFile, mockMux, {
-      agentName: "review-worker",
+      agentName: "ninthwave-reviewer",
     });
 
     const launchCall = mockMux.launchWorkspace.mock.calls[0];
@@ -1053,7 +1053,7 @@ describe("launchAiSession agentName", () => {
     // cmd is a launcher script path in /tmp
     expect(cmd).toMatch(/^\/tmp\/nw-launch-.*\.sh$/);
     const script = readFileSync(cmd, "utf-8");
-    expect(script).toContain("--agent=review-worker");
+    expect(script).toContain("--agent=ninthwave-reviewer");
     expect(script).toContain("--allow-all");
     expect(script).toContain("-i ");
   });
@@ -1089,7 +1089,7 @@ describe("launchSingleItem agentName default", () => {
     cleanupTempRepos();
   });
 
-  it("launches with --agent todo-worker by default", async () => {
+  it("launches with --agent ninthwave-implementer by default", async () => {
     const mockMux = createMockMux();
     const repo = setupTempRepo();
     const workDir = setupTodosDir(repo);
@@ -1104,7 +1104,7 @@ describe("launchSingleItem agentName default", () => {
     const launchCall = mockMux.launchWorkspace.mock.calls[0];
     expect(launchCall).toBeDefined();
     const cmd = launchCall[1] as string;
-    expect(cmd).toContain("--agent todo-worker");
+    expect(cmd).toContain("--agent ninthwave-implementer");
   });
 });
 
@@ -1136,10 +1136,10 @@ describe("launchReviewWorker", () => {
     expect(createWorktree).not.toHaveBeenCalled();
     // Should NOT call fetchOrigin (no branch to fetch)
     expect(fetchOrigin).not.toHaveBeenCalled();
-    // Should launch with review-worker agent
+    // Should launch with ninthwave-reviewer agent
     const launchCall = mockMux.launchWorkspace.mock.calls[0];
     const cmd = launchCall[1] as string;
-    expect(cmd).toContain("--agent review-worker");
+    expect(cmd).toContain("--agent ninthwave-reviewer");
     // Info message should mention off mode
     expect(result).toContain("off mode");
   });
@@ -1252,7 +1252,7 @@ describe("launchReviewWorker", () => {
     expect(sentPrompt).not.toContain("BASE_BRANCH:");
   });
 
-  it("launches with --agent review-worker for all modes", async () => {
+  it("launches with --agent ninthwave-reviewer for all modes", async () => {
     const mockMux = createMockMux();
     const repo = setupTempRepo();
 
@@ -1265,8 +1265,8 @@ describe("launchReviewWorker", () => {
       const launchCall = mockMux.launchWorkspace.mock.calls[0];
       expect(launchCall).toBeDefined();
       const cmd = launchCall[1] as string;
-      expect(cmd).toContain("--agent review-worker");
-      expect(cmd).not.toContain("--agent todo-worker");
+      expect(cmd).toContain("--agent ninthwave-reviewer");
+      expect(cmd).not.toContain("--agent ninthwave-implementer");
     }
   });
 

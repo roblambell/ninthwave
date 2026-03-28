@@ -1,8 +1,13 @@
 ---
-name: todo-worker
-description: Focused implementation agent for batch TODO processing. Receives a single TODO item and implements it, tests it, reviews it, and opens a PR.
+name: ninthwave-implementer
+description: "ninthwave orchestration agent -- implements work items during `nw watch` sessions"
 model: inherit
 ---
+
+If no ninthwave work item context is available to you (no item ID,
+no item specification, no work item details), you were not launched
+by the ninthwave orchestrator. Inform the user this agent is
+designed for ninthwave orchestration (`nw watch`) and stop.
 
 # TODO Worker Agent
 

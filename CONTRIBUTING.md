@@ -58,7 +58,7 @@ ninthwave/                          # The repo IS the installable bundle
 │   ├── decompose/SKILL.md          # /decompose — feature breakdown
 │   └── ninthwave-upgrade/SKILL.md  # /ninthwave-upgrade — self-update
 ├── agents/
-│   └── todo-worker.md              # Copied to all tool agent directories by setup
+│   └── implementer.md              # Copied to all tool agent directories by setup
 └── README.md
 ```
 
@@ -78,13 +78,13 @@ ninthwave/                          # The repo IS the installable bundle
 | `core/commands/setup.ts` | The `ninthwave setup` command. Creates project-level config: `.ninthwave/` dir, skill symlinks, agent copies. |
 | `skills/work/SKILL.md` | The orchestration skill. Drives the 5-phase workflow (select, launch, monitor, merge, finalize). |
 | `skills/decompose/SKILL.md` | Breaks feature specs into PR-sized work items with dependency batches. |
-| `agents/todo-worker.md` | The worker prompt. Each AI session follows this: read the TODO, read project conventions, implement, test, review, PR, wait for orchestrator. |
+| `agents/implementer.md` | The implementation agent prompt. Each AI session follows this: read the TODO, read project conventions, implement, test, review, PR, wait for orchestrator. |
 
 ### How the Pieces Fit
 
 1. **User runs `/decompose`** — the decompose skill explores the codebase, breaks the feature into work items, writes them to `.ninthwave/work/`
 2. **User runs `/work`** — the work skill reads `.ninthwave/work/`, presents selection options, then calls `ninthwave start` to create worktrees and launch AI sessions via cmux
-3. **`ninthwave start`** auto-detects the AI tool, creates a git worktree per item, allocates a partition for port/DB isolation, and launches each session with the `todo-worker` agent
+3. **`ninthwave start`** auto-detects the AI tool, creates a git worktree per item, allocates a partition for port/DB isolation, and launches each session with the `ninthwave-implementer` agent
 4. **Each worker session** reads `CLAUDE.md`/`AGENTS.md` for project conventions, implements the TODO, runs tests, creates a PR, then idles waiting for orchestrator messages
 5. **The orchestrator** (the `/work` skill session) monitors PR status, dispatches CI fixes and review feedback to workers via `cmux send`, merges PRs, rebases dependents, and handles version bumping
 

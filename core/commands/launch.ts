@@ -78,7 +78,7 @@ export interface LaunchResult {
 /** Agent files to seed into worktrees (matches setup.ts AGENT_SOURCES). */
 const AGENT_FILES: { source: string; targets: { dir: string; suffix: string }[] }[] = [
   {
-    source: "todo-worker.md",
+    source: "implementer.md",
     targets: [
       { dir: ".claude/agents", suffix: ".md" },
       { dir: ".opencode/agents", suffix: ".md" },
@@ -86,7 +86,7 @@ const AGENT_FILES: { source: string; targets: { dir: string; suffix: string }[] 
     ],
   },
   {
-    source: "review-worker.md",
+    source: "reviewer.md",
     targets: [
       { dir: ".claude/agents", suffix: ".md" },
       { dir: ".opencode/agents", suffix: ".md" },
@@ -111,7 +111,7 @@ export function seedAgentFiles(worktreePath: string, hubRoot: string): string[] 
     const baseName = agent.source.replace(/\.md$/, "");
 
     for (const target of agent.targets) {
-      const filename = target.suffix === ".agent.md" ? `${baseName}.agent.md` : agent.source;
+      const filename = target.suffix === ".agent.md" ? `ninthwave-${baseName}.agent.md` : agent.source;
       const destPath = join(worktreePath, target.dir, filename);
 
       if (existsSync(destPath)) continue;
@@ -177,8 +177,8 @@ export function detectAiTool(): string {
 /**
  * Launch an AI coding session for a single TODO item.
  *
- * @param options.agentName - The agent prompt to use (default: "todo-worker").
- *   Pass "review-worker" for review sessions, or any future agent type.
+ * @param options.agentName - The agent prompt to use (default: "ninthwave-implementer").
+ *   Pass "ninthwave-reviewer" for review sessions, or any future agent type.
  */
 export function launchAiSession(
   tool: string,
@@ -189,7 +189,7 @@ export function launchAiSession(
   mux: Multiplexer,
   options: { projectRoot?: string; agentName?: string } = {},
 ): string | null {
-  const agentName = options.agentName ?? "todo-worker";
+  const agentName = options.agentName ?? "ninthwave-implementer";
   const wsName = `${id} ${safeTitle}`;
   let cmd = "";
   let initialPrompt = "Start";
@@ -709,7 +709,7 @@ ${baseBranchLine}${securityLine}`;
       safeTitle,
       promptFile,
       mux,
-      { projectRoot: repoRoot, agentName: "review-worker" },
+      { projectRoot: repoRoot, agentName: "ninthwave-reviewer" },
     );
     if (!workspaceRef) return null;
     return { worktreePath, workspaceRef };
@@ -770,7 +770,7 @@ PROJECT_ROOT: ${repoRoot}`;
       safeTitle,
       promptFile,
       mux,
-      { projectRoot: repoRoot, agentName: "repair-worker" },
+      { projectRoot: repoRoot, agentName: "ninthwave-repairer" },
     );
     if (!workspaceRef) return null;
     return { workspaceRef };
