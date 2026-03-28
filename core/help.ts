@@ -29,6 +29,7 @@ import { cmdCiFailures } from "./commands/ci.ts";
 import { cmdVersionBump } from "./commands/version-bump.ts";
 import { cmdInit } from "./commands/init.ts";
 import { cmdWatch } from "./commands/orchestrate.ts";
+import { cmdCrew } from "./commands/crew.ts";
 import { cmdReconcile } from "./commands/reconcile.ts";
 import { cmdAnalytics } from "./commands/analytics.ts";
 import { cmdHistory } from "./commands/history.ts";
@@ -134,6 +135,22 @@ export const COMMAND_REGISTRY: ReadonlyArray<CommandEntry> = [
       "nw watch",
       "nw watch --items H-FOO-1 H-FOO-2",
       "nw watch --daemon",
+    ],
+  },
+  {
+    name: "crew",
+    usage: "crew [<crew-code>|create|join <crew-code>]",
+    description: "Join or create a crew for collaborative orchestration",
+    group: "workflow",
+    needsRoot: true,
+    needsWork: true,
+    handler: async (ctx) => { await cmdCrew(ctx.args, ctx.workDir, ctx.worktreeDir, ctx.projectRoot); },
+    flags: {},
+    examples: [
+      "nw crew",
+      "nw crew abc-xyz",
+      "nw crew create",
+      "nw crew join abc-xyz",
     ],
   },
   {
