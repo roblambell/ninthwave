@@ -41,6 +41,7 @@ import {
   type ViewOptions,
   type SessionMetrics,
   type FrameLayout,
+  renderHelpOverlay,
 } from "../core/status-render.ts";
 import {
   detectTuiMode,
@@ -2145,5 +2146,136 @@ describe("crew mode TUI rendering", () => {
     const headerText = stripAnsi(layout.headerLines.join("\n"));
     expect(headerText).toContain("Crew: ABC-DEF");
     expect(headerText).toContain("DAEMON");
+  });
+});
+
+// ── Help overlay ──────────────────────────────────────────────────────────────
+
+describe("renderHelpOverlay", () => {
+  it("returns expected number of lines matching termRows", () => {
+    const lines = renderHelpOverlay(80, 30);
+    expect(lines.length).toBe(30);
+  });
+
+  it("box-drawing characters are correct (top-left, top-right, bottom-left, bottom-right)", () => {
+    const lines = renderHelpOverlay(80, 30);
+    const nonEmpty = lines.filter((l) => l.trim().length > 0);
+    const plain = nonEmpty.map(stripAnsi);
+    // First non-empty line should be the top border
+    expect(plain[0]).toMatch(/┌─+┐/);
+    // Last non-empty line should be the bottom border
+    expect(plain[plain.length - 1]).toMatch(/└─+┘/);
+  });
+
+  it("content fits within termWidth", () => {
+    const termWidth = 60;
+    const lines = renderHelpOverlay(termWidth, 30);
+    for (const line of lines) {
+      const displayLen = stripAnsi(line).length;
+      expect(displayLen).toBeLessThanOrEqual(termWidth);
+    }
+  });
+
+  it("contains key help sections", () => {
+    const lines = renderHelpOverlay(100, 40);
+    const text = stripAnsi(lines.join("\n"));
+    expect(text).toContain("Metrics");
+    expect(text).toContain("Lead time");
+    expect(text).toContain("Throughput");
+    expect(text).toContain("Session");
+    expect(text).toContain("Merge Strategies");
+    expect(text).toContain("auto");
+    expect(text).toContain("manual");
+    expect(text).toContain("bypass");
+    expect(text).toContain("Keyboard Shortcuts");
+    expect(text).toContain("Shift+Tab");
+    expect(text).toContain("ninthwave");
+    expect(text).toContain("Apache-2.0");
+    expect(text).toContain("ninthwave.dev");
+  });
+
+  it("strategy section uses strategyIndicator icons", () => {
+    const lines = renderHelpOverlay(100, 40);
+    const text = stripAnsi(lines.join("\n"));
+    // strategyIndicator uses these icons
+    expect(text).toMatch(/›.*auto/);
+    expect(text).toMatch(/‖.*manual/);
+    expect(text).toMatch(/».*bypass/);
+  });
+
+  it("documents all keyboard shortcuts removed from footer in H-TUI-4", () => {
+    const lines = renderHelpOverlay(100, 40);
+    const text = stripAnsi(lines.join("\n"));
+    // These shortcuts were previously in the footer before H-TUI-4:
+    expect(text).toContain("q");        // quit
+    expect(text).toContain("d");        // deps toggle
+    expect(text).toContain("Up/Down");  // scroll
+    expect(text).toContain("Ctrl+C");   // double-tap quit
+    expect(text).toContain("Escape");   // dismiss help
+    expect(text).toContain("?");        // toggle help
+  });
+
+  it("help content is ASCII-only except strategy icons", () => {
+    const lines = renderHelpOverlay(100, 40);
+    const text = stripAnsi(lines.join("\n"));
+    // Remove the three known strategy icon chars and box-drawing chars
+    const cleaned = text.replace(/[›‖»┌┐└┘─│]/g, "");
+    // All remaining chars should be ASCII (0x00–0x7F)
+    for (const ch of cleaned) {
+      expect(ch.charCodeAt(0)).toBeLessThanOrEqual(0x7F);
+    }
+  });
+});
+
+// ── renderTuiFrame with showHelp ──────────────────────────────────────────────
+
+describe("renderTuiFrame with showHelp", () => {
+  function makeOrchestratorItem(overrides: Partial<OrchestratorItem> = {}): OrchestratorItem {
+    return {
+      id: "T-1",
+      workItem: { id: "T-1", title: "Test item", priority: "medium", source: "test", domain: "test", affectedFiles: [] } as WorkItem,
+      state: "implementing",
+      prNumber: null,
+      lastTransition: new Date().toISOString(),
+      failureReason: undefined,
+      worktreeCreated: true,
+      resolvedRepoRoot: "/test",
+      startedAt: new Date().toISOString(),
+      endedAt: undefined,
+      exitCode: null,
+      stderrTail: undefined,
+      reviewCycleStartedAt: undefined,
+      ciRetries: 0,
+      lastReviewPollCursor: undefined,
+      workspaceRef: undefined,
+      ...overrides,
+    } as OrchestratorItem;
+  }
+
+  it("renders help overlay when showHelp is true", () => {
+    const chunks: string[] = [];
+    const write = (s: string) => chunks.push(s);
+    const items = [makeOrchestratorItem()];
+
+    renderTuiFrame(items, 5, write, { showHelp: true }, 0);
+
+    const output = chunks.join("");
+    const text = stripAnsi(output);
+    expect(text).toContain("Help");
+    expect(text).toContain("Keyboard Shortcuts");
+    // Should NOT contain normal status table content
+    expect(text).not.toContain("ninthwave status");
+  });
+
+  it("renders normal frame when showHelp is false", () => {
+    const chunks: string[] = [];
+    const write = (s: string) => chunks.push(s);
+    const items = [makeOrchestratorItem()];
+
+    renderTuiFrame(items, 5, write, { showHelp: false }, 0);
+
+    const output = chunks.join("");
+    const text = stripAnsi(output);
+    expect(text).toContain("ninthwave status");
   });
 });

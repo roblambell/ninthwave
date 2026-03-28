@@ -79,6 +79,7 @@ import {
   getTerminalHeight,
   buildStatusLayout,
   renderFullScreenFrame,
+  renderHelpOverlay,
   clampScrollOffset,
   MIN_FULLSCREEN_ROWS,
   type StatusItem,
@@ -166,7 +167,12 @@ export function renderTuiFrame(
 
   write("\x1B[H");
 
-  if (termRows >= MIN_FULLSCREEN_ROWS) {
+  if (viewOptions?.showHelp) {
+    // Render help overlay instead of the normal frame
+    const helpLines = renderHelpOverlay(termWidth, termRows);
+    const content = helpLines.join("\n");
+    write(content.replace(/\n/g, "\x1B[K\n") + "\x1B[K");
+  } else if (termRows >= MIN_FULLSCREEN_ROWS) {
     const layout = buildStatusLayout(statusItems, termWidth, wipLimit, false, viewOptions);
     const clamped = clampScrollOffset(scrollOffset, layout.itemLines.length, Math.max(1, termRows - layout.headerLines.length - layout.footerLines.length));
     const frameLines = renderFullScreenFrame(layout, termRows, termWidth, clamped);
@@ -1671,6 +1677,8 @@ export interface TuiState {
   ctrlCPending: boolean;
   /** Timestamp of the first Ctrl+C press (for 2s timeout). */
   ctrlCTimestamp: number;
+  /** Whether the help overlay is visible. */
+  showHelp: boolean;
   /** Called when the user cycles the merge strategy via Shift+Tab. */
   onStrategyChange?: (strategy: MergeStrategy) => void;
   /** Called after any key that should trigger an immediate re-render. */
@@ -1684,7 +1692,8 @@ export interface TuiState {
  * - Ctrl-C (0x03) triggers the same graceful shutdown
  * - `m` toggles metrics panel
  * - `d` toggles deps detail view
- * - `?` toggles help footer
+ * - `?` toggles full-screen help overlay
+ * - Escape dismisses help overlay (raw `\x1b`, not arrow key sequences)
  * - Up/Down arrows scroll item list
  *
  * Returns a cleanup function that restores terminal state.
@@ -1756,6 +1765,20 @@ export function setupKeyboardShortcuts(
 
     let handled = true;
     switch (key) {
+      case "?":
+        tuiState.showHelp = !tuiState.showHelp;
+        tuiState.viewOptions.showHelp = tuiState.showHelp;
+        break;
+      case "\x1b": // Raw Escape (length 1) — dismiss help overlay
+        // Only treat single-byte \x1b as Escape. Arrow keys send \x1b[A etc.
+        // which are longer sequences and won't match this case.
+        if (tuiState.showHelp) {
+          tuiState.showHelp = false;
+          tuiState.viewOptions.showHelp = false;
+        } else {
+          handled = false;
+        }
+        break;
       case "d":
         tuiState.viewOptions.showBlockerDetail = !tuiState.viewOptions.showBlockerDetail;
         break;
@@ -2531,6 +2554,7 @@ export async function cmdOrchestrate(
     bypassEnabled: orch.config.bypassEnabled,
     ctrlCPending: false,
     ctrlCTimestamp: 0,
+    showHelp: false,
     onStrategyChange: (strategy) => {
       orch.setMergeStrategy(strategy);
     },

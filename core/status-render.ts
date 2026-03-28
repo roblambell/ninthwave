@@ -37,6 +37,8 @@ export interface ViewOptions {
   mergeStrategy?: MergeStrategy;
   /** When true, footer shows "Press Ctrl-C again to exit" instead of strategy indicator. */
   ctrlCPending?: boolean;
+  /** When true, render the help overlay instead of the normal frame. */
+  showHelp?: boolean;
 }
 
 /**
@@ -1361,3 +1363,145 @@ export function renderFullScreenFrame(
 
 /** Minimum terminal rows for full-screen mode. Below this, use legacy non-fullscreen rendering. */
 export const MIN_FULLSCREEN_ROWS = 10;
+
+// ─── Help overlay ────────────────────────────────────────────────────────────
+
+/**
+ * Render the full-screen help overlay as an array of lines.
+ * This is a pure function — no side effects, no terminal writes.
+ *
+ * Content:
+ * - Metrics explanations (Lead time, Throughput, Session)
+ * - Merge strategies with icons/colors from strategyIndicator()
+ * - Keyboard shortcuts
+ * - Credits
+ *
+ * The overlay uses box-drawing characters for the border.
+ * Content is horizontally centered within the terminal width.
+ */
+export function renderHelpOverlay(
+  termWidth: number,
+  termRows: number,
+): string[] {
+  // ── Build content lines (plain text, no padding yet) ──────────────
+
+  const sections: string[][] = [];
+
+  // Metrics section
+  sections.push([
+    `${BOLD}Metrics${RESET}`,
+    `  Lead time    Median start-to-merge duration`,
+    `  Throughput   Merged items per hour`,
+    `  Session      Time since orchestrator start`,
+  ]);
+
+  // Merge strategies section — reuse strategyIndicator() for icons/colors
+  sections.push([
+    `${BOLD}Merge Strategies${RESET}`,
+    `  ${strategyIndicator("auto")}     AI review + CI -> auto-merge`,
+    `  ${strategyIndicator("manual")}  AI review + CI, human merges`,
+    `  ${strategyIndicator("bypass")}  AI review + CI -> admin merge`,
+  ]);
+
+  // Keyboard shortcuts section
+  sections.push([
+    `${BOLD}Keyboard Shortcuts${RESET}`,
+    `  Shift+Tab   Cycle merge strategy`,
+    `  ?           Toggle this help overlay`,
+    `  Escape      Dismiss help overlay`,
+    `  q           Quit`,
+    `  Ctrl+C x2   Quit (double-tap)`,
+    `  d           Toggle dependency details`,
+    `  Up/Down     Scroll item list`,
+  ]);
+
+  // Credits section
+  sections.push([
+    `${DIM}ninthwave -- parallel AI coding orchestration${RESET}`,
+    `${DIM}Apache-2.0 -- ninthwave.dev${RESET}`,
+  ]);
+
+  // ── Flatten sections with blank separators ─────────────────────────
+
+  const contentLines: string[] = [];
+  for (let s = 0; s < sections.length; s++) {
+    if (s > 0) contentLines.push(""); // blank line between sections
+    contentLines.push(...sections[s]!);
+  }
+
+  // ── Compute box dimensions ─────────────────────────────────────────
+
+  const maxContentWidth = Math.max(
+    ...contentLines.map((l) => stripAnsiForWidth(l).length),
+  );
+  // Box inner width: at least content width + 2 padding chars each side
+  const innerWidth = Math.min(maxContentWidth + 4, termWidth - 4);
+  const boxWidth = innerWidth + 2; // +2 for left/right border chars
+
+  // ── Draw box ───────────────────────────────────────────────────────
+
+  const boxLines: string[] = [];
+  const leftMargin = Math.max(0, Math.floor((termWidth - boxWidth) / 2));
+  const pad = " ".repeat(leftMargin);
+
+  // Top border
+  boxLines.push(`${pad}┌${"─".repeat(innerWidth)}┐`);
+
+  // Title
+  const title = "Help";
+  const titlePad = Math.max(0, Math.floor((innerWidth - title.length) / 2));
+  boxLines.push(`${pad}│${" ".repeat(titlePad)}${BOLD}${title}${RESET}${" ".repeat(Math.max(0, innerWidth - titlePad - title.length))}│`);
+  boxLines.push(`${pad}│${" ".repeat(innerWidth)}│`);
+
+  // Content lines (truncate if wider than available space)
+  const maxContentDisplay = innerWidth - 2; // 2 chars left padding
+  for (const line of contentLines) {
+    const displayLen = stripAnsiForWidth(line).length;
+    let rendered = line;
+    if (displayLen > maxContentDisplay) {
+      // Truncate plain text to fit — find the cut point accounting for ANSI codes
+      let visible = 0;
+      let cutIdx = 0;
+      const plain = stripAnsiForWidth(line);
+      // Walk the plain text to find where to cut
+      for (let i = 0; i < plain.length && visible < maxContentDisplay - 3; i++) {
+        visible++;
+        cutIdx = i + 1;
+      }
+      // Rebuild: take the truncated plain text + "..."
+      // Since ANSI escapes make slicing hard, use the plain text directly for overflow cases
+      rendered = plain.slice(0, cutIdx) + "...";
+    }
+    const renderedLen = stripAnsiForWidth(rendered).length;
+    const rightPad = Math.max(0, innerWidth - 2 - renderedLen);
+    boxLines.push(`${pad}│  ${rendered}${" ".repeat(rightPad)}│`);
+  }
+
+  // Empty line before footer hint
+  boxLines.push(`${pad}│${" ".repeat(innerWidth)}│`);
+
+  // Footer hint
+  const hint = "Press ? or Escape to close";
+  const hintPad = Math.max(0, Math.floor((innerWidth - hint.length) / 2));
+  boxLines.push(`${pad}│${" ".repeat(hintPad)}${DIM}${hint}${RESET}${" ".repeat(Math.max(0, innerWidth - hintPad - hint.length))}│`);
+
+  // Bottom border
+  boxLines.push(`${pad}└${"─".repeat(innerWidth)}┘`);
+
+  // ── Vertically center the box ──────────────────────────────────────
+
+  const totalBoxHeight = boxLines.length;
+  const topPad = Math.max(0, Math.floor((termRows - totalBoxHeight) / 2));
+
+  const output: string[] = [];
+  for (let i = 0; i < topPad; i++) {
+    output.push("");
+  }
+  output.push(...boxLines);
+  // Fill remaining rows so the overlay covers the full screen
+  while (output.length < termRows) {
+    output.push("");
+  }
+
+  return output;
+}

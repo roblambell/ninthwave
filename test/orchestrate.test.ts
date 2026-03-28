@@ -1952,6 +1952,7 @@ describe("setupKeyboardShortcuts", () => {
       bypassEnabled: false,
       ctrlCPending: false,
       ctrlCTimestamp: 0,
+      showHelp: false,
       onStrategyChange: (s) => changedStrategies.push(s),
     };
 
@@ -1974,6 +1975,7 @@ describe("setupKeyboardShortcuts", () => {
       bypassEnabled: false,
       ctrlCPending: false,
       ctrlCTimestamp: 0,
+      showHelp: false,
     };
 
     setupKeyboardShortcuts(ac, () => {}, stdin, tuiState);
@@ -1992,6 +1994,7 @@ describe("setupKeyboardShortcuts", () => {
       bypassEnabled: true,
       ctrlCPending: false,
       ctrlCTimestamp: 0,
+      showHelp: false,
     };
 
     const cleanup = setupKeyboardShortcuts(ac, () => {}, stdin, tuiState);
@@ -2018,6 +2021,7 @@ describe("setupKeyboardShortcuts", () => {
       bypassEnabled: false,
       ctrlCPending: false,
       ctrlCTimestamp: 0,
+      showHelp: false,
     };
 
     setupKeyboardShortcuts(ac, () => {}, stdin, tuiState);
@@ -2043,6 +2047,7 @@ describe("setupKeyboardShortcuts", () => {
       bypassEnabled: false,
       ctrlCPending: false,
       ctrlCTimestamp: 0,
+      showHelp: false,
     };
 
     const cleanup = setupKeyboardShortcuts(ac, () => {}, stdin, tuiState);
@@ -2068,6 +2073,7 @@ describe("setupKeyboardShortcuts", () => {
       bypassEnabled: false,
       ctrlCPending: false,
       ctrlCTimestamp: 0,
+      showHelp: false,
     };
 
     const cleanup = setupKeyboardShortcuts(ac, (e) => logs.push(e), stdin, tuiState);
@@ -2103,6 +2109,7 @@ describe("setupKeyboardShortcuts", () => {
       bypassEnabled: false,
       ctrlCPending: false,
       ctrlCTimestamp: 0,
+      showHelp: false,
     };
 
     const cleanup = setupKeyboardShortcuts(ac, () => {}, stdin, tuiState);
@@ -2115,6 +2122,74 @@ describe("setupKeyboardShortcuts", () => {
     expect(tuiState.viewOptions.ctrlCPending).toBe(false);
 
     cleanup();
+  });
+
+  // ── Help overlay keyboard handling ──────────────────────────────────
+
+  it("? toggles showHelp boolean", () => {
+    const ac = new AbortController();
+    const stdin = mockStdin();
+    const tuiState: TuiState = {
+      scrollOffset: 0,
+      viewOptions: { mergeStrategy: "auto" },
+      mergeStrategy: "auto",
+      bypassEnabled: false,
+      ctrlCPending: false,
+      ctrlCTimestamp: 0,
+      showHelp: false,
+    };
+
+    setupKeyboardShortcuts(ac, () => {}, stdin, tuiState);
+
+    (stdin as any)._emit("data", "?");
+    expect(tuiState.showHelp).toBe(true);
+    expect(tuiState.viewOptions.showHelp).toBe(true);
+
+    (stdin as any)._emit("data", "?");
+    expect(tuiState.showHelp).toBe(false);
+    expect(tuiState.viewOptions.showHelp).toBe(false);
+  });
+
+  it("Escape (single \\x1b) dismisses help overlay", () => {
+    const ac = new AbortController();
+    const stdin = mockStdin();
+    const tuiState: TuiState = {
+      scrollOffset: 0,
+      viewOptions: { mergeStrategy: "auto" },
+      mergeStrategy: "auto",
+      bypassEnabled: false,
+      ctrlCPending: false,
+      ctrlCTimestamp: 0,
+      showHelp: true,
+    };
+
+    setupKeyboardShortcuts(ac, () => {}, stdin, tuiState);
+
+    (stdin as any)._emit("data", "\x1b");
+    expect(tuiState.showHelp).toBe(false);
+    expect(tuiState.viewOptions.showHelp).toBe(false);
+  });
+
+  it("arrow keys (\\x1b[A) do NOT dismiss help overlay", () => {
+    const ac = new AbortController();
+    const stdin = mockStdin();
+    const tuiState: TuiState = {
+      scrollOffset: 0,
+      viewOptions: { mergeStrategy: "auto" },
+      mergeStrategy: "auto",
+      bypassEnabled: false,
+      ctrlCPending: false,
+      ctrlCTimestamp: 0,
+      showHelp: true,
+    };
+
+    setupKeyboardShortcuts(ac, () => {}, stdin, tuiState);
+
+    (stdin as any)._emit("data", "\x1b[A"); // Up arrow
+    expect(tuiState.showHelp).toBe(true); // still showing
+
+    (stdin as any)._emit("data", "\x1b[B"); // Down arrow
+    expect(tuiState.showHelp).toBe(true); // still showing
   });
 });
 
