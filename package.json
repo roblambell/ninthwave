@@ -2,6 +2,7 @@
   "name": "ninthwave",
   "type": "module",
   "private": true,
+  "license": "Apache-2.0",
   "scripts": {
     "test": "bun test --smol --bail test/",
     "test:watch": "bun test --smol --watch test/",
