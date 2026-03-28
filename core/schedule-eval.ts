@@ -238,16 +238,17 @@ export function isDue(
 /**
  * Compute the next occurrence of a cron expression after a given time.
  *
- * Scans minute-by-minute from `after` up to 400 days ahead.
+ * Scans minute-by-minute from `after` up to MAX_SCAN_DAYS ahead.
  * Returns null if no match is found (e.g., impossible cron like "60 25 32 13 *").
  */
+const MAX_SCAN_DAYS = 400;
+
 export function nextRunTime(cronExpr: string, after: Date): Date | null {
   // Start from the next minute after `after`
   const start = truncateToMinute(after);
   start.setMinutes(start.getMinutes() + 1);
 
-  // Scan up to 400 days * 24 hours * 60 minutes = 576,000 iterations max
-  const maxIterations = 400 * 24 * 60;
+  const maxIterations = MAX_SCAN_DAYS * 24 * 60;
 
   const candidate = new Date(start);
   for (let i = 0; i < maxIterations; i++) {

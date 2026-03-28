@@ -214,19 +214,21 @@ describe("isDue", () => {
     expect(isDue("0 9 * * *", lastRun, now)).toBe(false);
   });
 
-  it("DST spring-forward: 2:30 schedule skipped when clock jumps 2→3", () => {
-    // Simulate spring forward: clock goes from 1:59 to 3:00
-    // A task scheduled for 2:30 should NOT fire at 3:00
-    const now = new Date(2026, 2, 8, 3, 0, 0); // 3:00 AM after spring forward
+  it("does not fire when cron hour doesn't match (spring-forward scenario)", () => {
+    // If DST skips hour 2 entirely (clock jumps 1:59→3:00), a 2:30 cron
+    // simply won't match at 3:00 because the hour field doesn't match.
+    // This test verifies the hour-mismatch mechanism that makes it safe.
+    const now = new Date(2026, 2, 8, 3, 0, 0);
     expect(isDue("30 2 * * *", null, now)).toBe(false);
   });
 
-  it("DST fall-back: 1:30 fires once via lastRunAt dedup", () => {
-    // During fall-back, 1:30 occurs twice. First occurrence fires:
-    const firstOccurrence = new Date(2026, 10, 1, 1, 30, 0); // Nov 1, 2026 1:30 AM
+  it("lastRunAt dedup prevents double-fire in same minute (fall-back scenario)", () => {
+    // If DST repeats hour 1 (clock goes 1:59→1:00), a 1:30 cron could
+    // match twice. The lastRunAt dedup prevents the second fire.
+    // This test verifies the dedup mechanism using same-minute timestamps.
+    const firstOccurrence = new Date(2026, 10, 1, 1, 30, 0);
     expect(isDue("30 1 * * *", null, firstOccurrence)).toBe(true);
 
-    // Second occurrence with lastRunAt set to first — should not fire
     const lastRun = new Date(2026, 10, 1, 1, 30, 10);
     const secondOccurrence = new Date(2026, 10, 1, 1, 30, 50);
     expect(isDue("30 1 * * *", lastRun, secondOccurrence)).toBe(false);
