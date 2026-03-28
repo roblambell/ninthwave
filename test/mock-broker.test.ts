@@ -1,6 +1,7 @@
 // Tests for the mock crew coordination broker.
-// Covers: crew creation, WebSocket protocol, creator affinity scheduling,
-// duplicate claim prevention, disconnect/release/reconnect, and JSONL logging.
+// Covers: crew creation, WebSocket protocol, author-based affinity scheduling,
+// dependency filtering, duplicate claim prevention, disconnect/release/reconnect,
+// and JSONL logging.
 
 import { describe, it, expect, afterEach, beforeEach } from "vitest";
 import { MockBroker, type CrewEvent } from "../core/mock-broker.ts";
@@ -50,11 +51,12 @@ function connectWs(
   crewCode: string,
   daemonId: string,
   name: string,
+  operatorId?: string,
 ): Promise<WebSocket> {
   return new Promise((resolve, reject) => {
-    const ws = new WebSocket(
-      `ws://localhost:${port}/api/crews/${crewCode}/ws?daemonId=${daemonId}&name=${name}`,
-    );
+    let url = `ws://localhost:${port}/api/crews/${crewCode}/ws?daemonId=${daemonId}&name=${name}`;
+    if (operatorId) url += `&operatorId=${encodeURIComponent(operatorId)}`;
+    const ws = new WebSocket(url);
     ws.addEventListener("open", () => resolve(ws));
     ws.addEventListener("error", (e) => reject(e));
   });
@@ -248,55 +250,72 @@ describe("mock-broker", () => {
     });
   });
 
-  describe("sync and claim with creator affinity", () => {
-    it("assigns creator-synced TODOs back to the creator", async () => {
+  describe("sync and claim with author affinity", () => {
+    it("assigns author-matched items to the daemon with matching operatorId", async () => {
       const { port } = startBroker();
       const code = await createCrew(port);
 
-      const ws1 = await connectWs(port, code, "d1", "worker-1");
-      const ws2 = await connectWs(port, code, "d2", "worker-2");
+      const ws1 = await connectWs(port, code, "d1", "worker-1", "alice@example.com");
+      const ws2 = await connectWs(port, code, "d2", "worker-2", "bob@example.com");
 
-      // d1 syncs TODO-A and TODO-B
-      await sendSync(ws1, "d1", ["todo-A", "todo-B"]);
+      // d1 syncs items authored by alice and bob
+      await sendSync(ws1, "d1", ["todo-A", "todo-B"], {
+        "todo-A": { author: "alice@example.com" },
+        "todo-B": { author: "bob@example.com" },
+      });
 
-      // d2 syncs TODO-C and TODO-D
-      await sendSync(ws2, "d2", ["todo-C", "todo-D"]);
-
-      // d1 claims — should get its own TODO first (creator affinity)
+      // d1 (alice) claims — should prefer alice-authored item (author affinity)
       const claim1 = await sendClaim(ws1, "d1");
-      expect(["todo-A", "todo-B"]).toContain(claim1.todoId);
+      expect(claim1.todoId).toBe("todo-A");
 
-      // d2 claims — should get its own TODO first
+      // d2 (bob) claims — should get bob-authored item
       const claim2 = await sendClaim(ws2, "d2");
-      expect(["todo-C", "todo-D"]).toContain(claim2.todoId);
+      expect(claim2.todoId).toBe("todo-B");
 
       ws1.close();
       ws2.close();
     });
 
-    it("falls back to pool scheduling when creator TODOs are exhausted", async () => {
+    it("falls back to pool scheduling when author-matched items are exhausted", async () => {
       const { port } = startBroker();
       const code = await createCrew(port);
 
-      const ws1 = await connectWs(port, code, "d1", "worker-1");
-      const ws2 = await connectWs(port, code, "d2", "worker-2");
+      const ws1 = await connectWs(port, code, "d1", "worker-1", "alice@example.com");
 
-      // d1 syncs 1 TODO
-      await sendSync(ws1, "d1", ["todo-A"]);
+      // Sync two items: one by alice, one by bob
+      await sendSync(ws1, "d1", ["todo-alice", "todo-bob"], {
+        "todo-alice": { author: "alice@example.com" },
+        "todo-bob": { author: "bob@example.com" },
+      });
 
-      // d2 syncs 1 TODO
-      await sendSync(ws2, "d2", ["todo-B"]);
-
-      // d1 claims its own TODO
+      // d1 claims — should get alice's item first (author affinity)
       const claim1 = await sendClaim(ws1, "d1");
-      expect(claim1.todoId).toBe("todo-A");
+      expect(claim1.todoId).toBe("todo-alice");
 
-      // d1 claims again — should get todo-B from pool
+      // d1 claims again — should fall back to bob's item (pool)
       const claim2 = await sendClaim(ws1, "d1");
-      expect(claim2.todoId).toBe("todo-B");
+      expect(claim2.todoId).toBe("todo-bob");
 
       ws1.close();
-      ws2.close();
+    });
+
+    it("uses pool scheduling when daemon has no operatorId", async () => {
+      const { port } = startBroker();
+      const code = await createCrew(port);
+
+      // No operatorId — defaults to ""
+      const ws = await connectWs(port, code, "d1", "worker-1");
+
+      await sendSync(ws, "d1", ["todo-A", "todo-B"], {
+        "todo-A": { author: "alice@example.com", priority: 2 },
+        "todo-B": { author: "bob@example.com", priority: 1 },
+      });
+
+      // No operatorId means no author affinity — should sort by priority
+      const claim1 = await sendClaim(ws, "d1");
+      expect(claim1.todoId).toBe("todo-B"); // priority 1 < 2
+
+      ws.close();
     });
 
     it("respects priority ordering (lower number = higher priority)", async () => {
@@ -613,14 +632,14 @@ describe("mock-broker", () => {
       const claimEvents = events.filter((e) => e.event === "claim");
       expect(claimEvents.length).toBeGreaterThan(0);
       for (const ce of claimEvents) {
-        expect(["creator", "pool"]).toContain((ce.metadata as { affinity: string }).affinity);
+        expect(["author", "pool"]).toContain((ce.metadata as { affinity: string }).affinity);
       }
 
       // Verify sync events have affinity metadata
       const syncEvents = events.filter((e) => e.event === "sync");
       expect(syncEvents.length).toBeGreaterThan(0);
       for (const se of syncEvents) {
-        expect((se.metadata as { affinity: string }).affinity).toBe("creator");
+        expect((se.metadata as { affinity: string }).affinity).toBe("author");
       }
     });
   });
@@ -732,6 +751,156 @@ describe("mock-broker", () => {
       expect(todo).toBeDefined();
       expect(todo!.dependencies).toEqual([]);
       expect(Array.isArray(todo!.dependencies)).toBe(true);
+
+      ws.close();
+    });
+  });
+
+  describe("dependency filtering", () => {
+    it("filters out items with unresolved dependencies", async () => {
+      const { port } = startBroker();
+      const code = await createCrew(port);
+      const ws = await connectWs(port, code, "d1", "worker-1");
+
+      // todo-B depends on todo-A; todo-A has no dependencies
+      await sendSync(ws, "d1", ["todo-A", "todo-B"], {
+        "todo-A": { dependencies: [] },
+        "todo-B": { dependencies: ["todo-A"] },
+      });
+
+      // Only todo-A should be claimable (todo-B has unresolved dep)
+      const claim1 = await sendClaim(ws, "d1");
+      expect(claim1.todoId).toBe("todo-A");
+
+      // todo-B still blocked — A is claimed but not completed
+      const claim2 = await sendClaim(ws, "d1");
+      expect(claim2.todoId).toBeNull();
+
+      ws.close();
+    });
+
+    it("unblocks dependent items after dependency is completed", async () => {
+      const { port } = startBroker();
+      const code = await createCrew(port);
+      const ws = await connectWs(port, code, "d1", "worker-1");
+
+      await sendSync(ws, "d1", ["todo-A", "todo-B"], {
+        "todo-A": { dependencies: [] },
+        "todo-B": { dependencies: ["todo-A"] },
+      });
+
+      // Claim and complete todo-A
+      const claim1 = await sendClaim(ws, "d1");
+      expect(claim1.todoId).toBe("todo-A");
+      await sendComplete(ws, "d1", "todo-A");
+
+      // Now todo-B should be claimable
+      const claim2 = await sendClaim(ws, "d1");
+      expect(claim2.todoId).toBe("todo-B");
+
+      ws.close();
+    });
+
+    it("treats dependencies not in the broker map as unresolved", async () => {
+      const { port } = startBroker();
+      const code = await createCrew(port);
+      const ws = await connectWs(port, code, "d1", "worker-1");
+
+      // todo-A depends on "unknown-item" which is not synced
+      await sendSync(ws, "d1", ["todo-A"], {
+        "todo-A": { dependencies: ["unknown-item"] },
+      });
+
+      // Should not be claimable
+      const claim = await sendClaim(ws, "d1");
+      expect(claim.todoId).toBeNull();
+
+      ws.close();
+    });
+
+    it("handles circular dependencies — neither item is claimable", async () => {
+      const { port } = startBroker();
+      const code = await createCrew(port);
+      const ws = await connectWs(port, code, "d1", "worker-1");
+
+      // A depends on B, B depends on A — circular
+      await sendSync(ws, "d1", ["todo-A", "todo-B"], {
+        "todo-A": { dependencies: ["todo-B"] },
+        "todo-B": { dependencies: ["todo-A"] },
+      });
+
+      // Neither should be claimable
+      const claim = await sendClaim(ws, "d1");
+      expect(claim.todoId).toBeNull();
+
+      ws.close();
+    });
+
+    it("handles multi-level dependency chains", async () => {
+      const { port } = startBroker();
+      const code = await createCrew(port);
+      const ws = await connectWs(port, code, "d1", "worker-1");
+
+      // C depends on B, B depends on A
+      await sendSync(ws, "d1", ["todo-A", "todo-B", "todo-C"], {
+        "todo-A": { dependencies: [] },
+        "todo-B": { dependencies: ["todo-A"] },
+        "todo-C": { dependencies: ["todo-B"] },
+      });
+
+      // Only A is claimable initially
+      const claim1 = await sendClaim(ws, "d1");
+      expect(claim1.todoId).toBe("todo-A");
+      await sendComplete(ws, "d1", "todo-A");
+
+      // Now B is claimable (A completed), but C is still blocked (B not completed)
+      const claim2 = await sendClaim(ws, "d1");
+      expect(claim2.todoId).toBe("todo-B");
+
+      const claim3 = await sendClaim(ws, "d1");
+      expect(claim3.todoId).toBeNull(); // C still blocked
+
+      await sendComplete(ws, "d1", "todo-B");
+
+      // Now C is claimable
+      const claim4 = await sendClaim(ws, "d1");
+      expect(claim4.todoId).toBe("todo-C");
+
+      ws.close();
+    });
+  });
+
+  describe("dependency filtering + author affinity combined", () => {
+    it("author-affinity items with unresolved deps are still filtered out", async () => {
+      const { port } = startBroker();
+      const code = await createCrew(port);
+      const ws = await connectWs(port, code, "d1", "worker-1", "alice@example.com");
+
+      // todo-A: authored by alice, depends on todo-C (unresolved)
+      // todo-B: authored by someone else, no deps
+      await sendSync(ws, "d1", ["todo-A", "todo-B", "todo-C"], {
+        "todo-A": { author: "alice@example.com", dependencies: ["todo-C"], priority: 0 },
+        "todo-B": { author: "bob@example.com", dependencies: [], priority: 1 },
+        "todo-C": { author: "alice@example.com", dependencies: [], priority: 2 },
+      });
+
+      // Despite alice-authored todo-A having highest priority, it's blocked by dep
+      // d1 should get todo-C (alice-authored, no deps) first due to author affinity
+      const claim1 = await sendClaim(ws, "d1");
+      expect(claim1.todoId).toBe("todo-C");
+
+      // Next: todo-B (only remaining unblocked item, pool)
+      const claim2 = await sendClaim(ws, "d1");
+      expect(claim2.todoId).toBe("todo-B");
+
+      // todo-A still blocked (todo-C claimed but not completed)
+      const claim3 = await sendClaim(ws, "d1");
+      expect(claim3.todoId).toBeNull();
+
+      // Complete todo-C, now todo-A is unblocked
+      await sendComplete(ws, "d1", "todo-C");
+      const claim4 = await sendClaim(ws, "d1");
+      expect(claim4.todoId).toBe("todo-A");
 
       ws.close();
     });

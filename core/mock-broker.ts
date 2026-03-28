@@ -1,16 +1,19 @@
 // Mock localhost WebSocket broker for crew coordination.
 // Runs in-process via Bun.serve(). Implements the full crew protocol:
 // crew creation, WebSocket messaging, claim/sync/complete/heartbeat,
-// creator-affinity scheduling, disconnect/reconnect, and JSONL event logging.
+// author-based affinity scheduling, dependency filtering,
+// disconnect/reconnect, and JSONL event logging.
 //
-// Creator affinity rationale: AI agents do NOT carry persistent context between
-// work items — each session starts fresh. The benefit of creator affinity is
-// human steering: the person who decomposed work items can intervene, steer, and
-// review more easily when those items run on their own machine. Affinity is a
-// preference within WIP limits, not a hard rule. When the creator's daemon hits
-// its WIP limit, queued items with no unresolved dependencies overflow to other
-// daemons. Review jobs are local-only and do not participate in crew claim
-// scheduling.
+// Author affinity rationale: AI agents do NOT carry persistent context between
+// work items — each session starts fresh. The benefit of author-based affinity
+// is human steering: the person who authored work items can intervene, steer, and
+// review more easily when those items run on their own machine. Affinity matches
+// each item's author field against the requesting daemon's operatorId (the git
+// email of the human running the daemon). This is a preference within WIP limits,
+// not a hard rule. When no author-matched items are available, items overflow to
+// any daemon (pool scheduling). Items with unresolved dependencies are filtered
+// out before claim scheduling. Review jobs are local-only and do not participate
+// in crew claim scheduling.
 
 import { appendFileSync, mkdirSync } from "fs";
 import { dirname } from "path";
@@ -66,7 +69,7 @@ export interface CrewEvent {
   daemon_id: string;
   event: "claim" | "sync" | "complete" | "disconnect" | "reconnect" | "abandon";
   todo_path: string;
-  metadata: { affinity: "creator" | "pool" } | Record<string, unknown>;
+  metadata: { affinity: "author" | "pool" } | Record<string, unknown>;
 }
 
 // ── Crew status type (shared with TUI) ─────────────────────────────
@@ -387,7 +390,7 @@ export class MockBroker {
           claimedBy: null,
           completedBy: null,
         });
-        this.logEvent(crew.code, daemonId, "sync", item.id, { affinity: "creator" });
+        this.logEvent(crew.code, daemonId, "sync", item.id, { affinity: "author" });
       }
     }
     // Respond with sync_ack containing all known todo IDs
@@ -401,13 +404,17 @@ export class MockBroker {
     const daemon = crew.daemons.get(daemonId);
     if (!daemon) return;
 
-    // Find the best available TODO for this daemon using creator-affinity scheduling.
-    // Creator affinity prefers routing items back to the daemon whose human decomposed
-    // them — enabling easier steering and intervention, not agent context (agents start
-    // fresh each session). This is a soft preference: items overflow to other daemons
-    // when the creator's daemon is at its WIP limit.
+    // Find available items: unclaimed, uncompleted, and all dependencies resolved.
+    // A dependency is resolved when its ID exists in the crew's items map with
+    // completedBy !== null. Items not in the map are treated as unresolved.
     const available = Array.from(crew.items.values()).filter(
-      (t) => t.claimedBy === null && t.completedBy === null,
+      (t) =>
+        t.claimedBy === null &&
+        t.completedBy === null &&
+        t.dependencies.every((depId) => {
+          const dep = crew.items.get(depId);
+          return dep !== undefined && dep.completedBy !== null;
+        }),
     );
 
     if (available.length === 0) {
@@ -415,11 +422,14 @@ export class MockBroker {
       return;
     }
 
-    // Sort: creator affinity first (human steering preference), then priority (lower = higher), then oldest first
+    // Sort: author affinity first (human steering preference), then priority
+    // (lower = higher), then oldest first. Author affinity matches the requesting
+    // daemon's operatorId against each item's author field.
+    const operatorId = daemon.operatorId;
     available.sort((a, b) => {
-      const aCreator = a.creatorDaemonId === daemonId ? 0 : 1;
-      const bCreator = b.creatorDaemonId === daemonId ? 0 : 1;
-      if (aCreator !== bCreator) return aCreator - bCreator;
+      const aAuthor = operatorId !== "" && a.author === operatorId ? 0 : 1;
+      const bAuthor = operatorId !== "" && b.author === operatorId ? 0 : 1;
+      if (aAuthor !== bAuthor) return aAuthor - bAuthor;
       if (a.priority !== b.priority) return a.priority - b.priority;
       return a.syncedAt - b.syncedAt;
     });
@@ -428,7 +438,8 @@ export class MockBroker {
     todo.claimedBy = daemonId;
     daemon.claimedItems.add(todo.path);
 
-    const affinity: "creator" | "pool" = todo.creatorDaemonId === daemonId ? "creator" : "pool";
+    const affinity: "author" | "pool" =
+      operatorId !== "" && todo.author === operatorId ? "author" : "pool";
     this.logEvent(crew.code, daemonId, "claim", todo.path, { affinity });
     this.send(ws, { type: "claim_response", requestId, todoId: todo.path });
     // Broadcast crew status after claim
