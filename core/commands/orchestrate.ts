@@ -3188,9 +3188,9 @@ export async function cmdOrchestrate(
     daemonRebase,
     warn: (message) =>
       log({ ts: new Date().toISOString(), level: "warn", event: "orchestrator_warning", message }),
-    launchReview: (itemId, prNumber, repoRoot) => {
+    launchReview: (itemId, prNumber, repoRoot, implementerWorktreePath) => {
       const autoFix = orch.config.reviewAutoFix;
-      const result = launchReviewWorker(prNumber, itemId, autoFix, repoRoot, aiTool, mux);
+      const result = launchReviewWorker(prNumber, itemId, autoFix, repoRoot, aiTool, mux, { implementerWorktreePath });
       if (!result) return null;
       return { workspaceRef: result.workspaceRef, verdictPath: result.verdictPath };
     },

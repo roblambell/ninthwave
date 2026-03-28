@@ -5955,9 +5955,27 @@ describe("Orchestrator", () => {
       );
 
       expect(result.success).toBe(true);
-      expect(launchReview).toHaveBeenCalledWith("R-13-1", 42, defaultCtx.projectRoot);
+      expect(launchReview).toHaveBeenCalledWith("R-13-1", 42, defaultCtx.projectRoot, undefined);
       expect(orch.getItem("R-13-1")!.reviewWorkspaceRef).toBe("review-workspace:1");
       expect(orch.getItem("R-13-1")!.reviewVerdictPath).toBe("/tmp/nw-verdict-R-13-1.json");
+    });
+
+    it("executeAction: launch-review passes item.worktreePath to deps.launchReview", () => {
+      const launchReview = vi.fn(() => ({ workspaceRef: "review-workspace:1", verdictPath: "/tmp/nw-verdict-R-13-1b.json" }));
+      const deps = mockDeps({ launchReview });
+      orch.addItem(makeWorkItem("R-13-1b"));
+      orch.setState("R-13-1b", "reviewing");
+      orch.getItem("R-13-1b")!.prNumber = 42;
+      orch.getItem("R-13-1b")!.worktreePath = "/tmp/test/ninthwave-R-13-1b";
+
+      const result = orch.executeAction(
+        { type: "launch-review", itemId: "R-13-1b", prNumber: 42 },
+        defaultCtx,
+        deps,
+      );
+
+      expect(result.success).toBe(true);
+      expect(launchReview).toHaveBeenCalledWith("R-13-1b", 42, defaultCtx.projectRoot, "/tmp/test/ninthwave-R-13-1b");
     });
 
     it("executeAction: launch-review succeeds as no-op when dep not wired", () => {
