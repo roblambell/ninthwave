@@ -255,13 +255,13 @@ export function setupTempRepoWithRemote(): string {
   const bare = join(parent, "bare");
   const local = join(parent, "local");
 
-  // Create bare remote
+  // Create bare remote with explicit main branch
   mkdirSync(bare, { recursive: true });
-  git(bare, "init", "--bare", "--quiet");
+  git(bare, "init", "--bare", "--quiet", "--initial-branch=main");
 
-  // Create local repo
+  // Create local repo with explicit main branch
   mkdirSync(local, { recursive: true });
-  git(local, "init", "--quiet");
+  git(local, "init", "--quiet", "--initial-branch=main");
   git(local, "config", "user.email", "test@test.com");
   git(local, "config", "user.name", "Test");
   git(local, "remote", "add", "origin", bare);
