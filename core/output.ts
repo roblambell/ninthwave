@@ -11,6 +11,10 @@ export const BOLD = useColor ? "\x1b[1m" : "";
 export const DIM = useColor ? "\x1b[2m" : "";
 export const RESET = useColor ? "\x1b[0m" : "";
 
+// Alternate screen buffer sequences — isolate TUI output from scrollback
+export const ALT_SCREEN_ON = "\x1B[?1049h";
+export const ALT_SCREEN_OFF = "\x1B[?1049l";
+
 export function die(message: string): never {
   console.error(`${RED}Error:${RESET} ${message}`);
   process.exit(1);
