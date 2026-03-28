@@ -127,7 +127,7 @@ describe("checkUncommittedWorkItems (preflight)", () => {
     };
     const result = checkUncommittedWorkItems("/fake/project", runner);
     expect(result.status).toBe("pass");
-    expect(result.message).toBe("All TODO files committed");
+    expect(result.message).toBe("All work item files committed");
   });
 
   it("fails with count when untracked files exist", () => {
@@ -143,7 +143,7 @@ describe("checkUncommittedWorkItems (preflight)", () => {
     };
     const result = checkUncommittedWorkItems("/fake/project", runner);
     expect(result.status).toBe("fail");
-    expect(result.message).toContain("2 uncommitted TODO file(s)");
+    expect(result.message).toContain("2 uncommitted work item file(s)");
     expect(result.detail).toContain("git add .ninthwave/work/");
   });
 
@@ -160,7 +160,7 @@ describe("checkUncommittedWorkItems (preflight)", () => {
     };
     const result = checkUncommittedWorkItems("/fake/project", runner);
     expect(result.status).toBe("fail");
-    expect(result.message).toContain("1 uncommitted TODO file(s)");
+    expect(result.message).toContain("1 uncommitted work item file(s)");
   });
 
   it("warns when git status fails", () => {
@@ -169,7 +169,7 @@ describe("checkUncommittedWorkItems (preflight)", () => {
     };
     const result = checkUncommittedWorkItems("/fake/project", runner);
     expect(result.status).toBe("warn");
-    expect(result.message).toBe("Could not check TODO file status");
+    expect(result.message).toBe("Could not check work item file status");
   });
 });
 
@@ -348,12 +348,12 @@ describe("preflight with projectRoot", () => {
     };
     const result = preflight(runner, "/fake/project");
     expect(result.passed).toBe(true);
-    // 4 env checks + 1 TODO check + 1 copilot trust check = 6
+    // 4 env checks + 1 work item check + 1 copilot trust check = 6
     expect(result.checks).toHaveLength(6);
-    expect(result.checks[4]!.message).toBe("All TODO files committed");
+    expect(result.checks[4]!.message).toBe("All work item files committed");
   });
 
-  it("fails when uncommitted TODOs detected with projectRoot", () => {
+  it("fails when uncommitted work items detected with projectRoot", () => {
     const runner: ShellRunner = (cmd: string, args: string[]): RunResult => {
       if (cmd === "git" && args.includes("--porcelain")) {
         return {
@@ -373,10 +373,10 @@ describe("preflight with projectRoot", () => {
     const result = preflight(runner, "/fake/project");
     expect(result.passed).toBe(false);
     expect(result.errors.length).toBe(1);
-    expect(result.errors[0]).toContain("uncommitted TODO file");
+    expect(result.errors[0]).toContain("uncommitted work item file");
   });
 
-  it("omits TODO check when projectRoot is not provided", () => {
+  it("omits work item check when projectRoot is not provided", () => {
     const result = preflight(allPassRunner());
     expect(result.checks).toHaveLength(4);
   });

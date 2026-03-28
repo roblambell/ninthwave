@@ -32,8 +32,8 @@ const defaultDeps: HeartbeatDeps = {
 
 // ── Branch detection ─────────────────────────────────────────────────
 
-/** Extract TODO ID from a branch name like "ninthwave/H-FOO-1". Returns null if not a todo branch. */
-export function extractTodoId(branch: string): string | null {
+/** Extract item ID from a branch name like "ninthwave/H-FOO-1". Returns null if not an item branch. */
+export function extractItemId(branch: string): string | null {
   const match = branch.match(/^ninthwave\/(.+)$/);
   return match ? match[1] : null;
 }
@@ -109,7 +109,7 @@ export function parseHeartbeatArgs(args: string[]): HeartbeatArgs {
 
 /**
  * Write a heartbeat file for the current worker.
- * Auto-detects the TODO ID from the current git branch (ninthwave/{ID}).
+ * Auto-detects the item ID from the current git branch (ninthwave/{ID}).
  * Returns a status message.
  */
 export function cmdHeartbeat(
@@ -125,9 +125,9 @@ export function cmdHeartbeat(
     return ""; // unreachable — satisfies control flow when die is mocked in tests
   }
 
-  const id = extractTodoId(branch);
+  const id = extractItemId(branch);
   if (!id) {
-    die(`Not on a todo branch (expected "ninthwave/<ID>", got "${branch}")`);
+    die(`Not on an item branch (expected "ninthwave/<ID>", got "${branch}")`);
     return ""; // unreachable
   }
 

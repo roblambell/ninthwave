@@ -549,7 +549,7 @@ describe("cmdNoArgs", () => {
     }
 
     const output = logs.join("\n");
-    expect(output).toContain("no TODO items");
+    expect(output).toContain("no work items");
     expect(output).toContain("/decompose");
     expect(output).toContain(".ninthwave/work/");
   });
@@ -573,7 +573,7 @@ describe("cmdNoArgs", () => {
     }
 
     const output = logs.join("\n");
-    expect(output).toContain("no TODO items");
+    expect(output).toContain("no work items");
   });
 
   it("routes to status view when daemon is running", async () => {

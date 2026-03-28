@@ -276,7 +276,7 @@ describe("per-command rich help (nw <command> --help)", () => {
 
   it("shows flag descriptions for watch", () => {
     const result = runCli("watch", "--help");
-    expect(result.stdout).toContain("TODO item IDs to process");
+    expect(result.stdout).toContain("Work item IDs to process");
     expect(result.stdout).toContain("Run in daemon mode");
   });
 

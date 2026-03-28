@@ -1,4 +1,4 @@
-// orchestrate command: event loop for parallel TODO processing.
+// orchestrate command: event loop for parallel work item processing.
 // Parses args, reconstructs state from disk/GitHub, runs the poll→transition→execute loop,
 // emits structured JSON logs, and handles graceful SIGINT/SIGTERM shutdown.
 // Supports daemon mode (--daemon) for background operation with state persistence.
@@ -275,14 +275,14 @@ export function buildSnapshot(
 
       switch (status) {
         case "merged": {
-          // Title collision check: when a TODO ID is reused, the old merged PR
+          // Title collision check: when a work item ID is reused, the old merged PR
           // still shows up for the same branch name. If the orchestrator already
           // assigned a PR number to this item (during this session), trust it.
-          // Otherwise, compare the merged PR's title against the TODO title.
+          // Otherwise, compare the merged PR's title against the work item title.
           const mergedPrTitle = parts[5] ?? "";
-          const todoTitle = orchItem.workItem.title;
+          const itemTitle = orchItem.workItem.title;
           const alreadyTracked = orchItem.prNumber != null && snap.prNumber === orchItem.prNumber;
-          if (alreadyTracked || !mergedPrTitle || prTitleMatchesWorkItem(mergedPrTitle, todoTitle)) {
+          if (alreadyTracked || !mergedPrTitle || prTitleMatchesWorkItem(mergedPrTitle, itemTitle)) {
             snap.prState = "merged";
           }
           // else: title mismatch — stale merged PR from a previous cycle, ignore it
@@ -726,8 +726,8 @@ export function reconstructState(
 
     switch (status) {
       case "merged": {
-        // Collision detection: verify the merged PR's title matches this TODO's title.
-        // If titles don't match, the merged PR belongs to a previous TODO that reused the
+        // Collision detection: verify the merged PR's title matches this work item's title.
+        // If titles don't match, the merged PR belongs to a previous item that reused the
         // same ID — treat as no-pr to avoid falsely completing the new item (H-MID-1).
         // BUT: skip the title check if the orchestrator already tracked this PR number
         // (from daemon state) — that means we assigned it during the previous run,
@@ -738,8 +738,8 @@ export function reconstructState(
           orch.setState(item.id, "merged");
         } else {
           const mergedPrTitle = parts[5] ?? "";
-          const todoTitle = orch.getItem(item.id)?.workItem.title ?? "";
-          if (mergedPrTitle && todoTitle && !prTitleMatchesWorkItem(mergedPrTitle, todoTitle)) {
+          const itemTitle = orch.getItem(item.id)?.workItem.title ?? "";
+          if (mergedPrTitle && itemTitle && !prTitleMatchesWorkItem(mergedPrTitle, itemTitle)) {
             orch.setState(item.id, "implementing");
             recoverWorkspaceRef(orch, item.id, workspaceList);
           } else {
@@ -772,7 +772,7 @@ export function reconstructState(
 
 /**
  * Try to recover the workspaceRef for an implementing item by matching
- * its TODO ID in the cmux workspace listing.
+ * its item ID in the cmux workspace listing.
  *
  * Workspace names follow the pattern: "workspace:N  ✳ <ID> <title>"
  * so we scan for lines containing the item ID.
@@ -803,10 +803,10 @@ function recoverWorkspaceRef(
  * Dependencies for cleanOrphanedWorktrees, injectable for testing.
  */
 export interface CleanOrphanedDeps {
-  /** List todo-* directory names in the worktree dir. */
+  /** List ninthwave-* directory names in the worktree dir. */
   getWorktreeIds(worktreeDir: string): string[];
-  /** List open todo IDs from todo files on disk. */
-  getOpenTodoIds(workDir: string): string[];
+  /** List open item IDs from work item files on disk. */
+  getOpenItemIds(workDir: string): string[];
   /** Clean a single worktree by ID. Returns true if cleaned. */
   cleanWorktree(id: string, worktreeDir: string, projectRoot: string): boolean;
   /** Close a multiplexer workspace by item ID (best-effort). */
@@ -815,7 +815,7 @@ export interface CleanOrphanedDeps {
   log(entry: LogEntry): void;
 }
 
-/** List todo-* worktree IDs in the worktree directory. */
+/** List ninthwave-* worktree IDs in the worktree directory. */
 function listWorktreeIds(worktreeDir: string): string[] {
   if (!existsSync(worktreeDir)) return [];
   try {
@@ -827,8 +827,8 @@ function listWorktreeIds(worktreeDir: string): string[] {
   }
 }
 
-/** List open todo IDs from todo files on disk. */
-function listOpenTodoIds(workDir: string): string[] {
+/** List open item IDs from work item files on disk. */
+function listOpenItemIds(workDir: string): string[] {
   if (!existsSync(workDir)) return [];
   try {
     const entries = readdirSync(workDir).filter((f) => f.endsWith(".md"));
@@ -844,9 +844,9 @@ function listOpenTodoIds(workDir: string): string[] {
 }
 
 /**
- * Clean orphaned todo-* worktrees that have no matching todo file.
- * A worktree `todo-{ID}` is orphaned if no `*--{ID}.md` file exists
- * in the todos directory. Non-todo worktrees are left alone.
+ * Clean orphaned ninthwave-* worktrees that have no matching work item file.
+ * A worktree is orphaned if no `*--{ID}.md` file exists
+ * in the work items directory. Non-ninthwave worktrees are left alone.
  *
  * Returns the list of IDs that were cleaned.
  */
@@ -859,11 +859,11 @@ export function cleanOrphanedWorktrees(
   const worktreeIds = deps.getWorktreeIds(worktreeDir);
   if (worktreeIds.length === 0) return [];
 
-  const openTodoIds = new Set(deps.getOpenTodoIds(workDir));
+  const openItemIds = new Set(deps.getOpenItemIds(workDir));
   const cleanedIds: string[] = [];
 
   for (const wtId of worktreeIds) {
-    if (!openTodoIds.has(wtId)) {
+    if (!openItemIds.has(wtId)) {
       // Close workspace before removing worktree to prevent orphaned windows
       if (deps.closeWorkspaceForItem) {
         try { deps.closeWorkspaceForItem(wtId); } catch { /* best-effort */ }
@@ -1211,7 +1211,7 @@ function handleActionExecution(
     });
   }
 
-  // After a successful merge, reconcile todo files with GitHub state
+  // After a successful merge, reconcile work item files with GitHub state
   // so list --ready reflects reality for the rest of the run.
   if (action.type === "merge" && result.success && deps.reconcile) {
     try {
@@ -1246,7 +1246,7 @@ export interface OrchestrateLoopDeps {
   actionDeps: OrchestratorDeps;
   /** Get available free memory in bytes. Defaults to os.freemem(). Injectable for testing. */
   getFreeMem?: () => number;
-  /** Reconcile todo files with GitHub state after merge actions. */
+  /** Reconcile work item files with GitHub state after merge actions. */
   reconcile?: (workDir: string, worktreeDir: string, projectRoot: string) => void;
   /** File I/O for analytics metrics (injectable for testing). When absent, analytics is skipped. */
   analyticsIO?: AnalyticsIO;
@@ -1260,7 +1260,7 @@ export interface OrchestrateLoopDeps {
   syncDisplay?: (orch: Orchestrator, snapshot: PollSnapshot) => void;
   /** Dependencies for external PR review processing. When present and reviewExternal is enabled, external PRs are scanned and reviewed. */
   externalReviewDeps?: ExternalReviewDeps;
-  /** Scan for TODO files. Required for watch mode — re-scans the todos directory to discover new items. */
+  /** Scan for work item files. Required for watch mode — re-scans the work directory to discover new items. */
   scanWorkItems?: () => WorkItem[];
   /** Crew coordination broker. When present, crew mode is active — claim before launch, complete after merge. */
   crewBroker?: CrewBroker;
@@ -1285,7 +1285,7 @@ export interface OrchestrateLoopConfig {
   maxIterations?: number;
   /** When true, scan for non-ninthwave PRs and spawn review workers for them. */
   reviewExternal?: boolean;
-  /** When true, daemon stays running after all items reach terminal state, watching for new TODO files. */
+  /** When true, daemon stays running after all items reach terminal state, watching for new work items. */
   watch?: boolean;
   /** Polling interval (milliseconds) for watch mode. Default: 30000 (30 seconds). */
   watchIntervalMs?: number;
@@ -1400,18 +1400,18 @@ export async function orchestrateLoop(
     if (allTerminal) {
       handleRunComplete(allItems, orch, ctx, deps, config, log, runStartTime, costData);
 
-      // Watch mode: instead of exiting, poll for new TODO files
+      // Watch mode: instead of exiting, poll for new work items
       if (config.watch && deps.scanWorkItems) {
         const watchInterval = config.watchIntervalMs ?? 30_000;
         log({
           ts: new Date().toISOString(),
           level: "info",
           event: "watch_mode_waiting",
-          message: "All items complete. Watching for new TODOs...",
+          message: "All items complete. Watching for new work items...",
           watchIntervalMs: watchInterval,
         });
 
-        // Poll for new TODOs until we find some or get aborted
+        // Poll for new work items until we find some or get aborted
         let foundNew = false;
         while (!foundNew) {
           __iterations++;
@@ -1428,21 +1428,21 @@ export async function orchestrateLoop(
             return;
           }
 
-          // Re-scan for TODO files
-          const freshTodos = deps.scanWorkItems();
+          // Re-scan for work item files
+          const freshItems = deps.scanWorkItems();
           const existingIds = new Set(orch.getAllItems().map((i) => i.id));
-          const newTodos = freshTodos.filter((t) => !existingIds.has(t.id));
+          const newItems = freshItems.filter((t) => !existingIds.has(t.id));
 
-          if (newTodos.length > 0) {
-            for (const todo of newTodos) {
-              orch.addItem(todo);
+          if (newItems.length > 0) {
+            for (const item of newItems) {
+              orch.addItem(item);
             }
             log({
               ts: new Date().toISOString(),
               level: "info",
               event: "watch_new_items",
-              newIds: newTodos.map((t) => t.id),
-              count: newTodos.length,
+              newIds: newItems.map((t) => t.id),
+              count: newItems.length,
             });
             foundNew = true;
           }
@@ -1480,7 +1480,7 @@ export async function orchestrateLoop(
       });
     }
 
-    // Crew mode: sync active TODOs to broker (fire-and-forget, before snapshot)
+    // Crew mode: sync active items to broker (fire-and-forget, before snapshot)
     // Clear author cache each cycle to avoid stale data across syncs.
     authorCache.clear();
     if (deps.crewBroker) {
@@ -1610,7 +1610,7 @@ export async function orchestrateLoop(
         // Persist external review state
         writeExternalReviews(ctx.projectRoot, externalReviews);
       } catch (e: unknown) {
-        // Non-fatal — external review failure shouldn't block TODO processing
+        // Non-fatal — external review failure shouldn't block work item processing
         const msg = e instanceof Error ? e.message : String(e);
         log({
           ts: new Date().toISOString(),
@@ -1951,42 +1951,42 @@ export async function cmdOrchestrate(
   if (!skipPreflight) {
     const pf = preflight(undefined, projectRoot);
     if (!pf.passed) {
-      // Check if the only failure is uncommitted TODOs — handle with auto-commit
-      const todoCheck = pf.checks.find(
-        (c) => c.status === "fail" && c.message.includes("uncommitted TODO file"),
+      // Check if the only failure is uncommitted work items — handle with auto-commit
+      const itemCheck = pf.checks.find(
+        (c) => c.status === "fail" && c.message.includes("uncommitted work item file"),
       );
       const otherErrors = pf.errors.filter(
-        (e) => !e.includes("uncommitted TODO file"),
+        (e) => !e.includes("uncommitted work item file"),
       );
 
-      if (todoCheck && otherErrors.length === 0) {
-        // Only uncommitted TODOs failed — try auto-commit
+      if (itemCheck && otherErrors.length === 0) {
+        // Only uncommitted work items failed — try auto-commit
         const isInteractive = !isDaemonChild && !daemonMode && process.stdout.isTTY === true;
         let shouldCommit = false;
 
         if (isInteractive) {
-          warn(todoCheck.message);
+          warn(itemCheck.message);
           shouldCommit = await confirmPrompt(
-            "Commit and push TODO files before launching workers?",
+            "Commit and push work item files before launching workers?",
             true,
           );
           if (!shouldCommit) {
-            die("Uncommitted TODO files detected. Commit them before launching workers.");
+            die("Uncommitted work item files detected. Commit them before launching workers.");
           }
         } else {
           // Daemon/non-interactive mode: auto-commit
-          info(`Auto-committing: ${todoCheck.message}`);
+          info(`Auto-committing: ${itemCheck.message}`);
           shouldCommit = true;
         }
 
         if (shouldCommit) {
           try {
             gitAdd(projectRoot, [".ninthwave/work/"]);
-            gitCommit(projectRoot, "chore: commit TODO files before orchestration");
+            gitCommit(projectRoot, "chore: commit work item files before orchestration");
             gitPush(projectRoot);
-            info("TODO files committed and pushed.");
+            info("Work item files committed and pushed.");
           } catch (err) {
-            die(`Failed to auto-commit TODO files: ${(err as Error).message}`);
+            die(`Failed to auto-commit work item files: ${(err as Error).message}`);
           }
         }
       } else {
@@ -2048,12 +2048,12 @@ export async function cmdOrchestrate(
   const computedWipLimit = computeDefaultWipLimit();
   let wipLimit = wipLimitOverride ?? computedWipLimit;
 
-  // Parse TODO items (needed for both interactive and flag-based modes)
-  const allTodos = parseWorkItems(workDir, worktreeDir);
+  // Parse work items (needed for both interactive and flag-based modes)
+  const workItems = parseWorkItems(workDir, worktreeDir);
 
   // Interactive mode: no --items and stdin is a TTY
   if (shouldEnterInteractive(itemIds.length > 0)) {
-    const result = await runInteractiveFlow(allTodos, wipLimit);
+    const result = await runInteractiveFlow(workItems, wipLimit);
     if (!result) {
       process.exit(0);
     }
@@ -2081,15 +2081,15 @@ export async function cmdOrchestrate(
   // Apply custom GitHub token so daemon and workers use the configured identity
   applyGithubToken(projectRoot);
 
-  const todoMap = new Map<string, WorkItem>();
-  for (const todo of allTodos) {
-    todoMap.set(todo.id, todo);
+  const workItemMap = new Map<string, WorkItem>();
+  for (const item of workItems) {
+    workItemMap.set(item.id, item);
   }
 
   // Validate all items exist
   for (const id of itemIds) {
-    if (!todoMap.has(id)) {
-      die(`Item ${id} not found in todo files`);
+    if (!workItemMap.has(id)) {
+      die(`Item ${id} not found in work item files`);
     }
   }
 
@@ -2104,7 +2104,7 @@ export async function cmdOrchestrate(
     ...(reviewCanApprove ? { reviewCanApprove } : {}),
   });
   for (const id of itemIds) {
-    orch.addItem(todoMap.get(id)!);
+    orch.addItem(workItemMap.get(id)!);
   }
 
   // Populate resolvedRepoRoot for cross-repo items
@@ -2153,7 +2153,7 @@ export async function cmdOrchestrate(
   // from previous runs don't confuse reconstructState or count toward WIP.
   cleanOrphanedWorktrees(workDir, worktreeDir, projectRoot, {
     getWorktreeIds: listWorktreeIds,
-    getOpenTodoIds: listOpenTodoIds,
+    getOpenItemIds: listOpenItemIds,
     cleanWorktree: (id, wtDir, root) => cleanSingleWorktree(id, wtDir, root),
     closeWorkspaceForItem: (itemId) => {
       const list = mux.listWorkspaces();
@@ -2179,14 +2179,14 @@ export async function cmdOrchestrate(
   const actionDeps: OrchestratorDeps = {
     launchSingleItem: (item, workDir, worktreeDir, projectRoot, aiTool, baseBranch, forceWorkerLaunch) =>
       launchSingleItem(item, workDir, worktreeDir, projectRoot, aiTool, mux, { baseBranch, forceWorkerLaunch }),
-    cleanStaleBranch: (todo, projRoot) => {
+    cleanStaleBranch: (item, projRoot) => {
       let targetRepo: string;
       try {
-        targetRepo = resolveRepo(todo.repoAlias, projRoot);
+        targetRepo = resolveRepo(item.repoAlias, projRoot);
       } catch {
         return; // Can't resolve repo — launchSingleItem will handle the error
       }
-      cleanStaleBranchForReuse(todo.id, todo.title, targetRepo);
+      cleanStaleBranchForReuse(item.id, item.title, targetRepo);
     },
     cleanSingleWorktree,
     prMerge: (repoRoot, prNumber) => prMerge(repoRoot, prNumber),

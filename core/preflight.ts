@@ -127,24 +127,24 @@ export function checkGitConfig(runner: ShellRunner): CheckResult {
   };
 }
 
-/** Check: no uncommitted TODO files in .ninthwave/work/. */
+/** Check: no uncommitted work item files in .ninthwave/work/. */
 export function checkUncommittedWorkItems(
   projectRoot: string,
   runner: ShellRunner,
 ): CheckResult {
   const status = runner("git", ["-C", projectRoot, "status", "--porcelain", ".ninthwave/work/"]);
   if (status.exitCode !== 0) {
-    return { status: "warn", message: "Could not check TODO file status" };
+    return { status: "warn", message: "Could not check work item file status" };
   }
   const changes = status.stdout.trim();
   if (!changes) {
-    return { status: "pass", message: "All TODO files committed" };
+    return { status: "pass", message: "All work item files committed" };
   }
   const count = changes.split("\n").filter(Boolean).length;
   return {
     status: "fail",
-    message: `${count} uncommitted TODO file(s) in .ninthwave/work/`,
-    detail: "Run: git add .ninthwave/work/ && git commit -m 'chore: add TODO files' && git push",
+    message: `${count} uncommitted work item file(s) in .ninthwave/work/`,
+    detail: "Run: git add .ninthwave/work/ && git commit -m 'chore: add work item files' && git push",
   };
 }
 
@@ -197,7 +197,7 @@ export function checkCopilotTrust(
  * human-readable error messages for any failures.
  *
  * When projectRoot is provided, includes project-specific checks
- * (e.g., uncommitted TODO files). Without it, only environment checks run.
+ * (e.g., uncommitted work item files). Without it, only environment checks run.
  */
 export function preflight(
   runner: ShellRunner = defaultShellRunner,

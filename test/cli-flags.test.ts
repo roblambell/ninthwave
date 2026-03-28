@@ -88,7 +88,7 @@ describe("CLI flags", () => {
       const result = runCli("list", "--help");
       expect(result.exitCode).toBe(0);
       expect(result.stdout).toContain("nw list");
-      expect(result.stdout).toContain("List TODO items");
+      expect(result.stdout).toContain("List work items");
     });
 
     it("shows command-specific help for list -h", () => {

@@ -2207,18 +2207,18 @@ describe("cleanOrphanedWorktrees", () => {
   function makeDeps(overrides: Partial<CleanOrphanedDeps> = {}): CleanOrphanedDeps {
     return {
       getWorktreeIds: () => [],
-      getOpenTodoIds: () => [],
+      getOpenItemIds: () => [],
       cleanWorktree: () => true,
       log: () => {},
       ...overrides,
     };
   }
 
-  it("cleans worktrees with no matching todo file", () => {
+  it("cleans worktrees with no matching work item file", () => {
     const cleaned: string[] = [];
     const deps = makeDeps({
       getWorktreeIds: () => ["M-CI-1", "H-WRK-2"],
-      getOpenTodoIds: () => ["H-WRK-2"], // M-CI-1 has no todo file
+      getOpenItemIds: () => ["H-WRK-2"], // M-CI-1 has no work item file
       cleanWorktree: (id) => {
         cleaned.push(id);
         return true;
@@ -2230,11 +2230,11 @@ describe("cleanOrphanedWorktrees", () => {
     expect(cleaned).toEqual(["M-CI-1"]);
   });
 
-  it("preserves worktrees with matching todo file", () => {
+  it("preserves worktrees with matching work item file", () => {
     const cleaned: string[] = [];
     const deps = makeDeps({
       getWorktreeIds: () => ["M-CI-1", "H-WRK-2"],
-      getOpenTodoIds: () => ["M-CI-1", "H-WRK-2"],
+      getOpenItemIds: () => ["M-CI-1", "H-WRK-2"],
       cleanWorktree: (id) => {
         cleaned.push(id);
         return true;
@@ -2249,7 +2249,7 @@ describe("cleanOrphanedWorktrees", () => {
   it("returns empty when no worktrees exist", () => {
     const deps = makeDeps({
       getWorktreeIds: () => [],
-      getOpenTodoIds: () => ["M-CI-1"],
+      getOpenItemIds: () => ["M-CI-1"],
     });
 
     const result = cleanOrphanedWorktrees("/todos", "/worktrees", "/root", deps);
@@ -2260,7 +2260,7 @@ describe("cleanOrphanedWorktrees", () => {
     const logs: LogEntry[] = [];
     const deps = makeDeps({
       getWorktreeIds: () => ["M-CI-1", "H-WRK-2"],
-      getOpenTodoIds: () => [],
+      getOpenItemIds: () => [],
       log: (entry) => logs.push(entry),
     });
 
@@ -2275,7 +2275,7 @@ describe("cleanOrphanedWorktrees", () => {
     const logs: LogEntry[] = [];
     const deps = makeDeps({
       getWorktreeIds: () => ["M-CI-1"],
-      getOpenTodoIds: () => ["M-CI-1"],
+      getOpenItemIds: () => ["M-CI-1"],
       log: (entry) => logs.push(entry),
     });
 
@@ -2500,7 +2500,7 @@ describe("orchestrateLoop watch mode", () => {
     // Watch mode waiting log was emitted
     expect(logs.some((l) => l.event === "watch_mode_waiting")).toBe(true);
     const watchLog = logs.find((l) => l.event === "watch_mode_waiting")!;
-    expect(watchLog.message).toBe("All items complete. Watching for new TODOs...");
+    expect(watchLog.message).toBe("All items complete. Watching for new work items...");
 
     // New items detected log was emitted
     expect(logs.some((l) => l.event === "watch_new_items")).toBe(true);

@@ -122,7 +122,7 @@ export const COMMAND_REGISTRY: ReadonlyArray<CommandEntry> = [
     needsWork: true,
     handler: async (ctx) => { await cmdWatch(ctx.args, ctx.workDir, ctx.worktreeDir, ctx.projectRoot); },
     flags: {
-      "--items": "TODO item IDs to process",
+      "--items": "Work item IDs to process",
       "--daemon": "Run in daemon mode (background)",
       "--no-watch": "Disable TUI watch mode",
       "--watch": "Enable TUI watch mode",
@@ -203,7 +203,7 @@ export const COMMAND_REGISTRY: ReadonlyArray<CommandEntry> = [
   {
     name: "list",
     usage: "list [--priority P] [--domain D] [--feature F] [--ready]",
-    description: "List TODO items",
+    description: "List work items",
     group: "diagnostic",
     needsRoot: true,
     needsWork: true,
@@ -224,7 +224,7 @@ export const COMMAND_REGISTRY: ReadonlyArray<CommandEntry> = [
   {
     name: "deps",
     usage: "deps <ID>",
-    description: "Show dependency chain for a TODO item",
+    description: "Show dependency chain for a work item",
     group: "diagnostic",
     needsRoot: true,
     needsWork: true,
@@ -235,7 +235,7 @@ export const COMMAND_REGISTRY: ReadonlyArray<CommandEntry> = [
   {
     name: "conflicts",
     usage: "conflicts <ID1> <ID2>...",
-    description: "Check file conflicts between TODO items",
+    description: "Check file conflicts between work items",
     group: "diagnostic",
     needsRoot: true,
     needsWork: true,
@@ -306,7 +306,7 @@ export const COMMAND_REGISTRY: ReadonlyArray<CommandEntry> = [
   {
     name: "start",
     usage: "start <ID1> [ID2]...",
-    description: "Launch parallel coding sessions for TODO items",
+    description: "Launch parallel coding sessions for work items",
     group: "advanced",
     needsRoot: true,
     needsWork: true,
@@ -339,7 +339,7 @@ export const COMMAND_REGISTRY: ReadonlyArray<CommandEntry> = [
   {
     name: "close-workspaces",
     usage: "close-workspaces",
-    description: "Close all cmux todo workspaces",
+    description: "Close all cmux workspaces",
     group: "advanced",
     needsRoot: true,
     needsWork: false,
@@ -361,7 +361,7 @@ export const COMMAND_REGISTRY: ReadonlyArray<CommandEntry> = [
   {
     name: "mark-done",
     usage: "mark-done <ID1> [ID2]...",
-    description: "Remove completed TODO files from disk",
+    description: "Remove completed work item files from disk",
     group: "advanced",
     needsRoot: true,
     needsWork: true,
@@ -372,7 +372,7 @@ export const COMMAND_REGISTRY: ReadonlyArray<CommandEntry> = [
   {
     name: "reconcile",
     usage: "reconcile",
-    description: "Sync TODO files with merged PRs",
+    description: "Sync work items with merged PRs",
     group: "advanced",
     needsRoot: true,
     needsWork: true,
@@ -427,7 +427,7 @@ export const COMMAND_REGISTRY: ReadonlyArray<CommandEntry> = [
   {
     name: "heartbeat",
     usage: "heartbeat --progress <0-1> --label <text>",
-    description: "Report worker progress (auto-detects TODO ID from branch)",
+    description: "Report worker progress (auto-detects item ID from branch)",
     group: "advanced",
     needsRoot: true,
     needsWork: false,
@@ -577,7 +577,7 @@ function printGroup(label: string, commands: CommandEntry[]): void {
 /** Print grouped usage help (Workflow + Diagnostics only). */
 export function printHelp(): void {
   console.log("Usage: nw <command> [options]");
-  console.log("       nw <ID> [ID2...]          Launch TODO items by ID");
+  console.log("       nw <ID> [ID2...]          Launch work items by ID");
   console.log();
 
   const groups = commandsByGroup(["workflow", "diagnostic"]);
@@ -592,7 +592,7 @@ export function printHelp(): void {
 /** Print full usage help with all groups including Advanced. */
 export function printHelpAll(): void {
   console.log("Usage: nw <command> [options]");
-  console.log("       nw <ID> [ID2...]          Launch TODO items by ID");
+  console.log("       nw <ID> [ID2...]          Launch work items by ID");
   console.log();
 
   const groups = commandsByGroup(GROUP_ORDER);

@@ -90,14 +90,14 @@ describe("cmdCloseWorkspaces", () => {
     expect(output).toContain("No cmux workspaces");
   });
 
-  it("closes matching todo workspaces", () => {
+  it("closes matching workspaces", () => {
     const mockMux = createMockMux();
     mockMux.listWorkspaces.mockReturnValue(
       "workspace:1 TODO H-CI-2 some title\nworkspace:2 TODO M-CI-1 another title",
     );
 
     const output = captureOutput(() => cmdCloseWorkspaces(mockMux));
-    expect(output).toContain("Closed 2 todo workspace(s)");
+    expect(output).toContain("Closed 2 workspace(s)");
     expect(mockMux.closeWorkspace).toHaveBeenCalledTimes(2);
   });
 });

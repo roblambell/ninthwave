@@ -72,7 +72,7 @@ function makeDeps(overrides: Partial<ReconcileDeps> = {}): ReconcileDeps {
   return {
     pullRebase: () => ({ ok: true, conflict: false }),
     getMergedTodoIds: () => [],
-    getOpenTodoIds: (workDir: string) => {
+    getOpenItemIds: (workDir: string) => {
       if (!existsSync(workDir)) return [];
       try {
         const entries = readdirSync(workDir).filter(f => f.endsWith(".md"));

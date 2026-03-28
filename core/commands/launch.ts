@@ -1,4 +1,4 @@
-// start command: launch parallel AI coding sessions for TODO items.
+// start command: launch parallel AI coding sessions for work items.
 
 import { existsSync, mkdirSync, readFileSync, writeFileSync, unlinkSync, copyFileSync } from "fs";
 import { join, basename, dirname } from "path";
@@ -67,7 +67,7 @@ export function sanitizeForShellQuoting(text: string): string {
     .replace(/[^\x00-\x7F]/g, "");     // strip remaining non-ASCII
 }
 
-/** Result of launching a single TODO item. */
+/** Result of launching a single work item. */
 export interface LaunchResult {
   worktreePath: string;
   workspaceRef: string;
@@ -185,7 +185,7 @@ export function detectAiTool(): string {
 }
 
 /**
- * Launch an AI coding session for a single TODO item.
+ * Launch an AI coding session for a single work item.
  *
  * @param options.agentName - The agent prompt to use (default: "ninthwave-implementer").
  *   Pass "ninthwave-reviewer" for review sessions, or any future agent type.
@@ -210,7 +210,7 @@ export function launchAiSession(
       break;
     case "opencode":
       cmd = `opencode --agent ${agentName} --title '${wsName}'`;
-      initialPrompt = `${readFileSync(promptFile, "utf-8")}\n\nStart implementing this TODO now.`;
+      initialPrompt = `${readFileSync(promptFile, "utf-8")}\n\nStart implementing this work item now.`;
       break;
     case "copilot": {
       // Write a launcher script that reads the prompt from a file and passes
@@ -220,7 +220,7 @@ export function launchAiSession(
       const promptDataFile = `/tmp/nw-prompt-${id}-${Date.now()}`;
       writeFileSync(
         promptDataFile,
-        `${readFileSync(promptFile, "utf-8")}\n\nStart implementing this TODO now.`,
+        `${readFileSync(promptFile, "utf-8")}\n\nStart implementing this work item now.`,
       );
       writeFileSync(
         launcherScript,
@@ -274,7 +274,7 @@ export function launchAiSession(
   return wsRef;
 }
 
-// ── Stale branch cleanup for reused TODO IDs ────────────────────────
+// ── Stale branch cleanup for reused work item IDs ───────────────────
 
 /** Dependencies for stale branch cleanup, injectable for testing. */
 export interface StaleBranchCleanupDeps {
@@ -296,25 +296,25 @@ const defaultStaleBranchDeps: StaleBranchCleanupDeps = {
 };
 
 /**
- * Clean up stale branches when a TODO ID is reused with different work.
+ * Clean up stale branches when a work item ID is reused with different work.
  *
- * When a TODO ID is reused (same ID, different title), the old `ninthwave/*` branch
+ * When a work item ID is reused (same ID, different title), the old `ninthwave/*` branch
  * may still exist with a merged PR. Workers launched on this branch detect the
  * existing merged PR and immediately exit, falsely marking the item as "done".
  *
  * This function checks if merged PRs exist for the branch with titles that
- * don't match the current TODO title. If so, it deletes both local and remote
+ * don't match the current work item title. If so, it deletes both local and remote
  * branches so the worker starts fresh with a new branch and PR.
  *
  * @returns true if stale branches were cleaned, false if no cleanup needed
  */
 export function cleanStaleBranchForReuse(
-  todoId: string,
-  todoTitle: string,
+  itemId: string,
+  itemTitle: string,
   targetRepo: string,
   deps: StaleBranchCleanupDeps = defaultStaleBranchDeps,
 ): boolean {
-  const branchName = `ninthwave/${todoId}`;
+  const branchName = `ninthwave/${itemId}`;
 
   // Check for merged PRs on this branch
   const mergedPrs = deps.prList(targetRepo, branchName, "merged");
@@ -322,9 +322,9 @@ export function cleanStaleBranchForReuse(
     return false; // No merged PRs — nothing to clean
   }
 
-  // Check if any merged PR title matches the current TODO title
+  // Check if any merged PR title matches the current work item title
   const hasMatchingTitle = mergedPrs.some((pr) =>
-    prTitleMatchesWorkItem(pr.title, todoTitle),
+    prTitleMatchesWorkItem(pr.title, itemTitle),
   );
   if (hasMatchingTitle) {
     return false; // Title matches — same work, normal flow
@@ -333,7 +333,7 @@ export function cleanStaleBranchForReuse(
   // Title mismatch — stale branch from a previous cycle with different work
   deps.warn(
     `Stale branch detected: ${branchName} has ${mergedPrs.length} merged PR(s) from a previous cycle. ` +
-    `Old PR: "${mergedPrs[0]!.title}", new TODO: "${todoTitle}". Deleting stale branches.`,
+    `Old PR: "${mergedPrs[0]!.title}", new item: "${itemTitle}". Deleting stale branches.`,
   );
 
   // Delete local branch if it exists
@@ -362,17 +362,17 @@ export function cleanStaleBranchForReuse(
 }
 
 /**
- * Extract full TODO text for an item from its individual todo file.
+ * Extract full work item text from its individual file.
  * Looks for a file matching `*--{targetId}.md` in workDir.
  */
-export function extractTodoText(workDir: string, targetId: string): string {
+export function extractItemText(workDir: string, targetId: string): string {
   const item = readWorkItem(workDir, targetId);
   if (!item) return "";
   return item.rawText;
 }
 
 /**
- * Launch a single TODO item: create worktree, allocate partition, start AI session.
+ * Launch a single work item: create worktree, allocate partition, start AI session.
  * Used by the orchestrator to launch items one at a time as WIP slots open.
  */
 export function launchSingleItem(
@@ -573,7 +573,7 @@ export function launchSingleItem(
   );
 
   // Build system prompt
-  const todoText = extractTodoText(workDir, item.id);
+  const itemText = extractItemText(workDir, item.id);
   const baseBranchLine = options.baseBranch ? `BASE_BRANCH: ${options.baseBranch}\n` : "";
   const seededAgentsLine = seededAgents.length > 0
     ? `\nNOTE: The following files were seeded into this worktree by ninthwave and should be included in your first commit: ${seededAgents.join(", ")}\n`
@@ -583,7 +583,7 @@ YOUR_PARTITION: ${partition}
 PROJECT_ROOT: ${targetRepo}
 HUB_ROOT: ${projectRoot}
 ${baseBranchLine}${seededAgentsLine}
-${todoText}`;
+${itemText}`;
 
   // Write system prompt to a temp file
   const promptFile = join(tmpdir(), `nw-prompt-${item.id}-${Date.now()}`);
@@ -885,14 +885,14 @@ REPO_ROOT: ${repoRoot}`;
 }
 
 /**
- * CLI-level regex for detecting TODO IDs as positional arguments.
+ * CLI-level regex for detecting work item IDs as positional arguments.
  * Matches uppercase IDs like H-RR-1, M-SF-1, L-VIS-15, H-CP-7a.
  * Does NOT match lowercase variants or regular command names.
  */
-export const TODO_ID_CLI_PATTERN = /^[A-Z]+-[A-Z0-9]+-\d+[a-z]*$/;
+export const WORK_ITEM_ID_CLI_PATTERN = /^[A-Z]+-[A-Z0-9]+-\d+[a-z]*$/;
 
 /**
- * Launch TODO items by ID with topological dependency ordering.
+ * Launch work items by ID with topological dependency ordering.
  *
  * This is the handler for `nw <ID> [ID2...]` — the primary way to launch items.
  * It validates IDs, checks dependencies, computes batch order, and launches
@@ -915,7 +915,7 @@ export async function cmdRunItems(
   // Validate all IDs exist
   for (const id of ids) {
     if (!itemMap.has(id)) {
-      die(`TODO item ${id} not found. Run 'nw list' to see available items.`);
+      die(`Work item ${id} not found. Run 'nw list' to see available items.`);
     }
   }
 
@@ -926,8 +926,8 @@ export async function cmdRunItems(
     const item = itemMap.get(id)!;
     for (const depId of item.dependencies) {
       if (selectedSet.has(depId)) continue; // will be launched in correct order
-      if (!itemMap.has(depId)) continue; // already completed (todo file removed)
-      // Dep exists in TODO list but not in selected set — not ready
+      if (!itemMap.has(depId)) continue; // already completed (work item file removed)
+      // Dep exists in work item list but not in selected set — not ready
       die(
         `Cannot launch ${id}: depends on ${depId} which is neither completed nor included.\n` +
         `  Either include ${depId} in the launch: nw ${[...ids, depId].join(" ")}\n` +
@@ -979,15 +979,15 @@ export async function cmdRunItems(
   }
   console.log();
 
-  // Pre-flight: check for uncommitted TODO files
-  const todoCheck = checkUncommittedWorkItems(
+  // Pre-flight: check for uncommitted work item files
+  const itemCheck = checkUncommittedWorkItems(
     projectRoot,
     (cmd, a, opts) => defaultRun(cmd, a, opts),
   );
-  if (todoCheck.status === "fail") {
-    warn(todoCheck.message);
-    warn(todoCheck.detail ?? "Commit TODO files before launching workers.");
-    die("Workers will branch from committed main and miss uncommitted TODO specs.");
+  if (itemCheck.status === "fail") {
+    warn(itemCheck.message);
+    warn(itemCheck.detail ?? "Commit work item files before launching workers.");
+    die("Workers will branch from committed main and miss uncommitted work item specs.");
   }
 
   // Apply custom GitHub token so workers inherit it via environment
@@ -1008,8 +1008,8 @@ export async function cmdRunItems(
   // Clean stale partition locks before allocating
   const partitionDir = join(worktreeDir, ".partitions");
   const crossRepoIndex = join(worktreeDir, ".cross-repo-index");
-  cleanupStalePartitions(partitionDir, worktreeDir, (todoId) =>
-    getWorktreeInfo(todoId, crossRepoIndex, worktreeDir),
+  cleanupStalePartitions(partitionDir, worktreeDir, (itemId) =>
+    getWorktreeInfo(itemId, crossRepoIndex, worktreeDir),
   );
 
   const mux = muxOverride ?? getMux();
@@ -1082,15 +1082,15 @@ export async function cmdStart(
   }
   const allIds = new Set(items.map((it) => it.id));
 
-  // Pre-flight: check for uncommitted TODO files
-  const todoCheck = checkUncommittedWorkItems(
+  // Pre-flight: check for uncommitted work item files
+  const itemCheck = checkUncommittedWorkItems(
     projectRoot,
     (cmd, args, opts) => defaultRun(cmd, args, opts),
   );
-  if (todoCheck.status === "fail") {
-    warn(todoCheck.message);
-    warn(todoCheck.detail ?? "Commit TODO files before launching workers.");
-    die("Workers will branch from committed main and miss uncommitted TODO specs.");
+  if (itemCheck.status === "fail") {
+    warn(itemCheck.message);
+    warn(itemCheck.detail ?? "Commit work item files before launching workers.");
+    die("Workers will branch from committed main and miss uncommitted work item specs.");
   }
 
   // Apply custom GitHub token so workers inherit it via environment
@@ -1164,8 +1164,8 @@ export async function cmdStart(
   // Clean stale partition locks before allocating
   const partitionDir = join(worktreeDir, ".partitions");
   const crossRepoIndex = join(worktreeDir, ".cross-repo-index");
-  cleanupStalePartitions(partitionDir, worktreeDir, (todoId) =>
-    getWorktreeInfo(todoId, crossRepoIndex, worktreeDir),
+  cleanupStalePartitions(partitionDir, worktreeDir, (itemId) =>
+    getWorktreeInfo(itemId, crossRepoIndex, worktreeDir),
   );
 
   // Compute WIP limit from RAM

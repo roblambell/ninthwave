@@ -28,7 +28,7 @@ vi.mock("../core/git.ts", () => ({
 // functions to this mock, update the comment in git.test.ts lines 5-11.
 
 
-import { detectAiTool, cmdStart, cmdRunItems, launchSingleItem, launchAiSession, launchReviewWorker, sanitizeTitle, extractTodoText, cleanStaleBranchForReuse, TODO_ID_CLI_PATTERN } from "../core/commands/launch.ts";
+import { detectAiTool, cmdStart, cmdRunItems, launchSingleItem, launchAiSession, launchReviewWorker, sanitizeTitle, extractItemText, cleanStaleBranchForReuse, WORK_ITEM_ID_CLI_PATTERN } from "../core/commands/launch.ts";
 import { parseWorkItems } from "../core/parser.ts";
 import { fetchOrigin, ffMerge, createWorktree, branchExists, deleteBranch, findWorktreeForBranch, removeWorktree } from "../core/git.ts";
 
@@ -867,7 +867,7 @@ describe("sanitizeTitle", () => {
   });
 });
 
-describe("extractTodoText", () => {
+describe("extractItemText", () => {
   afterEach(() => cleanupTempRepos());
 
   /** Helper to create a todos directory with individual todo files. */
@@ -902,7 +902,7 @@ describe("extractTodoText", () => {
       "# Feat: Another item (M-FT-2)\n\n**Priority:** Medium\n**Depends on:** None\n**Domain:** features\n",
     );
 
-    const text = extractTodoText(workDir, "H-BUG-1");
+    const text = extractItemText(workDir, "H-BUG-1");
     expect(text).toContain("# Fix: Some bug (H-BUG-1)");
     expect(text).toContain("**Priority:** High");
     expect(text).toContain("Description of the bug.");
@@ -921,7 +921,7 @@ describe("extractTodoText", () => {
       "# Fix: Some bug (H-BUG-1)\n\n**Priority:** High\n**Depends on:** None\n**Domain:** bugs\n",
     );
 
-    const text = extractTodoText(workDir, "NONEXISTENT-99");
+    const text = extractItemText(workDir, "NONEXISTENT-99");
     expect(text).toBe("");
   });
 
@@ -930,7 +930,7 @@ describe("extractTodoText", () => {
     const workDir = join(repo, ".ninthwave", "work");
     // Directory does not exist
 
-    const text = extractTodoText(workDir, "H-BUG-1");
+    const text = extractItemText(workDir, "H-BUG-1");
     expect(text).toBe("");
   });
 
@@ -947,7 +947,7 @@ describe("extractTodoText", () => {
     );
 
     // File-per-todo uses exact suffix matching (--H-BUG-1.md), so H-BUG-1 matches exactly
-    const text = extractTodoText(workDir, "H-BUG-1");
+    const text = extractItemText(workDir, "H-BUG-1");
     expect(text).toContain("Item one");
     expect(text).toContain("Description for 1.");
     expect(text).not.toContain("Item ten");
@@ -972,7 +972,7 @@ describe("extractTodoText", () => {
       ].join("\n"),
     );
 
-    const text = extractTodoText(workDir, "L-LAST-1");
+    const text = extractItemText(workDir, "L-LAST-1");
     expect(text).toContain("# Fix: Only item (L-LAST-1)");
     expect(text).toContain("This is the last item.");
     expect(text).toContain("Acceptance: Done.");
@@ -982,7 +982,7 @@ describe("extractTodoText", () => {
     const repo = setupTempRepo();
     const workDir = createTodosDir(repo);
 
-    const text = extractTodoText(workDir, "H-BUG-1");
+    const text = extractItemText(workDir, "H-BUG-1");
     expect(text).toBe("");
   });
 });
@@ -1315,46 +1315,46 @@ describe("launchReviewWorker", () => {
   });
 });
 
-// ── TODO_ID_CLI_PATTERN tests ───────────────────────────────────────
+// ── WORK_ITEM_ID_CLI_PATTERN tests ───────────────────────────────────────
 
-describe("TODO_ID_CLI_PATTERN", () => {
+describe("WORK_ITEM_ID_CLI_PATTERN", () => {
   it("matches valid uppercase TODO IDs", () => {
-    expect(TODO_ID_CLI_PATTERN.test("H-RR-1")).toBe(true);
-    expect(TODO_ID_CLI_PATTERN.test("M-SF-1")).toBe(true);
-    expect(TODO_ID_CLI_PATTERN.test("L-VIS-15")).toBe(true);
-    expect(TODO_ID_CLI_PATTERN.test("C-UO-1")).toBe(true);
-    expect(TODO_ID_CLI_PATTERN.test("H-CR-5")).toBe(true);
-    expect(TODO_ID_CLI_PATTERN.test("H-BF5-1")).toBe(true);
+    expect(WORK_ITEM_ID_CLI_PATTERN.test("H-RR-1")).toBe(true);
+    expect(WORK_ITEM_ID_CLI_PATTERN.test("M-SF-1")).toBe(true);
+    expect(WORK_ITEM_ID_CLI_PATTERN.test("L-VIS-15")).toBe(true);
+    expect(WORK_ITEM_ID_CLI_PATTERN.test("C-UO-1")).toBe(true);
+    expect(WORK_ITEM_ID_CLI_PATTERN.test("H-CR-5")).toBe(true);
+    expect(WORK_ITEM_ID_CLI_PATTERN.test("H-BF5-1")).toBe(true);
   });
 
   it("matches IDs with lowercase suffix (split items)", () => {
-    expect(TODO_ID_CLI_PATTERN.test("H-CP-7a")).toBe(true);
-    expect(TODO_ID_CLI_PATTERN.test("H-CP-7b")).toBe(true);
+    expect(WORK_ITEM_ID_CLI_PATTERN.test("H-CP-7a")).toBe(true);
+    expect(WORK_ITEM_ID_CLI_PATTERN.test("H-CP-7b")).toBe(true);
   });
 
   it("rejects regular command names", () => {
-    expect(TODO_ID_CLI_PATTERN.test("watch")).toBe(false);
-    expect(TODO_ID_CLI_PATTERN.test("init")).toBe(false);
-    expect(TODO_ID_CLI_PATTERN.test("list")).toBe(false);
-    expect(TODO_ID_CLI_PATTERN.test("start")).toBe(false);
-    expect(TODO_ID_CLI_PATTERN.test("status")).toBe(false);
+    expect(WORK_ITEM_ID_CLI_PATTERN.test("watch")).toBe(false);
+    expect(WORK_ITEM_ID_CLI_PATTERN.test("init")).toBe(false);
+    expect(WORK_ITEM_ID_CLI_PATTERN.test("list")).toBe(false);
+    expect(WORK_ITEM_ID_CLI_PATTERN.test("start")).toBe(false);
+    expect(WORK_ITEM_ID_CLI_PATTERN.test("status")).toBe(false);
   });
 
   it("rejects lowercase TODO IDs", () => {
-    expect(TODO_ID_CLI_PATTERN.test("h-rr-1")).toBe(false);
-    expect(TODO_ID_CLI_PATTERN.test("m-sf-1")).toBe(false);
+    expect(WORK_ITEM_ID_CLI_PATTERN.test("h-rr-1")).toBe(false);
+    expect(WORK_ITEM_ID_CLI_PATTERN.test("m-sf-1")).toBe(false);
   });
 
   it("rejects partial matches", () => {
-    expect(TODO_ID_CLI_PATTERN.test("H-RR")).toBe(false);
-    expect(TODO_ID_CLI_PATTERN.test("H")).toBe(false);
-    expect(TODO_ID_CLI_PATTERN.test("RR-1")).toBe(false);
+    expect(WORK_ITEM_ID_CLI_PATTERN.test("H-RR")).toBe(false);
+    expect(WORK_ITEM_ID_CLI_PATTERN.test("H")).toBe(false);
+    expect(WORK_ITEM_ID_CLI_PATTERN.test("RR-1")).toBe(false);
   });
 
   it("rejects flags and other formats", () => {
-    expect(TODO_ID_CLI_PATTERN.test("--help")).toBe(false);
-    expect(TODO_ID_CLI_PATTERN.test("-v")).toBe(false);
-    expect(TODO_ID_CLI_PATTERN.test("")).toBe(false);
+    expect(WORK_ITEM_ID_CLI_PATTERN.test("--help")).toBe(false);
+    expect(WORK_ITEM_ID_CLI_PATTERN.test("-v")).toBe(false);
+    expect(WORK_ITEM_ID_CLI_PATTERN.test("")).toBe(false);
   });
 });
 

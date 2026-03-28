@@ -24,10 +24,10 @@ export interface ReconcileDeps {
   /** Get IDs and PR titles of merged ninthwave/* PRs from GitHub. Queries hub repo and any cross-repo targets. */
   getMergedTodoIds(projectRoot: string, worktreeDir: string): Array<{ id: string; prTitle: string }>;
 
-  /** Get IDs of open todo items from the todos directory. */
-  getOpenTodoIds(workDir: string): string[];
+  /** Get IDs of open work items from the work directory. */
+  getOpenItemIds(workDir: string): string[];
 
-  /** Mark items as done (delete their todo files). */
+  /** Mark items as done (delete their work item files). */
   markDone(ids: string[], workDir: string): void;
 
   /** List worktree IDs present in the worktree directory. */
@@ -207,7 +207,7 @@ export function defaultDeps(): ReconcileDeps {
   return {
     pullRebase: defaultPullRebase,
     getMergedTodoIds: (projectRoot, worktreeDir) => defaultGetMergedTodoIds(projectRoot, worktreeDir),
-    getOpenTodoIds: defaultGetOpenTodoIds,
+    getOpenItemIds: defaultGetOpenTodoIds,
     markDone: defaultMarkDone,
     getWorktreeIds: defaultGetWorktreeIds,
     cleanWorktree: defaultCleanWorktree,
@@ -254,11 +254,11 @@ export function reconcile(
     info("No merged ninthwave/* PRs found.");
   }
 
-  // Step 3: Find items that are merged but still have todo files.
-  // Collision safety (H-MID-1): compare the merged PR's title with the TODO file's
+  // Step 3: Find items that are merged but still have work item files.
+  // Collision safety (H-MID-1): compare the merged PR's title with the work item file's
   // title. If they don't match, the merged PR belongs to a previous cycle that reused
-  // the same ID — skip it to avoid falsely deleting the new TODO.
-  const openIds = new Set(deps.getOpenTodoIds(workDir));
+  // the same ID — skip it to avoid falsely deleting the new work item.
+  const openIds = new Set(deps.getOpenItemIds(workDir));
   const mergedPrTitleById = new Map(mergedItems.map((m) => [m.id, m.prTitle]));
   const toMarkDone: string[] = [];
   const skippedCollisions: string[] = [];
@@ -266,10 +266,10 @@ export function reconcile(
   for (const merged of mergedItems) {
     if (!openIds.has(merged.id)) continue;
 
-    // Title-match check: read the TODO file's title and compare with the merged PR's title
+    // Title-match check: read the work item file's title and compare with the merged PR's title
     if (merged.prTitle) {
-      const todoItem = readWorkItem(workDir, merged.id);
-      if (todoItem?.title && !prTitleMatchesWorkItem(merged.prTitle, todoItem.title)) {
+      const workItem = readWorkItem(workDir, merged.id);
+      if (workItem?.title && !prTitleMatchesWorkItem(merged.prTitle, workItem.title)) {
         skippedCollisions.push(merged.id);
         continue;
       }
@@ -339,9 +339,9 @@ export function reconcile(
     info(`Closed ${closedWorkspaces} stale workspace(s).`);
   }
 
-  // Step 4.6: Clean orphaned worktrees — worktrees with no matching todo file.
+  // Step 4.6: Clean orphaned worktrees — worktrees with no matching work item file.
   // Skip IDs already handled by step 4 (merged items) to avoid double-cleaning.
-  const refreshedOpenIds = new Set(deps.getOpenTodoIds(workDir));
+  const refreshedOpenIds = new Set(deps.getOpenItemIds(workDir));
   const refreshedWorktreeIds = deps.getWorktreeIds(worktreeDir);
   let orphanCount = 0;
   for (const wtId of refreshedWorktreeIds) {

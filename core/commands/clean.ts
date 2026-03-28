@@ -13,7 +13,7 @@ import {
 } from "../cross-repo.ts";
 
 /**
- * Close cmux workspaces whose TODO ID is in the given set.
+ * Close cmux workspaces whose item ID is in the given set.
  * Shared helper used by both reconcile (targeted) and clean (broad).
  * Returns the number of workspaces successfully closed.
  */
@@ -31,14 +31,14 @@ export function closeWorkspacesForIds(
     const trimmed = line.trim();
     if (!trimmed) continue;
 
-    // cmux format: "workspace:N TODO <ID> <title>"
+    // cmux format: "workspace:N <ID> <title>"
     const wsMatch = trimmed.match(/workspace:\d+/);
-    const todoMatch = trimmed.match(/TODO\s+([A-Z]+-[A-Za-z0-9]+-[0-9]+)/);
+    const idMatch = trimmed.match(/TODO\s+([A-Z]+-[A-Za-z0-9]+-[0-9]+)/);
 
-    if (wsMatch && todoMatch && ids.has(todoMatch[1]!)) {
+    if (wsMatch && idMatch && ids.has(idMatch[1]!)) {
       const wsRef = wsMatch[0]!;
-      const todoId = todoMatch[1]!;
-      info(`Closing workspace ${wsRef} (${todoId})`);
+      const itemId = idMatch[1]!;
+      info(`Closing workspace ${wsRef} (${itemId})`);
       if (mux.closeWorkspace(wsRef)) {
         closed++;
       } else {
@@ -47,7 +47,7 @@ export function closeWorkspacesForIds(
       continue;
     }
 
-    // Workspace name contains the TODO ID (e.g., "nw-H-WRK-1-1")
+    // Workspace name contains the item ID (e.g., "nw-H-WRK-1-1")
     for (const id of ids) {
       if (trimmed.includes(id)) {
         info(`Closing workspace ${trimmed} (${id})`);
@@ -63,7 +63,7 @@ export function closeWorkspacesForIds(
   return closed;
 }
 
-/** Close all cmux workspaces that belong to todo items. */
+/** Close all cmux workspaces that belong to work items. */
 export function cmdCloseWorkspaces(mux: Multiplexer = getMux()): void {
   if (!mux.isAvailable()) {
     warn("cmux not available, skipping workspace close");
@@ -79,12 +79,12 @@ export function cmdCloseWorkspaces(mux: Multiplexer = getMux()): void {
   let closed = 0;
   for (const line of workspaces.split("\n")) {
     const wsMatch = line.match(/workspace:\d+/);
-    const todoMatch = line.match(/TODO\s+([A-Z]+-[A-Za-z0-9]+-[0-9]+)/);
+    const idMatch = line.match(/TODO\s+([A-Z]+-[A-Za-z0-9]+-[0-9]+)/);
 
-    if (wsMatch && todoMatch) {
+    if (wsMatch && idMatch) {
       const wsRef = wsMatch[0];
-      const todoId = todoMatch[1];
-      info(`Closing workspace ${wsRef} (${todoId})`);
+      const itemId = idMatch[1];
+      info(`Closing workspace ${wsRef} (${itemId})`);
       if (!mux.closeWorkspace(wsRef)) {
         warn(`Failed to close ${wsRef}`);
       }
@@ -92,10 +92,10 @@ export function cmdCloseWorkspaces(mux: Multiplexer = getMux()): void {
     }
   }
 
-  console.log(`${GREEN}Closed ${closed} todo workspace(s)${RESET}`);
+  console.log(`${GREEN}Closed ${closed} workspace(s)${RESET}`);
 }
 
-/** Close cmux workspace for a specific TODO ID. */
+/** Close cmux workspace for a specific item ID. */
 export function cmdCloseWorkspace(targetId: string, mux: Multiplexer = getMux()): void {
   if (!targetId) die("Usage: ninthwave close-workspace <ID>");
 

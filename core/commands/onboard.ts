@@ -4,8 +4,8 @@
 // routes to the appropriate flow:
 // 1. No git repo → help text
 // 2. No .ninthwave/ → first-run onboarding (init flow)
-// 3. .ninthwave/ exists, no TODOs → guidance message
-// 4. TODOs exist, no daemon → checkbox picker with run/watch options
+// 3. .ninthwave/ exists, no work items → guidance message
+// 4. Work items exist, no daemon → checkbox picker with run/watch options
 // 5. Daemon running → live status view
 
 import { createInterface } from "readline";
@@ -177,7 +177,7 @@ export async function promptChoice<T>(
 // ── Session launch helpers ──────────────────────────────────────────
 
 const WELCOME_MSG =
-  "You're set up with ninthwave. Try /decompose to break down a feature, or /work to process existing TODOs.";
+  "You're set up with ninthwave. Try /decompose to break down a feature, or /work to process existing work items.";
 
 /**
  * Launch the AI tool inside the chosen multiplexer and pre-seed the welcome prompt.
@@ -388,7 +388,7 @@ export async function onboard(
 // ── Action picker ──────────────────────────────────────────────────
 
 /**
- * After the user selects TODO items, ask whether to run selected items
+ * After the user selects work items, ask whether to run selected items
  * or watch all items with the orchestrator.
  */
 export async function promptAction(
@@ -442,9 +442,9 @@ export async function cmdOnboard(projectDir: string): Promise<void> {
  * 1. Non-TTY → print help text
  * 2. No git repo → print help text
  * 3. No `.ninthwave/` → first-run onboarding (init flow)
- * 4. `.ninthwave/` exists, no TODOs → guidance message
- * 5. TODOs exist, daemon running → live status view
- * 6. TODOs exist, no daemon → checkbox picker + action choice
+ * 4. `.ninthwave/` exists, no work items → guidance message
+ * 5. Work items exist, daemon running → live status view
+ * 6. Work items exist, no daemon → checkbox picker + action choice
  */
 export async function cmdNoArgs(
   projectRoot: string | null,
@@ -480,7 +480,7 @@ export async function cmdNoArgs(
   const workDir = join(projectRoot, ".ninthwave", "work");
   const worktreeDir = join(projectRoot, ".worktrees");
 
-  // State 3: .ninthwave/ exists but no TODO files
+  // State 3: .ninthwave/ exists but no work item files
   let todos: WorkItem[] = [];
   if (checkExists(workDir)) {
     todos = doParseT(workDir, worktreeDir);
@@ -488,11 +488,11 @@ export async function cmdNoArgs(
 
   if (todos.length === 0) {
     console.log();
-    console.log(`${BOLD}ninthwave${RESET} is set up, but there are no TODO items.`);
+    console.log(`${BOLD}ninthwave${RESET} is set up, but there are no work items.`);
     console.log();
     console.log(`  Get started:`);
     console.log(`    ${DIM}•${RESET} Use ${BOLD}/decompose${RESET} in your AI tool to break down a feature`);
-    console.log(`    ${DIM}•${RESET} Create TODO files manually in ${BOLD}.ninthwave/work/${RESET}`);
+    console.log(`    ${DIM}•${RESET} Create work items manually in ${BOLD}.ninthwave/work/${RESET}`);
     console.log();
     return;
   }
@@ -512,7 +512,7 @@ export async function cmdNoArgs(
     return;
   }
 
-  // State 5: TODOs exist, no daemon → checkbox picker
+  // State 5: Work items exist, no daemon → checkbox picker
   const selectedIds = await doPromptItems(todos, prompt);
   if (selectedIds.length === 0) return;
 

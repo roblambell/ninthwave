@@ -7,7 +7,7 @@ import { die } from "./output.ts";
 import { run } from "./shell.ts";
 import { lookupCommand, printHelp, printHelpAll, printCommandHelp } from "./help.ts";
 import { cmdNoArgs } from "./commands/onboard.ts";
-import { TODO_ID_CLI_PATTERN, cmdRunItems } from "./commands/launch.ts";
+import { WORK_ITEM_ID_CLI_PATTERN, cmdRunItems } from "./commands/launch.ts";
 
 // ── Project root resolution ──────────────────────────────────────────
 
@@ -62,14 +62,14 @@ if (!command) {
   process.exit(0);
 }
 
-// ── TODO ID detection ────────────────────────────────────────────────
-// If all positional args match the TODO ID pattern, route to cmdRunItems.
+// ── Work item ID detection ──────────────────────────────────────────
+// If all positional args match the work item ID pattern, route to cmdRunItems.
 
 const allPositional = [command, ...args].filter(
   (a) => !a.startsWith("-"),
 );
 const allAreIds = allPositional.length > 0 && allPositional.every(
-  (a) => TODO_ID_CLI_PATTERN.test(a),
+  (a) => WORK_ITEM_ID_CLI_PATTERN.test(a),
 );
 
 if (allAreIds) {

@@ -3,7 +3,7 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import {
   cmdHeartbeat,
-  extractTodoId,
+  extractItemId,
   parseHeartbeatArgs,
   type HeartbeatArgs,
   type HeartbeatDeps,
@@ -50,26 +50,26 @@ function createDeps(
   };
 }
 
-// ── extractTodoId ───────────────────────────────────────────────────
+// ── extractItemId ───────────────────────────────────────────────────
 
-describe("extractTodoId", () => {
-  it("extracts ID from todo branch", () => {
-    expect(extractTodoId("ninthwave/H-FOO-1")).toBe("H-FOO-1");
+describe("extractItemId", () => {
+  it("extracts ID from item branch", () => {
+    expect(extractItemId("ninthwave/H-FOO-1")).toBe("H-FOO-1");
   });
 
   it("extracts complex IDs", () => {
-    expect(extractTodoId("ninthwave/M-ORC-3")).toBe("M-ORC-3");
-    expect(extractTodoId("ninthwave/L-VIS-12")).toBe("L-VIS-12");
+    expect(extractItemId("ninthwave/M-ORC-3")).toBe("M-ORC-3");
+    expect(extractItemId("ninthwave/L-VIS-12")).toBe("L-VIS-12");
   });
 
-  it("returns null for non-todo branches", () => {
-    expect(extractTodoId("main")).toBeNull();
-    expect(extractTodoId("feature/something")).toBeNull();
-    expect(extractTodoId("ninthwave-H-FOO-1")).toBeNull();
+  it("returns null for non-item branches", () => {
+    expect(extractItemId("main")).toBeNull();
+    expect(extractItemId("feature/something")).toBeNull();
+    expect(extractItemId("ninthwave-H-FOO-1")).toBeNull();
   });
 
   it("returns null for empty string", () => {
-    expect(extractTodoId("")).toBeNull();
+    expect(extractItemId("")).toBeNull();
   });
 });
 
@@ -251,7 +251,7 @@ describe("cmdHeartbeat", () => {
     expect(io.files.has(filePath)).toBe(true);
   });
 
-  it("exits on non-todo branch", () => {
+  it("exits on non-item branch", () => {
     const io = createMockIO();
     const deps = createDeps(io, "main");
     const exitSpy = vi

@@ -164,7 +164,7 @@ export async function promptItems(
   prompt: PromptFn,
 ): Promise<string[]> {
   if (todos.length === 0) {
-    console.log(`  ${YELLOW}No TODO items found.${RESET}`);
+    console.log(`  ${YELLOW}No work items found.${RESET}`);
     return [];
   }
 
@@ -177,7 +177,7 @@ export async function promptItems(
   });
 
   console.log();
-  console.log(`${BOLD}Available TODOs:${RESET}`);
+  console.log(`${BOLD}Available work items:${RESET}`);
   console.log();
   for (let i = 0; i < sorted.length; i++) {
     const t = sorted[i]!;
@@ -319,14 +319,14 @@ export async function confirmSummary(
   todos: WorkItem[],
   prompt: PromptFn,
 ): Promise<boolean> {
-  const todoMap = new Map(todos.map((t) => [t.id, t]));
+  const itemMap = new Map(todos.map((t) => [t.id, t]));
 
   console.log();
   console.log(`${BOLD}━━━ Summary ━━━${RESET}`);
   console.log();
   console.log(`  ${BOLD}Items (${result.itemIds.length}):${RESET}`);
   for (const id of result.itemIds) {
-    const t = todoMap.get(id);
+    const t = itemMap.get(id);
     console.log(`    ${CYAN}${id}${RESET}  ${t?.title ?? ""}`);
   }
   console.log(`  ${BOLD}Merge strategy:${RESET}  ${result.mergeStrategy}`);
