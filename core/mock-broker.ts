@@ -39,6 +39,8 @@ export interface WorkEntry {
 export interface DaemonState {
   id: string;
   name: string;
+  /** Operator identity (git email of the human running this daemon). */
+  operatorId: string;
   ws: WebSocket | null;
   lastHeartbeat: number;
   disconnectedAt: number | null;
@@ -130,6 +132,7 @@ export class MockBroker {
           const code = wsMatch[1]!;
           const daemonId = url.searchParams.get("daemonId");
           const name = url.searchParams.get("name");
+          const operatorId = url.searchParams.get("operatorId") ?? "";
 
           if (!daemonId) {
             return new Response("Missing daemonId query param", { status: 400 });
@@ -141,7 +144,7 @@ export class MockBroker {
           }
 
           const upgraded = server.upgrade(req, {
-            data: { crewCode: code, daemonId, name: name ?? daemonId },
+            data: { crewCode: code, daemonId, name: name ?? daemonId, operatorId },
           });
 
           if (!upgraded) {
@@ -156,14 +159,15 @@ export class MockBroker {
 
       websocket: {
         open(ws) {
-          const { crewCode, daemonId, name } = ws.data as {
+          const { crewCode, daemonId, name, operatorId } = ws.data as {
             crewCode: string;
             daemonId: string;
             name: string;
+            operatorId: string;
           };
 
           broker.wsMap.set(ws, { crewCode, daemonId });
-          broker.handleDaemonConnect(crewCode, daemonId, name, ws);
+          broker.handleDaemonConnect(crewCode, daemonId, name, ws, operatorId);
         },
 
         message(ws, message) {
@@ -244,7 +248,7 @@ export class MockBroker {
 
   // ── Daemon lifecycle ──────────────────────────────────────────────
 
-  private handleDaemonConnect(crewCode: string, daemonId: string, name: string, ws: WebSocket): void {
+  private handleDaemonConnect(crewCode: string, daemonId: string, name: string, ws: WebSocket, operatorId: string = ""): void {
     const crew = this.crews.get(crewCode);
     if (!crew) return;
 
@@ -257,6 +261,7 @@ export class MockBroker {
       existing.disconnectedAt = null;
       existing.released = false;
       existing.name = name;
+      existing.operatorId = operatorId;
 
       if (wasDisconnected) {
         // Determine which TODOs are still claimed vs released/re-claimed
@@ -297,6 +302,7 @@ export class MockBroker {
       crew.daemons.set(daemonId, {
         id: daemonId,
         name,
+        operatorId,
         ws,
         lastHeartbeat: Date.now(),
         disconnectedAt: null,

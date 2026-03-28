@@ -199,6 +199,42 @@ describe("mock-broker", () => {
       );
       expect(res.status).toBe(400);
     });
+
+    it("stores operatorId on DaemonState from connect handshake", async () => {
+      const { broker, port } = startBroker();
+      const code = await createCrew(port);
+
+      // Connect with operatorId query param
+      const ws = new WebSocket(
+        `ws://localhost:${port}/api/crews/${code}/ws?daemonId=d1&name=worker-1&operatorId=${encodeURIComponent("dev@example.com")}`,
+      );
+      await new Promise<void>((resolve, reject) => {
+        ws.addEventListener("open", () => resolve());
+        ws.addEventListener("error", (e) => reject(e));
+      });
+      await tick();
+
+      const crew = broker.getCrew(code);
+      expect(crew).toBeDefined();
+      const daemon = crew!.daemons.get("d1");
+      expect(daemon).toBeDefined();
+      expect(daemon!.operatorId).toBe("dev@example.com");
+      ws.close();
+    });
+
+    it("defaults operatorId to empty string when not provided", async () => {
+      const { broker, port } = startBroker();
+      const code = await createCrew(port);
+
+      const ws = await connectWs(port, code, "d2", "worker-2");
+      await tick();
+
+      const crew = broker.getCrew(code);
+      const daemon = crew!.daemons.get("d2");
+      expect(daemon).toBeDefined();
+      expect(daemon!.operatorId).toBe("");
+      ws.close();
+    });
   });
 
   describe("sync and claim with creator affinity", () => {

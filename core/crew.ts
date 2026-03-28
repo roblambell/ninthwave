@@ -6,6 +6,7 @@
 import { existsSync, readFileSync, writeFileSync, mkdirSync } from "fs";
 import { join, dirname } from "path";
 import { randomUUID } from "crypto";
+import { execSync } from "node:child_process";
 import { hostname } from "os";
 import { userStateDir } from "./daemon.ts";
 
@@ -157,6 +158,67 @@ export function getOrCreateDaemonId(projectRoot: string): string {
   return id;
 }
 
+// ── Operator identity persistence ──────────────────────────────────
+
+/** Injectable deps for operator identity (enables testing without git). */
+export interface OperatorIdDeps {
+  exec: (cmd: string) => string;
+  existsSync: typeof existsSync;
+  readFileSync: typeof readFileSync;
+  writeFileSync: typeof writeFileSync;
+  mkdirSync: typeof mkdirSync;
+}
+
+const defaultOperatorIdDeps: OperatorIdDeps = {
+  exec: (cmd) => execSync(cmd, { encoding: "utf-8", timeout: 5_000 }).trim(),
+  existsSync,
+  readFileSync,
+  writeFileSync,
+  mkdirSync,
+};
+
+/** Path to the operator-id file in the user state directory. */
+export function operatorIdPath(projectRoot: string): string {
+  return join(userStateDir(projectRoot), "operator-id");
+}
+
+/**
+ * Resolve the operator identity from `git config user.email`.
+ * On first call, the result is persisted to the state directory.
+ * On subsequent calls (e.g., daemon restart), the persisted value is returned.
+ *
+ * Falls back to empty string if `git config user.email` is not set.
+ */
+export function resolveOperatorId(
+  projectRoot: string,
+  deps: OperatorIdDeps = defaultOperatorIdDeps,
+): string {
+  const filePath = operatorIdPath(projectRoot);
+
+  // Check persisted file first (survives daemon restarts)
+  if (deps.existsSync(filePath)) {
+    const existing = deps.readFileSync(filePath, "utf-8").trim();
+    if (existing.length > 0) return existing;
+  }
+
+  // Resolve from git config
+  let email = "";
+  try {
+    email = deps.exec("git config user.email");
+  } catch {
+    // git config user.email not set — fall back to empty string
+  }
+
+  // Persist for future restarts
+  const dir = dirname(filePath);
+  if (!deps.existsSync(dir)) {
+    deps.mkdirSync(dir, { recursive: true });
+  }
+  deps.writeFileSync(filePath, email, "utf-8");
+
+  return email;
+}
+
 // ── Injectable dependencies ─────────────────────────────────────────
 
 export interface CrewBrokerDeps {
@@ -182,6 +244,7 @@ export class WebSocketCrewBroker implements CrewBroker {
   private ws: WebSocket | null = null;
   private connected = false;
   private daemonId: string;
+  private operatorId: string;
   private url: string;
   private name: string;
   private deps: CrewBrokerDeps;
@@ -206,6 +269,7 @@ export class WebSocketCrewBroker implements CrewBroker {
     name?: string,
   ) {
     this.daemonId = getOrCreateDaemonId(projectRoot);
+    this.operatorId = resolveOperatorId(projectRoot);
     this.name = name ?? hostname();
     this.url = `${url}/api/crews/${crewCode}/ws`;
     this.deps = deps;
@@ -216,6 +280,11 @@ export class WebSocketCrewBroker implements CrewBroker {
     return this.daemonId;
   }
 
+  /** Expose operatorId for testing. */
+  getOperatorId(): string {
+    return this.operatorId;
+  }
+
   async connect(): Promise<void> {
     this.disconnectedIntentionally = false;
     return this.doConnect();
@@ -224,7 +293,7 @@ export class WebSocketCrewBroker implements CrewBroker {
   private doConnect(): Promise<void> {
     return new Promise<void>((resolve, reject) => {
       this.connectPromise = { resolve, reject };
-      const wsUrl = `${this.url}?daemonId=${this.daemonId}&name=${encodeURIComponent(this.name)}`;
+      const wsUrl = `${this.url}?daemonId=${this.daemonId}&name=${encodeURIComponent(this.name)}&operatorId=${encodeURIComponent(this.operatorId)}`;
       this.ws = new WebSocket(wsUrl);
 
       this.ws.onopen = () => {

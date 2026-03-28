@@ -85,8 +85,9 @@ import {
   type CrewStatusInfo,
 } from "../status-render.ts";
 import type { CrewBroker, CrewStatus } from "../crew.ts";
-import { WebSocketCrewBroker, getOrCreateDaemonId } from "../crew.ts";
+import { WebSocketCrewBroker, getOrCreateDaemonId, resolveOperatorId } from "../crew.ts";
 import { MockBroker } from "../mock-broker.ts";
+import { AuthorCache } from "../git-author.ts";
 
 // ── Structured logging ─────────────────────────────────────────────
 
@@ -1341,6 +1342,10 @@ export async function orchestrateLoop(
     }
   }
 
+  // Author cache for resolving git author of TODO files during sync.
+  // Cleared each poll cycle to avoid stale data.
+  const authorCache = new AuthorCache();
+
   const runStartTime = new Date().toISOString();
   const costData = new Map<string, CostSummary>();
 
@@ -1476,11 +1481,19 @@ export async function orchestrateLoop(
     }
 
     // Crew mode: sync active TODOs to broker (fire-and-forget, before snapshot)
+    // Clear author cache each cycle to avoid stale data across syncs.
+    authorCache.clear();
     if (deps.crewBroker) {
       try {
-        const activeIds = orch.getAllItems()
-          .filter((i) => i.state !== "done" && i.state !== "stuck")
-          .map((i) => i.id);
+        const activeItems = orch.getAllItems()
+          .filter((i) => i.state !== "done" && i.state !== "stuck");
+        const activeIds = activeItems.map((i) => i.id);
+        // Pre-resolve authors for active items (populates cache for H-CA-1 enrichment)
+        for (const item of activeItems) {
+          if (item.workItem.filePath) {
+            authorCache.resolve(item.workItem.filePath, ctx.projectRoot);
+          }
+        }
         deps.crewBroker.sync(activeIds);
       } catch { /* best-effort — sync failure doesn't block the orchestrator */ }
     }
@@ -2309,6 +2322,10 @@ export async function cmdOrchestrate(
   // statusPaneRef is captured by reference so the closure always persists the current value.
   const daemonStartedAt = new Date().toISOString();
 
+  // Resolve operator identity (git email) for this daemon session.
+  // Persisted to state dir so it survives restarts.
+  const operatorId = resolveOperatorId(projectRoot);
+
   // Archive stale state from previous run and write a fresh initial state.
   // This ensures `ninthwave status` never shows items from a previous run mixed
   // with the current run — even before the first poll cycle completes.
@@ -2323,6 +2340,7 @@ export async function cmdOrchestrate(
   }
   const initialState = serializeOrchestratorState(orch.getAllItems(), process.pid, daemonStartedAt, {
     wipLimit,
+    operatorId,
   });
   writeStateFile(projectRoot, initialState);
 
@@ -2364,6 +2382,7 @@ export async function cmdOrchestrate(
       const state = serializeOrchestratorState(items, process.pid, daemonStartedAt, {
         statusPaneRef: null,
         wipLimit,
+        operatorId,
       });
       writeStateFile(projectRoot, state);
     } catch {

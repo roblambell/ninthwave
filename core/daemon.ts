@@ -64,6 +64,8 @@ export interface DaemonState {
   updatedAt: string;
   statusPaneRef?: string | null;
   wipLimit?: number;
+  /** Operator identity (git email of the human running this daemon). */
+  operatorId?: string;
   items: DaemonStateItem[];
 }
 
@@ -415,7 +417,7 @@ export function serializeOrchestratorState(
   items: OrchestratorItem[],
   pid: number,
   startedAt: string,
-  extras?: { statusPaneRef?: string | null; wipLimit?: number },
+  extras?: { statusPaneRef?: string | null; wipLimit?: number; operatorId?: string },
 ): DaemonState {
   return {
     pid,
