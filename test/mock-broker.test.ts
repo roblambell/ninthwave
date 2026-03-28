@@ -690,13 +690,13 @@ describe("mock-broker", () => {
       expect(crew).toBeDefined();
 
       const itemA = crew!.items.get("todo-A");
-      expect(todoA).toBeDefined();
+      expect(itemA).toBeDefined();
       expect(itemA!.dependencies).toEqual(["todo-B"]);
       expect(itemA!.priority).toBe(0);
       expect(itemA!.author).toBe("alice@example.com");
 
       const itemB = crew!.items.get("todo-B");
-      expect(todoB).toBeDefined();
+      expect(itemB).toBeDefined();
       expect(itemB!.dependencies).toEqual([]);
       expect(itemB!.priority).toBe(2);
       expect(itemB!.author).toBe("bob@example.com");
@@ -749,8 +749,8 @@ describe("mock-broker", () => {
       const crew = broker.getCrew(code);
       const wi = crew!.items.get("todo-A");
       expect(wi).toBeDefined();
-      expect(todo!.dependencies).toEqual([]);
-      expect(Array.isArray(todo!.dependencies)).toBe(true);
+      expect(wi!.dependencies).toEqual([]);
+      expect(Array.isArray(wi!.dependencies)).toBe(true);
 
       ws.close();
     });
@@ -923,7 +923,7 @@ describe("mock-broker", () => {
       expect(crew).toBeDefined();
       const wi = crew!.items.get("todo-A");
       expect(wi).toBeDefined();
-      expect(todo!.creatorDaemonId).toBe("d1");
+      expect(wi!.creatorDaemonId).toBe("d1");
 
       ws.close();
       ws2.close();
