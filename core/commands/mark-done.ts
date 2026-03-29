@@ -3,7 +3,7 @@
 import { existsSync, readFileSync, readdirSync } from "fs";
 import { join } from "path";
 import { die, GREEN, YELLOW, RESET } from "../output.ts";
-import { splitIds } from "../work-item-utils.ts";
+import { splitIds } from "../work-item-files.ts";
 import { isBranchMerged, commitCount } from "../git.ts";
 import { prList } from "../gh.ts";
 import { deleteWorkItemFile } from "../work-item-files.ts";

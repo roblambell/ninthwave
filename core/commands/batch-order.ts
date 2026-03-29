@@ -11,7 +11,7 @@ import {
   DIM,
   RESET,
 } from "../output.ts";
-import { splitIds } from "../work-item-utils.ts";
+import { splitIds } from "../work-item-files.ts";
 import type { WorkItem } from "../types.ts";
 
 /** Result of computing batch assignments. */

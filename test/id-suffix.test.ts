@@ -13,7 +13,7 @@ import {
   ID_PATTERN_SOURCE,
 } from "../core/types.ts";
 import { parseWorkItemFile, listWorkItems, readWorkItem } from "../core/work-item-files.ts";
-import { normalizeTitleForComparison } from "../core/work-item-utils.ts";
+import { normalizeTitleForComparison } from "../core/work-item-files.ts";
 
 // Track temp dirs for cleanup
 const tempDirs: string[] = [];

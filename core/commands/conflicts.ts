@@ -2,7 +2,7 @@
 
 import { parseWorkItems } from "../parser.ts";
 import { die, BOLD, RED, YELLOW, GREEN, RESET } from "../output.ts";
-import { splitIds } from "../work-item-utils.ts";
+import { splitIds } from "../work-item-files.ts";
 import type { WorkItem } from "../types.ts";
 
 export function cmdConflicts(

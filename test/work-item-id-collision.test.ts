@@ -10,7 +10,7 @@ import { tmpdir } from "os";
 import {
   normalizeTitleForComparison,
   prTitleMatchesWorkItem,
-} from "../core/work-item-utils.ts";
+} from "../core/work-item-files.ts";
 import { reconcile, type ReconcileDeps } from "../core/commands/reconcile.ts";
 import {
   Orchestrator,

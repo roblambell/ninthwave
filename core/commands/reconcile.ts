@@ -10,8 +10,7 @@ import { listCrossRepoEntries } from "../cross-repo.ts";
 import { cmdMarkDone } from "./mark-done.ts";
 import { cleanSingleWorktree, closeWorkspacesForIds } from "./clean.ts";
 import { getMux } from "../mux.ts";
-import { readWorkItem } from "../work-item-files.ts";
-import { prTitleMatchesWorkItem } from "../work-item-utils.ts";
+import { readWorkItem, prTitleMatchesWorkItem } from "../work-item-files.ts";
 import { ID_IN_FILENAME } from "../types.ts";
 
 /**

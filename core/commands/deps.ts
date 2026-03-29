@@ -2,7 +2,7 @@
 
 import { parseWorkItems } from "../parser.ts";
 import { die, BOLD, DIM, RESET } from "../output.ts";
-import { splitIds } from "../work-item-utils.ts";
+import { splitIds } from "../work-item-files.ts";
 import { ID_PATTERN_GLOBAL } from "../types.ts";
 import type { WorkItem } from "../types.ts";
 

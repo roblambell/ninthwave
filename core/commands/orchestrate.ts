@@ -36,7 +36,7 @@ import { confirmPrompt } from "../prompt.ts";
 import { shouldEnterInteractive, runInteractiveFlow } from "../interactive.ts";
 import type { WorkItem } from "../types.ts";
 import { ID_IN_FILENAME, PRIORITY_NUM } from "../types.ts";
-import { prTitleMatchesWorkItem } from "../work-item-utils.ts";
+import { prTitleMatchesWorkItem } from "../work-item-files.ts";
 import { loadConfig } from "../config.ts";
 import { preflight } from "../preflight.ts";
 import {

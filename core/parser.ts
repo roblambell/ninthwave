@@ -1,6 +1,6 @@
 // Directory-based TODO parser for the ninthwave CLI.
-// Delegates to listWorkItems() from todo-files.ts for actual file reading.
-// Re-exports utility functions from todo-utils.ts for backward compatibility.
+// Delegates to listWorkItems() from work-item-files.ts for actual file reading.
+// Re-exports utility functions from work-item-files.ts for backward compatibility.
 
 import type { WorkItem } from "./types.ts";
 import { listWorkItems } from "./work-item-files.ts";
@@ -14,7 +14,7 @@ export {
   extractFilePaths,
   expandWildcardDeps,
   extractBody,
-} from "./work-item-utils.ts";
+} from "./work-item-files.ts";
 
 /**
  * Parse todo items from a directory of todo files (.ninthwave/work/).

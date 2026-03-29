@@ -5,7 +5,7 @@ import { join, basename, dirname } from "path";
 import { tmpdir, freemem } from "os";
 import { parseWorkItems } from "../parser.ts";
 import { die, warn, info, GREEN, BOLD, DIM, RESET } from "../output.ts";
-import { splitIds } from "../work-item-utils.ts";
+import { splitIds, readWorkItem, prTitleMatchesWorkItem } from "../work-item-files.ts";
 import { computeBatches, CircularDependencyError } from "./batch-order.ts";
 import { calculateMemoryWipLimit } from "../orchestrator.ts";
 import { computeDefaultWipLimit } from "./orchestrate.ts";
@@ -37,9 +37,7 @@ import {
   ensureWorktreeExcluded,
 } from "../cross-repo.ts";
 import { cmdConflicts } from "./conflicts.ts";
-import { readWorkItem } from "../work-item-files.ts";
 import { applyGithubToken, prList } from "../gh.ts";
-import { prTitleMatchesWorkItem } from "../work-item-utils.ts";
 import { run as defaultRun } from "../shell.ts";
 import type { WorkItem } from "../types.ts";
 
