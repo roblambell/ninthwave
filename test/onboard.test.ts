@@ -22,6 +22,7 @@ import {
   type NoArgsDeps,
 } from "../core/commands/onboard.ts";
 import type { WorkItem } from "../core/types.ts";
+import type { InteractiveResult } from "../core/interactive.ts";
 import type { MergeStrategy } from "../core/orchestrator.ts";
 
 afterEach(() => {
@@ -560,7 +561,7 @@ describe("cmdNoArgs", () => {
     expect(output).toContain("12345");
   });
 
-  it("orchestrate path: calls cmdWatch with all item IDs, merge strategy, and WIP limit", async () => {
+  it("calls cmdWatch with item IDs, merge strategy, and WIP limit", async () => {
     const projectDir = setupTempRepo();
     mkdirSync(join(projectDir, ".ninthwave", "work"), { recursive: true });
 
@@ -568,174 +569,268 @@ describe("cmdNoArgs", () => {
       fakeWorkItem("H-FOO-1", "First task"),
       fakeWorkItem("H-FOO-2", "Second task"),
     ];
-    let summaryCalled = false;
     let watchArgs: string[] = [];
     let watchCalled = false;
+
+    const interactiveResult: InteractiveResult = {
+      itemIds: ["H-FOO-1", "H-FOO-2"],
+      mergeStrategy: "auto" as MergeStrategy,
+      wipLimit: 3,
+      allSelected: false,
+      reviewMode: "mine",
+      crewAction: null,
+    };
 
     await cmdNoArgs(projectDir, {
       isTTY: true,
       parseWorkItems: () => items,
       isDaemonRunning: () => null,
-      displayItemsSummary: () => { summaryCalled = true; },
-      promptMode: async () => "orchestrate",
-      runInteractiveFlow: async () => ({
-        itemIds: ["H-FOO-1", "H-FOO-2"],
-        mergeStrategy: "approved" as MergeStrategy,
-        wipLimit: 3,
-      }),
+      loadConfig: () => ({ locExtensions: "" }),
+      runInteractiveFlow: async () => interactiveResult,
       runWatch: async (args) => {
         watchCalled = true;
         watchArgs = args;
       },
     });
 
-    expect(summaryCalled).toBe(true);
     expect(watchCalled).toBe(true);
-    // Should pass all item IDs, merge strategy, and WIP limit as CLI args
     expect(watchArgs).toContain("--items");
     expect(watchArgs).toContain("H-FOO-1");
     expect(watchArgs).toContain("H-FOO-2");
     expect(watchArgs).toContain("--merge-strategy");
-    expect(watchArgs).toContain("approved");
+    expect(watchArgs).toContain("auto");
     expect(watchArgs).toContain("--wip-limit");
     expect(watchArgs).toContain("3");
+    // Should NOT have --watch when not all selected
+    expect(watchArgs).not.toContain("--watch");
   });
 
-  it("launch subset path: calls runInteractiveFlow then cmdRunItems with selected IDs", async () => {
+  it("passes --watch when allSelected is true", async () => {
     const projectDir = setupTempRepo();
     mkdirSync(join(projectDir, ".ninthwave", "work"), { recursive: true });
 
-    const items = [
-      fakeWorkItem("H-FOO-1", "First task"),
-      fakeWorkItem("H-FOO-2", "Second task"),
-    ];
-    let interactiveCalled = false;
-    let runSelectedCalled = false;
-    let runSelectedIds: string[] = [];
+    let watchArgs: string[] = [];
 
     await cmdNoArgs(projectDir, {
       isTTY: true,
-      parseWorkItems: () => items,
+      parseWorkItems: () => [fakeWorkItem("H-1", "Task")],
       isDaemonRunning: () => null,
-      displayItemsSummary: () => {},
-      promptMode: async () => "launch",
-      runInteractiveFlow: async () => {
-        interactiveCalled = true;
-        return {
-          itemIds: ["H-FOO-1"],
-          mergeStrategy: "auto" as MergeStrategy,
-          wipLimit: 4,
-        };
-      },
-      runSelected: async (ids) => {
-        runSelectedCalled = true;
-        runSelectedIds = ids;
-      },
-    });
-
-    expect(interactiveCalled).toBe(true);
-    expect(runSelectedCalled).toBe(true);
-    expect(runSelectedIds).toEqual(["H-FOO-1"]);
-  });
-
-  it("defaults to orchestrate on empty input at mode prompt", async () => {
-    const projectDir = setupTempRepo();
-    mkdirSync(join(projectDir, ".ninthwave", "work"), { recursive: true });
-
-    const items = [fakeWorkItem("H-1", "Task")];
-    let watchCalled = false;
-
-    // promptMode returning "orchestrate" simulates the default behavior
-    await cmdNoArgs(projectDir, {
-      isTTY: true,
-      parseWorkItems: () => items,
-      isDaemonRunning: () => null,
-      displayItemsSummary: () => {},
-      promptMode: async () => "orchestrate",
+      loadConfig: () => ({ locExtensions: "" }),
       runInteractiveFlow: async () => ({
         itemIds: ["H-1"],
         mergeStrategy: "auto" as MergeStrategy,
         wipLimit: 4,
+        allSelected: true,
+        reviewMode: "mine",
+        crewAction: null,
       }),
-      runWatch: async () => { watchCalled = true; },
+      runWatch: async (args) => { watchArgs = args; },
     });
 
-    expect(watchCalled).toBe(true);
+    expect(watchArgs).toContain("--watch");
   });
 
-  it("exits gracefully when user quits at mode prompt", async () => {
+  it("passes --review-external when reviewMode is 'all'", async () => {
     const projectDir = setupTempRepo();
     mkdirSync(join(projectDir, ".ninthwave", "work"), { recursive: true });
 
-    let runCalled = false;
+    let watchArgs: string[] = [];
+
+    await cmdNoArgs(projectDir, {
+      isTTY: true,
+      parseWorkItems: () => [fakeWorkItem("H-1", "Task")],
+      isDaemonRunning: () => null,
+      loadConfig: () => ({ locExtensions: "" }),
+      runInteractiveFlow: async () => ({
+        itemIds: ["H-1"],
+        mergeStrategy: "auto" as MergeStrategy,
+        wipLimit: 4,
+        allSelected: false,
+        reviewMode: "all" as const,
+        crewAction: null,
+      }),
+      runWatch: async (args) => { watchArgs = args; },
+    });
+
+    expect(watchArgs).toContain("--review-external");
+  });
+
+  it("passes --review-wip-limit 0 when reviewMode is 'off'", async () => {
+    const projectDir = setupTempRepo();
+    mkdirSync(join(projectDir, ".ninthwave", "work"), { recursive: true });
+
+    let watchArgs: string[] = [];
+
+    await cmdNoArgs(projectDir, {
+      isTTY: true,
+      parseWorkItems: () => [fakeWorkItem("H-1", "Task")],
+      isDaemonRunning: () => null,
+      loadConfig: () => ({ locExtensions: "" }),
+      runInteractiveFlow: async () => ({
+        itemIds: ["H-1"],
+        mergeStrategy: "auto" as MergeStrategy,
+        wipLimit: 4,
+        allSelected: false,
+        reviewMode: "off" as const,
+        crewAction: null,
+      }),
+      runWatch: async (args) => { watchArgs = args; },
+    });
+
+    expect(watchArgs).toContain("--review-wip-limit");
+    expect(watchArgs).toContain("0");
+  });
+
+  it("does not pass review flags when reviewMode is 'mine'", async () => {
+    const projectDir = setupTempRepo();
+    mkdirSync(join(projectDir, ".ninthwave", "work"), { recursive: true });
+
+    let watchArgs: string[] = [];
+
+    await cmdNoArgs(projectDir, {
+      isTTY: true,
+      parseWorkItems: () => [fakeWorkItem("H-1", "Task")],
+      isDaemonRunning: () => null,
+      loadConfig: () => ({ locExtensions: "" }),
+      runInteractiveFlow: async () => ({
+        itemIds: ["H-1"],
+        mergeStrategy: "auto" as MergeStrategy,
+        wipLimit: 4,
+        allSelected: false,
+        reviewMode: "mine" as const,
+        crewAction: null,
+      }),
+      runWatch: async (args) => { watchArgs = args; },
+    });
+
+    expect(watchArgs).not.toContain("--review-external");
+    expect(watchArgs).not.toContain("--review-wip-limit");
+  });
+
+  it("passes --crew <code> for crew join action", async () => {
+    const projectDir = setupTempRepo();
+    mkdirSync(join(projectDir, ".ninthwave", "work"), { recursive: true });
+
+    let watchArgs: string[] = [];
+
+    await cmdNoArgs(projectDir, {
+      isTTY: true,
+      parseWorkItems: () => [fakeWorkItem("H-1", "Task")],
+      isDaemonRunning: () => null,
+      loadConfig: () => ({ locExtensions: "" }),
+      runInteractiveFlow: async () => ({
+        itemIds: ["H-1"],
+        mergeStrategy: "auto" as MergeStrategy,
+        wipLimit: 4,
+        allSelected: false,
+        reviewMode: "mine" as const,
+        crewAction: { type: "join" as const, code: "xK2-9fB" },
+      }),
+      runWatch: async (args) => { watchArgs = args; },
+    });
+
+    expect(watchArgs).toContain("--crew");
+    expect(watchArgs).toContain("xK2-9fB");
+  });
+
+  it("passes --crew-create for crew create action", async () => {
+    const projectDir = setupTempRepo();
+    mkdirSync(join(projectDir, ".ninthwave", "work"), { recursive: true });
+
+    let watchArgs: string[] = [];
+
+    await cmdNoArgs(projectDir, {
+      isTTY: true,
+      parseWorkItems: () => [fakeWorkItem("H-1", "Task")],
+      isDaemonRunning: () => null,
+      loadConfig: () => ({ locExtensions: "" }),
+      runInteractiveFlow: async () => ({
+        itemIds: ["H-1"],
+        mergeStrategy: "auto" as MergeStrategy,
+        wipLimit: 4,
+        allSelected: false,
+        reviewMode: "mine" as const,
+        crewAction: { type: "create" as const },
+      }),
+      runWatch: async (args) => { watchArgs = args; },
+    });
+
+    expect(watchArgs).toContain("--crew-create");
+  });
+
+  it("exits gracefully when user cancels interactive flow", async () => {
+    const projectDir = setupTempRepo();
+    mkdirSync(join(projectDir, ".ninthwave", "work"), { recursive: true });
+
     let watchCalled = false;
 
     await cmdNoArgs(projectDir, {
       isTTY: true,
       parseWorkItems: () => [fakeWorkItem("H-1", "Task")],
       isDaemonRunning: () => null,
-      displayItemsSummary: () => {},
-      promptMode: async () => "quit",
-      runSelected: async () => { runCalled = true; },
+      loadConfig: () => ({ locExtensions: "" }),
+      runInteractiveFlow: async () => null, // User cancelled
       runWatch: async () => { watchCalled = true; },
     });
 
-    expect(runCalled).toBe(false);
     expect(watchCalled).toBe(false);
   });
 
-  it("exits gracefully when user quits at item selection in launch subset path", async () => {
+  it("goes directly to TUI selection without mode prompt", async () => {
     const projectDir = setupTempRepo();
     mkdirSync(join(projectDir, ".ninthwave", "work"), { recursive: true });
 
-    let runCalled = false;
+    let interactiveCalled = false;
 
     await cmdNoArgs(projectDir, {
       isTTY: true,
       parseWorkItems: () => [fakeWorkItem("H-1", "Task")],
       isDaemonRunning: () => null,
-      displayItemsSummary: () => {},
-      promptMode: async () => "launch",
-      runInteractiveFlow: async () => null, // User cancelled
-      runSelected: async () => { runCalled = true; },
-    });
-
-    expect(runCalled).toBe(false);
-  });
-
-  it("orchestrate path uses runInteractiveFlow (no separate readline prompts)", async () => {
-    const projectDir = setupTempRepo();
-    mkdirSync(join(projectDir, ".ninthwave", "work"), { recursive: true });
-
-    const items = [
-      fakeWorkItem("H-FOO-1", "First task"),
-      fakeWorkItem("H-FOO-2", "Second task"),
-    ];
-    let interactiveCalled = false;
-    let promptItemsCalled = false;
-
-    await cmdNoArgs(projectDir, {
-      isTTY: true,
-      parseWorkItems: () => items,
-      isDaemonRunning: () => null,
-      displayItemsSummary: () => {},
-      promptMode: async () => "orchestrate",
+      loadConfig: () => ({ locExtensions: "" }),
       runInteractiveFlow: async () => {
         interactiveCalled = true;
         return {
-          itemIds: ["H-FOO-1", "H-FOO-2"],
+          itemIds: ["H-1"],
           mergeStrategy: "auto" as MergeStrategy,
           wipLimit: 4,
+          allSelected: false,
+          reviewMode: "mine" as const,
+          crewAction: null,
         };
-      },
-      promptItems: async () => {
-        promptItemsCalled = true;
-        return ["H-FOO-1"];
       },
       runWatch: async () => {},
     });
 
     expect(interactiveCalled).toBe(true);
-    expect(promptItemsCalled).toBe(false);
+  });
+
+  it("reads review_external from project config to set default review mode", async () => {
+    const projectDir = setupTempRepo();
+    mkdirSync(join(projectDir, ".ninthwave", "work"), { recursive: true });
+
+    let interactiveCalled = false;
+
+    await cmdNoArgs(projectDir, {
+      isTTY: true,
+      parseWorkItems: () => [fakeWorkItem("H-1", "Task")],
+      isDaemonRunning: () => null,
+      loadConfig: () => ({ locExtensions: "", reviewExternal: "true" }),
+      runInteractiveFlow: async (_todos, _wip, deps) => {
+        interactiveCalled = true;
+        // Verify that the deps include the correct defaultReviewMode
+        expect(deps?.defaultReviewMode).toBe("all");
+        return {
+          itemIds: ["H-1"],
+          mergeStrategy: "auto" as MergeStrategy,
+          wipLimit: 4,
+          allSelected: false,
+          reviewMode: "all" as const,
+          crewAction: null,
+        };
+      },
+      runWatch: async () => {},
+    });
+
+    expect(interactiveCalled).toBe(true);
   });
 });

@@ -5,8 +5,8 @@
 // 1. No git repo → help text
 // 2. No .ninthwave/ → first-run onboarding (init flow)
 // 3. .ninthwave/ exists, no work items → guidance message
-// 4. Work items exist, no daemon → mode-first prompt (orchestrate/launch)
-// 5. Daemon running → live status view
+// 4. Daemon running → live status view
+// 5. Work items exist, no daemon → TUI selection → cmdWatch
 
 import { createInterface } from "readline";
 import { existsSync } from "fs";
@@ -20,14 +20,14 @@ import {
   RESET,
 } from "../output.ts";
 import { run } from "../shell.ts";
-import type { RunResult, WorkItem } from "../types.ts";
+import type { RunResult, WorkItem, ProjectConfig } from "../types.ts";
 import { initProject } from "./init.ts";
 import { getBundleDir } from "../paths.ts";
 import { isDaemonRunning } from "../daemon.ts";
 import { parseWorkItems } from "../parser.ts";
-import { promptItems, displayItemsSummary, promptMode, promptMergeStrategy, promptWipLimit, runInteractiveFlow } from "../interactive.ts";
-import type { Mode, InteractiveResult } from "../interactive.ts";
-import type { MergeStrategy } from "../orchestrator.ts";
+import { runInteractiveFlow } from "../interactive.ts";
+import type { InteractiveResult, InteractiveDeps } from "../interactive.ts";
+import { loadConfig } from "../config.ts";
 import { printHelp } from "../help.ts";
 import { AI_TOOL_PROFILES } from "../ai-tools.ts";
 import type { AiToolProfile } from "../ai-tools.ts";
@@ -76,16 +76,11 @@ export interface NoArgsDeps extends OnboardDeps {
   existsSync?: typeof existsSync;
   parseWorkItems?: (workDir: string, worktreeDir: string) => WorkItem[];
   isDaemonRunning?: (projectRoot: string) => number | null;
-  displayItemsSummary?: (todos: WorkItem[]) => void;
-  promptMode?: (prompt: PromptFn) => Promise<Mode>;
-  promptMergeStrategy?: (prompt: PromptFn) => Promise<MergeStrategy>;
-  promptWipLimit?: (defaultLimit: number, prompt: PromptFn) => Promise<number>;
-  promptItems?: (todos: WorkItem[], prompt: PromptFn) => Promise<string[]>;
-  runInteractiveFlow?: (todos: WorkItem[], defaultWipLimit: number) => Promise<InteractiveResult | null>;
-  runSelected?: (ids: string[], workDir: string, worktreeDir: string, projectRoot: string) => Promise<void>;
+  runInteractiveFlow?: (todos: WorkItem[], defaultWipLimit: number, deps?: InteractiveDeps) => Promise<InteractiveResult | null>;
   runWatch?: (args: string[], workDir: string, worktreeDir: string, projectRoot: string) => Promise<void>;
   runStatusWatch?: (worktreeDir: string, projectRoot: string) => Promise<void>;
   printHelp?: () => void;
+  loadConfig?: (projectRoot: string) => ProjectConfig;
 }
 
 const defaultCommandExists: CommandChecker = (cmd: string): boolean => {
@@ -392,10 +387,8 @@ export async function cmdOnboard(projectDir: string): Promise<void> {
  * 2. No git repo → print help text
  * 3. No `.ninthwave/` → first-run onboarding (init flow)
  * 4. `.ninthwave/` exists, no work items → guidance message
- * 5. Work items exist, daemon running → live status view
- * 6. Work items exist, no daemon → mode-first prompt:
- *    a. Orchestrate (default) → merge strategy + WIP limit → cmdWatch
- *    b. Launch subset → item selection → cmdRunItems
+ * 5. Daemon running → live status view
+ * 6. Work items exist, no daemon → TUI selection → cmdWatch
  */
 export async function cmdNoArgs(
   projectRoot: string | null,
@@ -405,12 +398,6 @@ export async function cmdNoArgs(
   const checkExists = deps.existsSync ?? existsSync;
   const doParseT = deps.parseWorkItems ?? parseWorkItems;
   const checkDaemon = deps.isDaemonRunning ?? isDaemonRunning;
-  const doDisplaySummary = deps.displayItemsSummary ?? displayItemsSummary;
-  const doPromptMode = deps.promptMode ?? promptMode;
-  const doPromptMergeStrategy = deps.promptMergeStrategy ?? promptMergeStrategy;
-  const doPromptWipLimit = deps.promptWipLimit ?? promptWipLimit;
-  const doPromptItems = deps.promptItems ?? promptItems;
-  const prompt = deps.prompt ?? defaultPrompt;
   const helpFn = deps.printHelp ?? printHelp;
 
   // Non-TTY: always print grouped help text
@@ -462,43 +449,49 @@ export async function cmdNoArgs(
     return;
   }
 
-  // State 5: Work items exist, no daemon → mode-first flow
-  // Show read-only summary of all items
-  doDisplaySummary(todos);
+  // State 5: Work items exist, no daemon → TUI selection → cmdWatch
+  // Load project config to determine review default
+  const doLoadConfig = deps.loadConfig ?? loadConfig;
+  const projectConfig = doLoadConfig(projectRoot);
+  const defaultReviewMode = projectConfig.reviewExternal === "true" ? "all" as const : "mine" as const;
 
-  // Ask: Orchestrate (default) or Launch subset?
-  const mode = await doPromptMode(prompt);
-  if (mode === "quit") return;
+  const doInteractive = deps.runInteractiveFlow ?? runInteractiveFlow;
+  const result = await doInteractive(todos, 4, { defaultReviewMode });
+  if (!result) return; // User cancelled
 
-  if (mode === "orchestrate") {
-    // TUI selection flow: items + merge strategy + WIP limit in-screen
-    const doInteractive = deps.runInteractiveFlow ?? runInteractiveFlow;
-    const result = await doInteractive(todos, 4);
-    if (!result) return; // User cancelled
+  // Build watch args from interactive result
+  const watchArgs = [
+    "--items", ...result.itemIds,
+    "--merge-strategy", result.mergeStrategy,
+    "--wip-limit", String(result.wipLimit),
+  ];
 
-    const watchArgs = [
-      "--items", ...result.itemIds,
-      "--merge-strategy", result.mergeStrategy,
-      "--wip-limit", String(result.wipLimit),
-    ];
+  // Dynamic re-scanning when all items selected
+  if (result.allSelected) {
+    watchArgs.push("--watch");
+  }
 
-    if (deps.runWatch) {
-      await deps.runWatch(watchArgs, workDir, worktreeDir, projectRoot);
-    } else {
-      const { cmdWatch } = await import("./orchestrate.ts");
-      await cmdWatch(watchArgs, workDir, worktreeDir, projectRoot);
+  // Review mode → CLI flags
+  if (result.reviewMode === "all") {
+    watchArgs.push("--review-external");
+  } else if (result.reviewMode === "off") {
+    watchArgs.push("--review-wip-limit", "0");
+  }
+  // "mine" → default behavior, no extra flag
+
+  // Crew action → CLI flags
+  if (result.crewAction) {
+    if (result.crewAction.type === "join") {
+      watchArgs.push("--crew", result.crewAction.code);
+    } else if (result.crewAction.type === "create") {
+      watchArgs.push("--crew-create");
     }
+  }
+
+  if (deps.runWatch) {
+    await deps.runWatch(watchArgs, workDir, worktreeDir, projectRoot);
   } else {
-    // "launch" -- TUI selection for item subset
-    const doInteractive = deps.runInteractiveFlow ?? runInteractiveFlow;
-    const result = await doInteractive(todos, 4);
-    if (!result) return; // User cancelled
-
-    if (deps.runSelected) {
-      await deps.runSelected(result.itemIds, workDir, worktreeDir, projectRoot);
-    } else {
-      const { cmdRunItems } = await import("./launch.ts");
-      await cmdRunItems(result.itemIds, workDir, worktreeDir, projectRoot);
-    }
+    const { cmdWatch } = await import("./orchestrate.ts");
+    await cmdWatch(watchArgs, workDir, worktreeDir, projectRoot);
   }
 }

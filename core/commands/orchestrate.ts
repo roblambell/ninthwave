@@ -1542,7 +1542,7 @@ export async function cmdOrchestrate(
   const {
     wipLimitOverride, pollIntervalOverride, frictionDir,
     daemonMode, isDaemonChild, clickupListId, remoteFlag,
-    reviewAutoFix, reviewExternal,
+    reviewAutoFix, reviewExternal, reviewWipLimit,
     verifyMain, noWatch, watchIntervalSecs,
     jsonFlag, skipPreflight, crewCreate, crewPort, crewName,
     bypassEnabled,
@@ -1947,7 +1947,10 @@ export async function cmdOrchestrate(
 
   // Resolve config-file flags
   const projectConfig = loadConfig(projectRoot);
-  const reviewExternalEnabled = reviewExternal || projectConfig.reviewExternal === "true";
+  // --review-wip-limit 0 explicitly disables reviews, overriding config
+  const reviewExternalEnabled = reviewWipLimit === 0
+    ? false
+    : (reviewExternal || projectConfig.reviewExternal === "true");
   const scheduleEnabled = projectConfig.scheduleEnabled === "true";
 
   // State persistence: serialize state each poll cycle so the status pane can display all items.
@@ -2238,8 +2241,9 @@ export async function cmdOrchestrate(
 
         // Re-parse work items and re-enter interactive selection
         // Widgets render in the same alt-screen buffer -- no screen switch needed
+        // showCrewStep: false because crew is session-scoped (already established)
         const freshItems = parseWorkItems(workDir, worktreeDir, projectRoot);
-        const interactiveResult = await runInteractiveFlow(freshItems, wipLimit);
+        const interactiveResult = await runInteractiveFlow(freshItems, wipLimit, { showCrewStep: false });
         if (!interactiveResult) {
           // User cancelled selection -- restore keyboard and exit loop
           cleanupKeyboard = setupKeyboardShortcuts(abortController, log, process.stdin, tuiState);
@@ -2259,6 +2263,13 @@ export async function cmdOrchestrate(
         mergeStrategy = interactiveResult.mergeStrategy;
         orch.setMergeStrategy(mergeStrategy);
 
+        // Update review config based on user's review mode selection
+        if (interactiveResult.reviewMode === "all") {
+          loopConfig.reviewExternal = true;
+        } else if (interactiveResult.reviewMode === "off") {
+          loopConfig.reviewExternal = false;
+        }
+
         // Restore keyboard shortcuts for the main TUI
         cleanupKeyboard = setupKeyboardShortcuts(abortController, log, process.stdin, tuiState);
 
@@ -2267,6 +2278,7 @@ export async function cmdOrchestrate(
           level: "info",
           event: "run_more_restart",
           newItems: interactiveResult.itemIds,
+          reviewMode: interactiveResult.reviewMode,
         });
         continue; // Restart the orchestrate loop
       }

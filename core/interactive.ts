@@ -10,6 +10,7 @@ import type { WorkItem } from "./types.ts";
 import { PRIORITY_NUM } from "./types.ts";
 import type { MergeStrategy } from "./orchestrator.ts";
 import type { CrewAction } from "./commands/crew.ts";
+import { isCrewCode } from "./commands/crew.ts";
 import {
   runSelectionScreen,
   createProcessIO,
@@ -37,6 +38,10 @@ export interface InteractiveDeps {
   useLegacyPrompts?: boolean;
   /** Injectable WidgetIO for testing the TUI path. */
   widgetIO?: WidgetIO;
+  /** When false, skip the crew step (e.g. run-more re-entry where crew is session-scoped). */
+  showCrewStep?: boolean;
+  /** Default review mode from project config. */
+  defaultReviewMode?: "all" | "mine" | "off";
 }
 
 // ── Default prompt using readline ────────────────────────────────────
@@ -127,56 +132,25 @@ export function displayItemsSummary(todos: WorkItem[]): void {
   console.log();
 }
 
-// ── Mode prompt ─────────────────────────────────────────────────────
-
-export type Mode = "orchestrate" | "launch" | "quit";
-
-/**
- * Prompt the user to choose between "Orchestrate" (default) and "Launch subset".
- * Returns "orchestrate", "launch", or "quit".
- * Used by cmdNoArgs() in onboard.ts for the mode-first flow.
- */
-export async function promptMode(
-  prompt: PromptFn,
-): Promise<Mode> {
-  console.log(`  ${BOLD}1${RESET}. ${CYAN}Orchestrate${RESET}  ${DIM}-- daemon mode with auto-merge and monitoring${RESET} ${GREEN}(default)${RESET}`);
-  console.log(`  ${BOLD}2${RESET}. ${CYAN}Launch subset${RESET} ${DIM}-- targeted work on selected items${RESET}`);
-  console.log();
-
-  while (true) {
-    const answer = await prompt(`${BOLD}Choose [1-2]: ${RESET}`);
-
-    if (answer.toLowerCase() === "q" || answer.toLowerCase() === "quit") {
-      return "quit";
-    }
-
-    // Default to orchestrate on empty input
-    if (answer === "" || answer === "1" || answer.toLowerCase() === "orchestrate") {
-      return "orchestrate";
-    }
-
-    if (answer === "2" || answer.toLowerCase() === "launch") {
-      return "launch";
-    }
-
-    console.log(`  ${YELLOW}Enter 1, 2, or "q" to quit.${RESET}`);
-  }
-}
-
 // ── Item selection ───────────────────────────────────────────────────
+
+export interface PromptItemsResult {
+  ids: string[];
+  allSelected: boolean;
+}
 
 /**
  * Display available TODOs and let the user toggle selections.
  * Accepts space/comma-separated numbers or ranges (e.g. "1 3 5" or "1-4,6").
- * Entering "all" selects everything.
+ * Entering "all" or selecting every item sets allSelected: true.
  */
 export async function promptItems(
   todos: WorkItem[],
   prompt: PromptFn,
-): Promise<string[]> {
+): Promise<PromptItemsResult> {
   if (todos.length === 0) {
     console.log(`  ${YELLOW}No work items found.${RESET}`);
-    return [];
+    return { ids: [], allSelected: false };
   }
 
   // Sort by priority then ID
@@ -213,11 +187,11 @@ export async function promptItems(
     const answer = await prompt(`${BOLD}Select items: ${RESET}`);
 
     if (answer.toLowerCase() === "q" || answer.toLowerCase() === "quit") {
-      return [];
+      return { ids: [], allSelected: false };
     }
 
     if (answer.toLowerCase() === "all") {
-      return sorted.map((t) => t.id);
+      return { ids: sorted.map((t) => t.id), allSelected: true };
     }
 
     const indices = parseSelection(answer, sorted.length);
@@ -228,7 +202,8 @@ export async function promptItems(
       continue;
     }
 
-    return indices.map((idx) => sorted[idx]!.id);
+    const ids = indices.map((idx) => sorted[idx]!.id);
+    return { ids, allSelected: ids.length === sorted.length };
   }
 }
 
@@ -323,6 +298,104 @@ export async function promptWipLimit(
   }
 }
 
+// ── Review mode prompt ──────────────────────────────────────────────
+
+export type ReviewMode = "all" | "mine" | "off";
+
+/**
+ * Prompt the user to choose AI review mode.
+ * Returns "all", "mine", or "off".
+ */
+export async function promptReviewMode(
+  defaultMode: ReviewMode,
+  prompt: PromptFn,
+): Promise<ReviewMode> {
+  console.log();
+  console.log(`${BOLD}AI reviews:${RESET}`);
+  console.log();
+  const options: { value: ReviewMode; label: string; description: string }[] = [
+    { value: "all", label: "all", description: "Review all PRs (including external)" },
+    { value: "mine", label: "mine", description: "Review only ninthwave-managed PRs" },
+    { value: "off", label: "off", description: "No AI reviews" },
+  ];
+
+  for (let i = 0; i < options.length; i++) {
+    const o = options[i]!;
+    const defaultTag = o.value === defaultMode ? ` ${GREEN}(default)${RESET}` : "";
+    console.log(
+      `  ${BOLD}${i + 1}${RESET}. ${CYAN}${o.label}${RESET}  ${DIM}-- ${o.description}${RESET}${defaultTag}`,
+    );
+  }
+  console.log();
+
+  while (true) {
+    const answer = await prompt(
+      `${BOLD}Choose [1-${options.length}]: ${RESET}`,
+    );
+
+    // Default on empty input
+    if (answer === "") return defaultMode;
+
+    const idx = parseInt(answer, 10) - 1;
+    if (idx >= 0 && idx < options.length) {
+      return options[idx]!.value;
+    }
+
+    // Accept typing the name directly
+    const byName = options.find((o) => o.value === answer.toLowerCase());
+    if (byName) return byName.value;
+
+    console.log(
+      `  ${YELLOW}Enter 1-${options.length} or a mode name (all/mine/off).${RESET}`,
+    );
+  }
+}
+
+// ── Crew mode prompt ────────────────────────────────────────────────
+
+/**
+ * Prompt the user to choose crew collaboration mode.
+ * Returns a CrewAction or null for solo mode.
+ */
+export async function promptCrewMode(
+  prompt: PromptFn,
+): Promise<CrewAction | null> {
+  console.log();
+  console.log(`${BOLD}Crew collaboration:${RESET}`);
+  console.log();
+  console.log(`  ${BOLD}1${RESET}. ${CYAN}solo${RESET}    ${DIM}-- work independently${RESET} ${GREEN}(default)${RESET}`);
+  console.log(`  ${BOLD}2${RESET}. ${CYAN}join${RESET}    ${DIM}-- join an existing crew${RESET}`);
+  console.log(`  ${BOLD}3${RESET}. ${CYAN}create${RESET}  ${DIM}-- start a new crew${RESET}`);
+  console.log();
+
+  while (true) {
+    const answer = await prompt(`${BOLD}Choose [1-3]: ${RESET}`);
+
+    // Default to solo on empty input
+    if (answer === "" || answer === "1" || answer.toLowerCase() === "solo") {
+      return null;
+    }
+
+    if (answer === "2" || answer.toLowerCase() === "join") {
+      // Prompt for crew code
+      while (true) {
+        const code = await prompt(`${BOLD}Crew code: ${RESET}`);
+        if (code === "" || code.toLowerCase() === "q") return null;
+        if (isCrewCode(code)) {
+          return { type: "join", code };
+        }
+        console.log(`  ${YELLOW}Invalid crew code.${RESET} Expected format: ${BOLD}XXX-XXX${RESET} (e.g. xK2-9fB).`);
+      }
+    }
+
+    if (answer === "3" || answer.toLowerCase() === "create") {
+      return { type: "create" };
+    }
+
+    console.log(`  ${YELLOW}Enter 1-3 or a mode name (solo/join/create).${RESET}`);
+  }
+}
+
 // ── Summary + confirmation ───────────────────────────────────────────
 
 export async function confirmSummary(
@@ -342,6 +415,15 @@ export async function confirmSummary(
   }
   console.log(`  ${BOLD}Merge strategy:${RESET}  ${result.mergeStrategy}`);
   console.log(`  ${BOLD}WIP limit:${RESET}       ${result.wipLimit}`);
+  console.log(`  ${BOLD}AI reviews:${RESET}      ${result.reviewMode}`);
+  if (result.crewAction) {
+    const crewLabel = result.crewAction.type === "create"
+      ? "create new crew"
+      : `join ${result.crewAction.code}`;
+    console.log(`  ${BOLD}Crew:${RESET}            ${crewLabel}`);
+  } else {
+    console.log(`  ${BOLD}Crew:${RESET}            solo`);
+  }
   console.log();
 
   const answer = await prompt(
@@ -374,7 +456,10 @@ export async function runTuiSelectionFlow(
   }
 
   try {
-    const result = await runSelectionScreen(io, todos, defaultWipLimit);
+    const result = await runSelectionScreen(io, todos, defaultWipLimit, {
+      defaultReviewMode: deps.defaultReviewMode,
+      showCrewStep: deps.showCrewStep,
+    });
     if (!result || result.cancelled) return null;
 
     return {
@@ -430,8 +515,8 @@ async function runReadlineFlow(
   const prompt = deps.prompt ?? defaultPrompt;
 
   // Step 1: Item selection
-  const itemIds = await promptItems(todos, prompt);
-  if (itemIds.length === 0) return null;
+  const itemResult = await promptItems(todos, prompt);
+  if (itemResult.ids.length === 0) return null;
 
   // Step 2: Merge strategy
   const mergeStrategy = await promptMergeStrategy(prompt);
@@ -439,14 +524,24 @@ async function runReadlineFlow(
   // Step 3: WIP limit
   const wipLimit = await promptWipLimit(defaultWipLimit, prompt);
 
-  // Step 4: Summary + confirmation
+  // Step 4: Review mode
+  const defaultReviewMode = deps.defaultReviewMode ?? "mine";
+  const reviewMode = await promptReviewMode(defaultReviewMode, prompt);
+
+  // Step 5: Crew collaboration (skippable for run-more re-entry)
+  let crewAction: CrewAction | null = null;
+  if (deps.showCrewStep !== false) {
+    crewAction = await promptCrewMode(prompt);
+  }
+
+  // Step 6: Summary + confirmation
   const result: InteractiveResult = {
-    itemIds,
+    itemIds: itemResult.ids,
     mergeStrategy,
     wipLimit,
-    allSelected: false,   // legacy readline path doesn't support __ALL__
-    reviewMode: "off",    // temp default until H-WJ-3
-    crewAction: null,     // temp default until H-WJ-3
+    allSelected: itemResult.allSelected,
+    reviewMode,
+    crewAction,
   };
 
   const confirmed = await confirmSummary(result, todos, prompt);
