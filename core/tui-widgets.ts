@@ -113,7 +113,8 @@ export function runCheckboxList(
       // Layout: title (2 lines), items (variable), footer (3 lines)
       const headerLines = 3; // title + blank + optional error
       const footerLines = 3; // blank + instructions + blank
-      const viewportHeight = Math.max(1, rows - headerLines - footerLines);
+      const separatorLines = opts.linkAllId ? 1 : 0; // blank line after sentinel
+      const viewportHeight = Math.max(1, rows - headerLines - footerLines - separatorLines);
 
       // Clamp scroll to keep cursor visible
       if (cursor < scrollOffset) scrollOffset = cursor;
@@ -127,9 +128,10 @@ export function runCheckboxList(
       const title = opts.title ?? "Select items";
       out += `${BOLD}${title}${RESET}${CLEAR_LINE}\n`;
 
-      // Selected count
-      const selectedCount = items.filter((i) => i.checked).length;
-      out += `${DIM}${selectedCount}/${items.length} selected${RESET}${CLEAR_LINE}\n`;
+      // Selected count (exclude sentinel from both numerator and denominator)
+      const countItems = opts.linkAllId ? items.filter((i) => i.id !== opts.linkAllId) : items;
+      const selectedCount = countItems.filter((i) => i.checked).length;
+      out += `${DIM}${selectedCount}/${countItems.length} selected${RESET}${CLEAR_LINE}\n`;
 
       // Error line (or blank)
       if (error) {
@@ -150,6 +152,10 @@ export function runCheckboxList(
         const line = `${pointer} ${checkbox} ${label}${detail}`;
         // Truncate to terminal width
         out += `${line.slice(0, cols + 60)}${CLEAR_LINE}\n`; // +60 for ANSI codes
+        // Visual separator after sentinel
+        if (opts.linkAllId && item.id === opts.linkAllId) {
+          out += `${CLEAR_LINE}\n`;
+        }
       }
 
       // Fill remaining viewport lines
@@ -194,23 +200,19 @@ export function runCheckboxList(
               const newState = !item.checked;
               for (const i of items) i.checked = newState;
             } else {
-              // Toggling a regular item
+              // Toggling a regular item (sentinel stays independent)
               item.checked = !item.checked;
-              // Sync __ALL__: checked only when all regular items are checked
-              const allItem = items.find((i) => i.id === linkId);
-              if (allItem) {
-                const regularItems = items.filter((i) => i.id !== linkId);
-                allItem.checked = regularItems.every((i) => i.checked);
-              }
             }
           } else {
             items[cursor]!.checked = !items[cursor]!.checked;
           }
           break;
         }
-        case "a": { // Toggle all
-          const allChecked = items.every((i) => i.checked);
-          for (const item of items) item.checked = !allChecked;
+        case "a": { // Toggle all regular items (sentinel stays independent)
+          const linkId = opts.linkAllId;
+          const regularItems = linkId ? items.filter((i) => i.id !== linkId) : items;
+          const allChecked = regularItems.every((i) => i.checked);
+          for (const item of regularItems) item.checked = !allChecked;
           break;
         }
         case "\r": { // Enter -- confirm

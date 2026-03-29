@@ -322,44 +322,47 @@ describe("runCheckboxList with linkAllId", () => {
     expect(result.allSelected).toBe(true);
   });
 
-  it("unchecking any item auto-unchecks __ALL__", async () => {
+  it("unchecking a regular item does not affect __ALL__", async () => {
     const { io, sendKeys } = createMockIO();
     const items = makeLinkedItems(2); // __ALL__, T-1, T-2 -- all checked
 
     const resultPromise = runCheckboxList(io, items, { linkAllId: "__ALL__" });
-    // Down to T-2 (index 2), space to uncheck. __ALL__ auto-unchecks.
+    // Down to T-2 (index 2), space to uncheck. __ALL__ stays checked (independent).
     sendKeys(["\x1B[B", "\x1B[B", " ", "\r"]);
 
     const result = await resultPromise;
     expect(result.selectedIds).toContain("T-1");
     expect(result.selectedIds).not.toContain("T-2");
-    expect(result.selectedIds).not.toContain("__ALL__");
-    expect(result.allSelected).toBe(false);
-  });
-
-  it("re-checking the last unchecked item re-checks __ALL__", async () => {
-    const { io, sendKeys } = createMockIO();
-    const items = makeLinkedItems(2); // __ALL__, T-1, T-2 -- all checked
-
-    const resultPromise = runCheckboxList(io, items, { linkAllId: "__ALL__" });
-    // Down to T-2 (index 2), space to uncheck (auto-unchecks __ALL__).
-    // Space again to re-check T-2 (__ALL__ re-checks since all regular items now checked).
-    // Confirm.
-    sendKeys(["\x1B[B", "\x1B[B", " ", " ", "\r"]);
-
-    const result = await resultPromise;
-    expect(result.selectedIds).toContain("T-1");
-    expect(result.selectedIds).toContain("T-2");
     expect(result.selectedIds).toContain("__ALL__");
     expect(result.allSelected).toBe(true);
   });
 
-  it("'a' key interacts correctly with __ALL__", async () => {
+  it("all regular items checked does not auto-check __ALL__", async () => {
     const { io, sendKeys } = createMockIO();
-    const items = makeLinkedItems(2); // all checked
+    // Start with __ALL__ unchecked, regular items checked
+    const items: CheckboxItem[] = [
+      { id: "__ALL__", label: "All", checked: false },
+      { id: "T-1", label: "Item 1", checked: true },
+      { id: "T-2", label: "Item 2", checked: true },
+    ];
 
     const resultPromise = runCheckboxList(io, items, { linkAllId: "__ALL__" });
-    // "a" unchecks all (allChecked=true), "a" re-checks all, confirm
+    // All regular items already checked. __ALL__ should stay unchecked. Confirm.
+    sendKeys(["\r"]);
+
+    const result = await resultPromise;
+    expect(result.selectedIds).toContain("T-1");
+    expect(result.selectedIds).toContain("T-2");
+    expect(result.selectedIds).not.toContain("__ALL__");
+    expect(result.allSelected).toBe(false);
+  });
+
+  it("'a' key toggles only regular items, not __ALL__", async () => {
+    const { io, sendKeys } = createMockIO();
+    const items = makeLinkedItems(2); // all checked including __ALL__
+
+    const resultPromise = runCheckboxList(io, items, { linkAllId: "__ALL__" });
+    // "a" unchecks regular items (sentinel stays checked), "a" re-checks regular items, confirm
     sendKeys(["a", "a", "\r"]);
 
     const result = await resultPromise;
@@ -369,18 +372,18 @@ describe("runCheckboxList with linkAllId", () => {
     expect(result.allSelected).toBe(true);
   });
 
-  it("'a' key uncheck when all checked leaves __ALL__ unchecked", async () => {
+  it("'a' key uncheck leaves __ALL__ unchanged", async () => {
     const { io, sendKeys } = createMockIO();
-    const items = makeLinkedItems(2); // all checked
+    const items = makeLinkedItems(2); // all checked including __ALL__
 
     const resultPromise = runCheckboxList(io, items, { linkAllId: "__ALL__" });
-    // "a" unchecks all, then select T-1 to avoid empty error
+    // "a" unchecks regular items only, sentinel stays checked. Select T-1 to confirm.
     sendKeys(["a", "\x1B[B", " ", "\r"]);
 
     const result = await resultPromise;
     expect(result.selectedIds).toContain("T-1");
-    expect(result.selectedIds).not.toContain("__ALL__");
-    expect(result.allSelected).toBe(false);
+    expect(result.selectedIds).toContain("__ALL__");
+    expect(result.allSelected).toBe(true);
   });
 
   it("edge case: single work item + __ALL__ (2 items total)", async () => {
@@ -397,12 +400,12 @@ describe("runCheckboxList with linkAllId", () => {
     expect(result.allSelected).toBe(true);
   });
 
-  it("uncheck single item re-checks __ALL__ when re-checked (single item edge case)", async () => {
+  it("toggling regular item does not affect __ALL__ (single item edge case)", async () => {
     const { io, sendKeys } = createMockIO();
     const items = makeLinkedItems(1); // __ALL__ + T-1, both checked
 
     const resultPromise = runCheckboxList(io, items, { linkAllId: "__ALL__" });
-    // Down to T-1, uncheck (auto-unchecks __ALL__), re-check (auto-re-checks __ALL__)
+    // Down to T-1, uncheck, re-check -- __ALL__ stays checked throughout (independent)
     sendKeys(["\x1B[B", " ", " ", "\r"]);
 
     const result = await resultPromise;
@@ -1012,7 +1015,7 @@ describe("runSelectionScreen", () => {
     expect(result!.allSelected).toBe(true);
   });
 
-  it("allSelected is false when __ALL__ is unchecked at confirmation", async () => {
+  it("allSelected is false when __ALL__ is explicitly unchecked", async () => {
     const { io, sendKeyBatches } = createMockIO();
     const items = [
       makeWorkItem("A-1", "First task"),
@@ -1020,14 +1023,14 @@ describe("runSelectionScreen", () => {
     ];
 
     const resultPromise = runSelectionScreen(io, items, 4);
-    // Uncheck B-2 (index 2 in list: __ALL__, A-1, B-2), which auto-unchecks __ALL__
+    // Space on __ALL__ (index 0) to uncheck all, then re-check A-1
     sendKeyBatches(
-      ["\x1B[B", "\x1B[B", " ", "\r"],  // Navigate to B-2, uncheck, confirm
-      ["\r"],                             // Accept strategy
-      ["\r"],                             // Accept WIP
-      ["\r"],                             // Accept review mode
-      ["\r"],                             // Accept crew
-      ["\r"],                             // Confirm
+      [" ", "\x1B[B", " ", "\r"],  // Uncheck __ALL__ (unchecks all), re-check A-1, confirm
+      ["\r"],                       // Accept strategy
+      ["\r"],                       // Accept WIP
+      ["\r"],                       // Accept review mode
+      ["\r"],                       // Accept crew
+      ["\r"],                       // Confirm
     );
 
     const result = await resultPromise;
@@ -1490,9 +1493,9 @@ describe("runSelectionScreen -- updated confirmation", () => {
     ];
 
     const resultPromise = runSelectionScreen(io, items, 4);
-    // Uncheck B-2 to make allSelected = false
+    // Explicitly uncheck __ALL__ (unchecks all), then re-check A-1
     sendKeyBatches(
-      ["\x1B[B", "\x1B[B", " ", "\r"],  // uncheck B-2
+      [" ", "\x1B[B", " ", "\r"],  // uncheck __ALL__, re-check A-1
       ["\r"],   // strategy
       ["\r"],   // WIP
       ["\r"],   // review
