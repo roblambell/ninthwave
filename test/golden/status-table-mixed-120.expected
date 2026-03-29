@@ -1,4 +1,4 @@
-ninthwave status
+ninthwave
 
     ID          STATE            DURATION TITLE
   ──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
@@ -13,4 +13,4 @@ ninthwave status
   · L-BF-2      Queued           -        Update README with new API docs
   · L-BF-3      Queued           -        Add retry logic to webhook handler
   ──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
-  ✓ 1 merged  ● 1 in review  ◌ 1 ci pending  ▸ 1 implementing  ✗ 1 ci failed  · 2 queued                         7 items
+  ✓ 1 merged  ● 1 in review  ◌ 1 ci pending  ▸ 1 implementing  ✗ 1 ci failed  · 2 queued                        7 items

@@ -1,4 +1,4 @@
-ninthwave status
+ninthwave
 
     ID          STATE          DURATION TITLE
   ──────────────────────────────────────────────────────────────────────────────
@@ -6,4 +6,4 @@ ninthwave status
   ✓ H-CA-2      Merged (#43)   15m      Database migration for users table
   ✓ M-FE-1      Merged (#44)   15m      Login form component
   ──────────────────────────────────────────────────────────────────────────────
-  ✓ 3 merged                                                             3 items
+  ✓ 3 merged                                                            3 items

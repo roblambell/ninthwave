@@ -35,7 +35,7 @@ describe("smoke: nw status", () => {
     const result = runCli(repo, {}, "status", "--once");
 
     expect(result.exitCode).toBe(0);
-    expect(result.stdout).toContain("ninthwave status");
+    expect(result.stdout).toContain("ninthwave");
     expect(result.stdout).toContain("No active items");
     expect(result.stderr).not.toContain("Error");
   });
@@ -88,7 +88,7 @@ describe("smoke: nw status", () => {
     const result = runCli(repo, {}, "status", "--once");
 
     expect(result.exitCode).toBe(0);
-    expect(result.stdout).toContain("ninthwave status");
+    expect(result.stdout).toContain("ninthwave");
     expect(result.stdout).toContain("H-SMOKE-1");
     expect(result.stdout).toContain("M-SMOKE-2");
     expect(result.stderr).not.toContain("Error");
