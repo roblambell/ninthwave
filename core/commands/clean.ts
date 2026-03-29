@@ -3,9 +3,31 @@
 import { existsSync, readdirSync, readFileSync, rmSync } from "fs";
 import { join, basename } from "path";
 import { die, warn, info, GREEN, RESET } from "../output.ts";
-import { isBranchMerged, removeWorktree, deleteBranch, deleteRemoteBranch } from "../git.ts";
-import { prList } from "../gh.ts";
+import {
+  isBranchMerged as defaultIsBranchMerged,
+  removeWorktree as defaultRemoveWorktree,
+  deleteBranch as defaultDeleteBranch,
+  deleteRemoteBranch as defaultDeleteRemoteBranch,
+} from "../git.ts";
+import { prList as defaultPrList } from "../gh.ts";
 import { type Multiplexer, getMux } from "../mux.ts";
+
+/** Injectable dependencies for clean commands, for testing. */
+export interface CleanDeps {
+  isBranchMerged: typeof defaultIsBranchMerged;
+  removeWorktree: typeof defaultRemoveWorktree;
+  deleteBranch: typeof defaultDeleteBranch;
+  deleteRemoteBranch: typeof defaultDeleteRemoteBranch;
+  prList: typeof defaultPrList;
+}
+
+const defaultCleanDeps: CleanDeps = {
+  isBranchMerged: defaultIsBranchMerged,
+  removeWorktree: defaultRemoveWorktree,
+  deleteBranch: defaultDeleteBranch,
+  deleteRemoteBranch: defaultDeleteRemoteBranch,
+  prList: defaultPrList,
+};
 import { releasePartition } from "../partitions.ts";
 import {
   getWorktreeInfo,
@@ -124,14 +146,15 @@ export function cmdCloseWorkspace(targetId: string, mux: Multiplexer = getMux())
 function isMerged(
   repoRoot: string,
   branch: string,
+  deps: CleanDeps,
 ): boolean {
   // Check git merge status
-  if (isBranchMerged(repoRoot, branch, "main")) {
+  if (deps.isBranchMerged(repoRoot, branch, "main")) {
     return true;
   }
 
   // Check via gh PR status
-  const result = prList(repoRoot, branch, "merged");
+  const result = deps.prList(repoRoot, branch, "merged");
   return result.ok && result.data.length > 0;
 }
 
@@ -147,6 +170,7 @@ export function cmdClean(
   worktreeDir: string,
   projectRoot: string,
   mux: Multiplexer = getMux(),
+  deps: CleanDeps = defaultCleanDeps,
 ): void {
   const targetId = args[0] ?? "";
 
@@ -172,13 +196,13 @@ export function cmdClean(
     if (targetId && id !== targetId) return false;
 
     const branch = `ninthwave/${id}`;
-    const merged = isMerged(repoRoot, branch);
+    const merged = isMerged(repoRoot, branch, deps);
 
     if (merged || targetId) {
       if (merged && !targetId) mergedIds.add(id);
       info(`Removing worktree for ${id} from ${basename(repoRoot)}`);
       try {
-        removeWorktree(repoRoot, wtDir, true);
+        deps.removeWorktree(repoRoot, wtDir, true);
       } catch (e) {
         warn(`Failed to remove worktree for ${id}: ${e instanceof Error ? e.message : e}`);
         try {
@@ -188,12 +212,12 @@ export function cmdClean(
         }
       }
       try {
-        deleteBranch(repoRoot, branch);
+        deps.deleteBranch(repoRoot, branch);
       } catch (e) {
         warn(`Failed to delete local branch ${branch}: ${e instanceof Error ? e.message : e}`);
       }
       try {
-        deleteRemoteBranch(repoRoot, branch);
+        deps.deleteRemoteBranch(repoRoot, branch);
       } catch (e) {
         warn(`Failed to delete remote branch ${branch}: ${e instanceof Error ? e.message : e}`);
       }
@@ -254,6 +278,7 @@ export function cleanSingleWorktree(
   id: string,
   worktreeDir: string,
   projectRoot: string,
+  deps: CleanDeps = defaultCleanDeps,
 ): boolean {
   const branch = `ninthwave/${id}`;
   const partitionDir = join(worktreeDir, ".partitions");
@@ -278,7 +303,7 @@ export function cleanSingleWorktree(
 
   info(`Removing worktree for ${id} from ${basename(targetRepo)}`);
   try {
-    removeWorktree(targetRepo, worktreePath, true);
+    deps.removeWorktree(targetRepo, worktreePath, true);
   } catch (e) {
     warn(`Failed to remove worktree for ${id}: ${e instanceof Error ? e.message : e}`);
     try {
@@ -288,12 +313,12 @@ export function cleanSingleWorktree(
     }
   }
   try {
-    deleteBranch(targetRepo, branch);
+    deps.deleteBranch(targetRepo, branch);
   } catch (e) {
     warn(`Failed to delete local branch ${branch}: ${e instanceof Error ? e.message : e}`);
   }
   try {
-    deleteRemoteBranch(targetRepo, branch);
+    deps.deleteRemoteBranch(targetRepo, branch);
   } catch (e) {
     warn(`Failed to delete remote branch ${branch}: ${e instanceof Error ? e.message : e}`);
   }
@@ -309,11 +334,12 @@ export function cmdCleanSingle(
   args: string[],
   worktreeDir: string,
   projectRoot: string,
+  deps: CleanDeps = defaultCleanDeps,
 ): void {
   const targetId = args[0] ?? "";
   if (!targetId) die("Usage: ninthwave clean-single <ID>");
 
-  if (cleanSingleWorktree(targetId, worktreeDir, projectRoot)) {
+  if (cleanSingleWorktree(targetId, worktreeDir, projectRoot, deps)) {
     console.log(`${GREEN}Cleaned worktree for ${targetId}${RESET}`);
   } else {
     console.log(`No worktree found for ${targetId}`);

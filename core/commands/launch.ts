@@ -5,13 +5,47 @@ import { join, basename } from "path";
 import { tmpdir } from "os";
 import { run } from "../shell.ts";
 import { die, warn, info } from "../output.ts";
-import { fetchOrigin, ffMerge, branchExists, deleteBranch, createWorktree, attachWorktree, removeWorktree, findWorktreeForBranch } from "../git.ts";
+import {
+  fetchOrigin as defaultFetchOrigin,
+  ffMerge as defaultFfMerge,
+  branchExists as defaultBranchExists,
+  deleteBranch as defaultDeleteBranch,
+  createWorktree as defaultCreateWorktree,
+  attachWorktree as defaultAttachWorktree,
+  removeWorktree as defaultRemoveWorktree,
+  findWorktreeForBranch as defaultFindWorktreeForBranch,
+} from "../git.ts";
 import { type Multiplexer, getMux, waitForReady } from "../mux.ts";
 import { sendWithReadyWait } from "../worker-health.ts";
 import { allocatePartition, getPartitionFor, releasePartition } from "../partitions.ts";
 import { resolveRepo, writeCrossRepoIndex, removeCrossRepoIndex, ensureWorktreeExcluded } from "../cross-repo.ts";
 import { readWorkItem } from "../work-item-files.ts";
-import { prList } from "../gh.ts";
+import { prList as defaultPrList } from "../gh.ts";
+
+/** Injectable dependencies for launch git operations, for testing. */
+export interface LaunchGitDeps {
+  fetchOrigin: typeof defaultFetchOrigin;
+  ffMerge: typeof defaultFfMerge;
+  branchExists: typeof defaultBranchExists;
+  createWorktree: typeof defaultCreateWorktree;
+  attachWorktree: typeof defaultAttachWorktree;
+  removeWorktree: typeof defaultRemoveWorktree;
+  deleteBranch: typeof defaultDeleteBranch;
+  findWorktreeForBranch: typeof defaultFindWorktreeForBranch;
+  prList: typeof defaultPrList;
+}
+
+const defaultLaunchGitDeps: LaunchGitDeps = {
+  fetchOrigin: defaultFetchOrigin,
+  ffMerge: defaultFfMerge,
+  branchExists: defaultBranchExists,
+  createWorktree: defaultCreateWorktree,
+  attachWorktree: defaultAttachWorktree,
+  removeWorktree: defaultRemoveWorktree,
+  deleteBranch: defaultDeleteBranch,
+  findWorktreeForBranch: defaultFindWorktreeForBranch,
+  prList: defaultPrList,
+};
 import { seedAgentFiles } from "../agent-files.ts";
 import { cleanStaleBranchForReuse } from "../branch-cleanup.ts";
 import type { WorkItem } from "../types.ts";
@@ -155,6 +189,7 @@ export function ensureWorktreeAndBranch(
   branchName: string,
   baseBranch?: string,
   forceWorkerLaunch?: boolean,
+  deps: LaunchGitDeps = defaultLaunchGitDeps,
 ): EnsureWorktreeResult {
   // Worktree already exists on disk -- reuse it
   if (existsSync(worktreePath)) {
@@ -171,15 +206,15 @@ export function ensureWorktreeAndBranch(
   // Fetch the appropriate base (dependency branch or main)
   if (baseBranch) {
     info(`Fetching dependency branch ${baseBranch} in ${basename(targetRepo)} for stacked launch of ${item.id}`);
-    try { fetchOrigin(targetRepo, baseBranch); } catch (e) {
+    try { deps.fetchOrigin(targetRepo, baseBranch); } catch (e) {
       warn(`Failed to fetch origin/${baseBranch} for ${item.id}: ${e instanceof Error ? e.message : e}. Worktree may be outdated.`);
     }
   } else {
     info(`Fetching latest main in ${basename(targetRepo)} before creating worktree for ${item.id}`);
-    try { fetchOrigin(targetRepo, "main"); } catch (e) {
+    try { deps.fetchOrigin(targetRepo, "main"); } catch (e) {
       warn(`Failed to fetch origin/main for ${item.id}: ${e instanceof Error ? e.message : e}. Worktree may be outdated.`);
     }
-    try { ffMerge(targetRepo, "main"); } catch (e) {
+    try { deps.ffMerge(targetRepo, "main"); } catch (e) {
       warn(`Failed to fast-forward main for ${item.id}: ${e instanceof Error ? e.message : e}. Worktree may be outdated.`);
     }
   }
@@ -187,27 +222,27 @@ export function ensureWorktreeAndBranch(
   // Handle branch collision -- the branch may already exist from a prior session
   // or be checked out in an external worktree.
   let reuseExistingBranch = false;
-  if (branchExists(targetRepo, branchName)) {
+  if (deps.branchExists(targetRepo, branchName)) {
     warn(`Branch ${branchName} already exists in ${basename(targetRepo)}. Checking for existing work.`);
 
     // Clean up external worktrees that have this branch checked out
-    const externalWt = findWorktreeForBranch(targetRepo, branchName);
+    const externalWt = deps.findWorktreeForBranch(targetRepo, branchName);
     if (externalWt && externalWt !== worktreePath) {
       warn(`Branch ${branchName} is checked out in external worktree: ${externalWt}. Removing it.`);
-      try { removeWorktree(targetRepo, externalWt, /* force */ true); } catch (e) {
+      try { deps.removeWorktree(targetRepo, externalWt, /* force */ true); } catch (e) {
         warn(`Failed to remove external worktree ${externalWt}: ${e instanceof Error ? e.message : e}`);
       }
     }
 
     // Check for open PRs on this branch
-    const openPrResult = prList(targetRepo, branchName, "open");
+    const openPrResult = deps.prList(targetRepo, branchName, "open");
     const openPrs = openPrResult.ok ? openPrResult.data : [];
     if (openPrs.length > 0 && !forceWorkerLaunch) {
       const existingPr = openPrs[0]!;
       info(`Open PR #${existingPr.number} found for ${branchName}. Skipping worker launch, daemon will handle.`);
       // Attach worktree for daemon to use for rebase operations
-      if (!findWorktreeForBranch(targetRepo, branchName)) {
-        attachWorktree(targetRepo, worktreePath, branchName);
+      if (!deps.findWorktreeForBranch(targetRepo, branchName)) {
+        deps.attachWorktree(targetRepo, worktreePath, branchName);
       }
       return { action: "skip-with-pr", existingPrNumber: existingPr.number };
     } else if (openPrs.length > 0 && forceWorkerLaunch) {
@@ -218,15 +253,15 @@ export function ensureWorktreeAndBranch(
       reuseExistingBranch = true;
     } else {
       try {
-        deleteBranch(targetRepo, branchName);
+        deps.deleteBranch(targetRepo, branchName);
       } catch (e) {
         // Retry: find the blocking worktree, remove it, and try again
-        const blockingWt = findWorktreeForBranch(targetRepo, branchName);
+        const blockingWt = deps.findWorktreeForBranch(targetRepo, branchName);
         if (blockingWt && blockingWt !== worktreePath) {
           warn(`Branch ${branchName} still checked out in worktree: ${blockingWt}. Removing and retrying.`);
           try {
-            removeWorktree(targetRepo, blockingWt, /* force */ true);
-            deleteBranch(targetRepo, branchName);
+            deps.removeWorktree(targetRepo, blockingWt, /* force */ true);
+            deps.deleteBranch(targetRepo, branchName);
           } catch (retryErr) {
             throw new Error(`Failed to delete branch ${branchName} after worktree removal: ${retryErr instanceof Error ? retryErr.message : retryErr}`);
           }
@@ -242,11 +277,11 @@ export function ensureWorktreeAndBranch(
     info(`Reusing existing worktree for ${item.id} in ${basename(targetRepo)}`);
   } else if (reuseExistingBranch) {
     info(`Attaching worktree for ${item.id} to existing branch ${branchName} in ${basename(targetRepo)}`);
-    attachWorktree(targetRepo, worktreePath, branchName);
+    deps.attachWorktree(targetRepo, worktreePath, branchName);
   } else {
     info(`Creating worktree for ${item.id} on branch ${branchName} in ${basename(targetRepo)}`);
     const startPoint = baseBranch ? `origin/${baseBranch}` : "HEAD";
-    createWorktree(targetRepo, worktreePath, branchName, startPoint);
+    deps.createWorktree(targetRepo, worktreePath, branchName, startPoint);
   }
 
   return { action: "launch" };
@@ -264,6 +299,7 @@ export function launchSingleItem(
   aiTool: string,
   mux: Multiplexer = getMux(),
   options: { baseBranch?: string; forceWorkerLaunch?: boolean; hubRepoNwo?: string } = {},
+  deps: LaunchGitDeps = defaultLaunchGitDeps,
 ): LaunchResult | null {
   let targetRepo: string;
   try {
@@ -291,7 +327,7 @@ export function launchSingleItem(
   // Ensure worktree and branch are ready (handles all branch collision/PR detection)
   const branchResult = ensureWorktreeAndBranch(
     item, targetRepo, projectRoot, worktreePath, branchName,
-    options.baseBranch, options.forceWorkerLaunch,
+    options.baseBranch, options.forceWorkerLaunch, deps,
   );
   if (branchResult.action === "skip-with-pr") {
     return { worktreePath, workspaceRef: "", existingPrNumber: branchResult.existingPrNumber };
@@ -367,7 +403,7 @@ ${itemText}`;
         warn(`Failed to remove cross-repo index for ${item.id}: ${e instanceof Error ? e.message : e}`);
       }
     }
-    try { removeWorktree(targetRepo, worktreePath, /* force */ true); } catch (e) {
+    try { deps.removeWorktree(targetRepo, worktreePath, /* force */ true); } catch (e) {
       warn(`Failed to remove worktree for ${item.id}: ${e instanceof Error ? e.message : e}`);
     }
     return null;
@@ -390,6 +426,7 @@ export function launchReviewWorker(
   aiTool: string,
   mux: Multiplexer = getMux(),
   options: { baseBranch?: string; reviewType?: "todo" | "external"; implementerWorktreePath?: string; hubRepoNwo?: string } = {},
+  deps: LaunchGitDeps = defaultLaunchGitDeps,
 ): ReviewLaunchResult | null {
   let worktreePath: string | null = null;
   let workDir: string;
@@ -424,7 +461,7 @@ export function launchReviewWorker(
         `Fetching branch ${branchName} in ${basename(repoRoot)} for review of ${itemId}`,
       );
       try {
-        fetchOrigin(repoRoot, branchName);
+        deps.fetchOrigin(repoRoot, branchName);
       } catch (e) {
         warn(
           `Failed to fetch origin/${branchName} in ${basename(repoRoot)} for review of ${itemId}: ${e instanceof Error ? e.message : e}`,
@@ -433,19 +470,19 @@ export function launchReviewWorker(
       }
 
       // Handle branch collision
-      if (branchExists(repoRoot, reviewBranch)) {
+      if (deps.branchExists(repoRoot, reviewBranch)) {
         warn(
           `Branch ${reviewBranch} already exists in ${basename(repoRoot)}. Deleting stale branch.`,
         );
         try {
-          deleteBranch(repoRoot, reviewBranch);
+          deps.deleteBranch(repoRoot, reviewBranch);
         } catch {
           // ignore
         }
       }
 
       info(`Creating review worktree for ${itemId} on branch ${reviewBranch}`);
-      createWorktree(repoRoot, worktreePath, reviewBranch, `origin/${branchName}`);
+      deps.createWorktree(repoRoot, worktreePath, reviewBranch, `origin/${branchName}`);
     }
   }
 
@@ -538,6 +575,7 @@ export function launchVerifierWorker(
   aiTool: string,
   mux: Multiplexer = getMux(),
   options: { hubRepoNwo?: string } = {},
+  deps: LaunchGitDeps = defaultLaunchGitDeps,
 ): VerifierLaunchResult | null {
   const worktreePath = join(repoRoot, ".worktrees", `ninthwave-verify-${itemId}`);
   const branch = `ninthwave/verify-${itemId}`;
@@ -549,23 +587,23 @@ export function launchVerifierWorker(
     ensureWorktreeExcluded(repoRoot);
 
     info(`Fetching main in ${basename(repoRoot)} for verifier of ${itemId}`);
-    try { fetchOrigin(repoRoot, "main"); } catch (e) {
+    try { deps.fetchOrigin(repoRoot, "main"); } catch (e) {
       warn(`Failed to fetch origin/main for verifier of ${itemId}: ${e instanceof Error ? e.message : e}`);
       return null;
     }
 
     // Handle branch collision
-    if (branchExists(repoRoot, branch)) {
+    if (deps.branchExists(repoRoot, branch)) {
       warn(`Branch ${branch} already exists in ${basename(repoRoot)}. Deleting stale branch.`);
       try {
-        deleteBranch(repoRoot, branch);
+        deps.deleteBranch(repoRoot, branch);
       } catch {
         // ignore
       }
     }
 
     info(`Creating verifier worktree for ${itemId} on branch ${branch}`);
-    createWorktree(repoRoot, worktreePath, branch, "origin/main");
+    deps.createWorktree(repoRoot, worktreePath, branch, "origin/main");
   }
 
   // Seed agent files into the verifier worktree

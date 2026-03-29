@@ -5,26 +5,8 @@ import { join } from "path";
 import { mkdirSync, writeFileSync } from "fs";
 import { setupTempRepo, cleanupTempRepos, captureOutput } from "./helpers.ts";
 import type { Multiplexer } from "../core/mux.ts";
-
-// Only mock modules that don't have their own test files.
-// lint-ignore: no-leaked-mock
-vi.mock("../core/git.ts", () => ({
-  isBranchMerged: vi.fn(() => false),
-  removeWorktree: vi.fn(),
-  deleteBranch: vi.fn(),
-  deleteRemoteBranch: vi.fn(),
-}));
-
-// lint-ignore: no-leaked-mock
-vi.mock("../core/gh.ts", () => ({
-  prList: vi.fn(() => []),
-}));
-
-// Import mocked modules for assertions
-import * as git from "../core/git.ts";
-
-// Import after mocks
 import {
+  type CleanDeps,
   cmdClean,
   cmdCleanSingle,
   cleanSingleWorktree,
@@ -44,6 +26,17 @@ function createMockMux(): Multiplexer & Record<string, Mock> {
     readScreen: vi.fn(() => ""),
     listWorkspaces: vi.fn(() => ""),
     closeWorkspace: vi.fn(() => true),
+  };
+}
+
+/** Create mock CleanDeps for dependency injection. */
+function createMockCleanDeps(): CleanDeps & Record<string, Mock> {
+  return {
+    isBranchMerged: vi.fn(() => false),
+    removeWorktree: vi.fn(),
+    deleteBranch: vi.fn(),
+    deleteRemoteBranch: vi.fn(),
+    prList: vi.fn(() => ({ ok: true as const, data: [] as Array<{ number: number; title: string }> })),
   };
 }
 
@@ -109,98 +102,103 @@ describe("cmdCloseWorkspace", () => {
 });
 
 describe("cleanSingleWorktree", () => {
-  beforeEach(() => vi.clearAllMocks());
   afterEach(() => cleanupTempRepos());
 
   it("returns false when worktree directory does not exist", () => {
+    const deps = createMockCleanDeps();
     const repo = setupTempRepo();
     const worktreeDir = join(repo, ".worktrees");
 
-    const result = cleanSingleWorktree("H-CI-2", worktreeDir, repo);
+    const result = cleanSingleWorktree("H-CI-2", worktreeDir, repo, deps);
     expect(result).toBe(false);
-    expect(git.removeWorktree as Mock).not.toHaveBeenCalled();
+    expect(deps.removeWorktree).not.toHaveBeenCalled();
   });
 
   it("returns true and cleans up when worktree exists", () => {
+    const deps = createMockCleanDeps();
     const repo = setupTempRepo();
     const worktreeDir = join(repo, ".worktrees");
     mkdirSync(join(worktreeDir, "ninthwave-H-CI-2"), { recursive: true });
 
-    const result = cleanSingleWorktree("H-CI-2", worktreeDir, repo);
+    const result = cleanSingleWorktree("H-CI-2", worktreeDir, repo, deps);
     expect(result).toBe(true);
-    expect(git.removeWorktree as Mock).toHaveBeenCalled();
-    expect(git.deleteBranch as Mock).toHaveBeenCalledWith(repo, "ninthwave/H-CI-2");
-    expect(git.deleteRemoteBranch as Mock).toHaveBeenCalledWith(repo, "ninthwave/H-CI-2");
+    expect(deps.removeWorktree).toHaveBeenCalled();
+    expect(deps.deleteBranch).toHaveBeenCalledWith(repo, "ninthwave/H-CI-2");
+    expect(deps.deleteRemoteBranch).toHaveBeenCalledWith(repo, "ninthwave/H-CI-2");
   });
 
   it("falls back to rmSync and logs warning when removeWorktree throws", () => {
+    const deps = createMockCleanDeps();
     const repo = setupTempRepo();
     const worktreeDir = join(repo, ".worktrees");
     mkdirSync(join(worktreeDir, "ninthwave-H-CI-2"), { recursive: true });
-    (git.removeWorktree as Mock).mockImplementation(() => {
+    deps.removeWorktree.mockImplementation(() => {
       throw new Error("git worktree remove failed");
     });
 
     const output = captureOutput(() => {
-      const result = cleanSingleWorktree("H-CI-2", worktreeDir, repo);
+      const result = cleanSingleWorktree("H-CI-2", worktreeDir, repo, deps);
       expect(result).toBe(true);
     });
-    expect(git.removeWorktree as Mock).toHaveBeenCalled();
+    expect(deps.removeWorktree).toHaveBeenCalled();
     expect(output).toContain("Failed to remove worktree for H-CI-2");
     expect(output).toContain("git worktree remove failed");
   });
 
   it("logs warning when deleteBranch fails and continues cleanup", () => {
+    const deps = createMockCleanDeps();
     const repo = setupTempRepo();
     const worktreeDir = join(repo, ".worktrees");
     mkdirSync(join(worktreeDir, "ninthwave-H-CI-2"), { recursive: true });
-    (git.deleteBranch as Mock).mockImplementation(() => {
+    deps.deleteBranch.mockImplementation(() => {
       throw new Error("branch not found");
     });
 
     const output = captureOutput(() => {
-      const result = cleanSingleWorktree("H-CI-2", worktreeDir, repo);
+      const result = cleanSingleWorktree("H-CI-2", worktreeDir, repo, deps);
       expect(result).toBe(true);
     });
-    expect(git.deleteBranch as Mock).toHaveBeenCalled();
-    expect(git.deleteRemoteBranch as Mock).toHaveBeenCalled();
+    expect(deps.deleteBranch).toHaveBeenCalled();
+    expect(deps.deleteRemoteBranch).toHaveBeenCalled();
     expect(output).toContain("Failed to delete local branch ninthwave/H-CI-2");
     expect(output).toContain("branch not found");
   });
 
   it("logs warning when deleteRemoteBranch fails and continues cleanup", () => {
+    const deps = createMockCleanDeps();
     const repo = setupTempRepo();
     const worktreeDir = join(repo, ".worktrees");
     mkdirSync(join(worktreeDir, "ninthwave-H-CI-2"), { recursive: true });
-    (git.deleteRemoteBranch as Mock).mockImplementation(() => {
+    deps.deleteRemoteBranch.mockImplementation(() => {
       throw new Error("remote branch not found");
     });
 
     const output = captureOutput(() => {
-      const result = cleanSingleWorktree("H-CI-2", worktreeDir, repo);
+      const result = cleanSingleWorktree("H-CI-2", worktreeDir, repo, deps);
       expect(result).toBe(true);
     });
-    expect(git.deleteRemoteBranch as Mock).toHaveBeenCalled();
+    expect(deps.deleteRemoteBranch).toHaveBeenCalled();
     expect(output).toContain("Failed to delete remote branch ninthwave/H-CI-2");
     expect(output).toContain("remote branch not found");
   });
 
   it("completes cleanup even when all operations fail", () => {
+    const deps = createMockCleanDeps();
     const repo = setupTempRepo();
     const worktreeDir = join(repo, ".worktrees");
     mkdirSync(join(worktreeDir, "ninthwave-H-CI-2"), { recursive: true });
-    (git.removeWorktree as Mock).mockImplementation(() => {
+    deps.removeWorktree.mockImplementation(() => {
       throw new Error("worktree failed");
     });
-    (git.deleteBranch as Mock).mockImplementation(() => {
+    deps.deleteBranch.mockImplementation(() => {
       throw new Error("branch failed");
     });
-    (git.deleteRemoteBranch as Mock).mockImplementation(() => {
+    deps.deleteRemoteBranch.mockImplementation(() => {
       throw new Error("remote failed");
     });
 
     const output = captureOutput(() => {
-      const result = cleanSingleWorktree("H-CI-2", worktreeDir, repo);
+      const result = cleanSingleWorktree("H-CI-2", worktreeDir, repo, deps);
       expect(result).toBe(true);
     });
     // All three warnings should be logged
@@ -211,58 +209,60 @@ describe("cleanSingleWorktree", () => {
 });
 
 describe("cmdCleanSingle", () => {
-  beforeEach(() => vi.clearAllMocks());
   afterEach(() => cleanupTempRepos());
 
   it("dies with no target ID", () => {
+    const deps = createMockCleanDeps();
     const repo = setupTempRepo();
     const worktreeDir = join(repo, ".worktrees");
 
     const output = captureOutput(() =>
-      cmdCleanSingle([], worktreeDir, repo),
+      cmdCleanSingle([], worktreeDir, repo, deps),
     );
 
     expect(output).toContain("Usage");
   });
 
   it("reports no worktree found when directory doesn't exist", () => {
+    const deps = createMockCleanDeps();
     const repo = setupTempRepo();
     const worktreeDir = join(repo, ".worktrees");
 
     const output = captureOutput(() =>
-      cmdCleanSingle(["H-CI-2"], worktreeDir, repo),
+      cmdCleanSingle(["H-CI-2"], worktreeDir, repo, deps),
     );
 
     expect(output).toContain("No worktree found");
   });
 
   it("cleans existing worktree", () => {
+    const deps = createMockCleanDeps();
     const repo = setupTempRepo();
     const worktreeDir = join(repo, ".worktrees");
     // Create a fake worktree directory
     mkdirSync(join(worktreeDir, "ninthwave-H-CI-2"), { recursive: true });
 
     const output = captureOutput(() =>
-      cmdCleanSingle(["H-CI-2"], worktreeDir, repo),
+      cmdCleanSingle(["H-CI-2"], worktreeDir, repo, deps),
     );
 
     expect(output).toContain("Cleaned worktree for H-CI-2");
-    expect(git.removeWorktree as Mock).toHaveBeenCalled();
+    expect(deps.removeWorktree).toHaveBeenCalled();
   });
 });
 
 describe("cmdClean", () => {
-  beforeEach(() => vi.clearAllMocks());
   afterEach(() => cleanupTempRepos());
 
   it("reports no worktrees when directory doesn't exist", () => {
     const mockMux = createMockMux();
+    const deps = createMockCleanDeps();
 
     const repo = setupTempRepo();
     const worktreeDir = join(repo, ".worktrees");
 
     const output = captureOutput(() =>
-      cmdClean([], worktreeDir, repo, mockMux),
+      cmdClean([], worktreeDir, repo, mockMux, deps),
     );
 
     expect(output).toContain("No worktrees to clean");
@@ -270,38 +270,41 @@ describe("cmdClean", () => {
 
   it("cleans merged worktrees", () => {
     const mockMux = createMockMux();
+    const deps = createMockCleanDeps();
     const repo = setupTempRepo();
     const worktreeDir = join(repo, ".worktrees");
     mkdirSync(join(worktreeDir, "ninthwave-H-CI-2"), { recursive: true });
 
-    (git.isBranchMerged as Mock).mockReturnValue(true);
+    deps.isBranchMerged.mockReturnValue(true);
 
     const output = captureOutput(() =>
-      cmdClean([], worktreeDir, repo, mockMux),
+      cmdClean([], worktreeDir, repo, mockMux, deps),
     );
 
     expect(output).toContain("Cleaned 1 worktree(s)");
-    expect(git.removeWorktree as Mock).toHaveBeenCalled();
+    expect(deps.removeWorktree).toHaveBeenCalled();
   });
 
   it("does not clean unmerged worktrees without target ID", () => {
     const mockMux = createMockMux();
+    const deps = createMockCleanDeps();
     const repo = setupTempRepo();
     const worktreeDir = join(repo, ".worktrees");
     mkdirSync(join(worktreeDir, "ninthwave-H-CI-2"), { recursive: true });
 
-    (git.isBranchMerged as Mock).mockReturnValue(false);
+    deps.isBranchMerged.mockReturnValue(false);
 
     const output = captureOutput(() =>
-      cmdClean([], worktreeDir, repo, mockMux),
+      cmdClean([], worktreeDir, repo, mockMux, deps),
     );
 
     expect(output).toContain("Cleaned 0 worktree(s)");
-    expect(git.removeWorktree as Mock).not.toHaveBeenCalled();
+    expect(deps.removeWorktree).not.toHaveBeenCalled();
   });
 
   it("only closes the targeted workspace when cleaning a specific ID", () => {
     const mockMux = createMockMux();
+    const deps = createMockCleanDeps();
     const repo = setupTempRepo();
     const worktreeDir = join(repo, ".worktrees");
     // Create worktrees for H-1 (target), H-2, and H-3
@@ -312,9 +315,9 @@ describe("cmdClean", () => {
     mockMux.listWorkspaces.mockReturnValue(
       "workspace:1 TODO H-1 first task\nworkspace:2 TODO H-2 second task\nworkspace:3 TODO H-3 third task",
     );
-    (git.isBranchMerged as Mock).mockReturnValue(false);
+    deps.isBranchMerged.mockReturnValue(false);
 
-    captureOutput(() => cmdClean(["H-1"], worktreeDir, repo, mockMux));
+    captureOutput(() => cmdClean(["H-1"], worktreeDir, repo, mockMux, deps));
 
     // Should only close workspace:1 (H-1), not workspace:2 or workspace:3
     expect(mockMux.closeWorkspace).toHaveBeenCalledTimes(1);
@@ -323,6 +326,7 @@ describe("cmdClean", () => {
 
   it("closes workspaces only for merged items when no target ID is specified", () => {
     const mockMux = createMockMux();
+    const deps = createMockCleanDeps();
     const repo = setupTempRepo();
     const worktreeDir = join(repo, ".worktrees");
     mkdirSync(join(worktreeDir, "ninthwave-H-CI-1"), { recursive: true });
@@ -331,9 +335,9 @@ describe("cmdClean", () => {
     mockMux.listWorkspaces.mockReturnValue(
       "workspace:1 TODO H-CI-1 first\nworkspace:2 TODO H-CI-2 second",
     );
-    (git.isBranchMerged as Mock).mockReturnValue(true);
+    deps.isBranchMerged.mockReturnValue(true);
 
-    captureOutput(() => cmdClean([], worktreeDir, repo, mockMux));
+    captureOutput(() => cmdClean([], worktreeDir, repo, mockMux, deps));
 
     // Should close workspaces for both items since both are merged
     expect(mockMux.closeWorkspace).toHaveBeenCalledTimes(2);
@@ -341,6 +345,7 @@ describe("cmdClean", () => {
 
   it("does not close workspaces for non-merged items (broad cleanup)", () => {
     const mockMux = createMockMux();
+    const deps = createMockCleanDeps();
     const repo = setupTempRepo();
     const worktreeDir = join(repo, ".worktrees");
     // Create worktrees for two items: H-CI-1 (merged) and H-CI-2 (not merged)
@@ -351,21 +356,22 @@ describe("cmdClean", () => {
       "workspace:1 TODO H-CI-1 first\nworkspace:2 TODO H-CI-2 second",
     );
     // H-CI-1 is merged, H-CI-2 is not
-    (git.isBranchMerged as Mock).mockImplementation(
+    deps.isBranchMerged.mockImplementation(
       (_repo: string, branch: string) => branch === "ninthwave/H-CI-1",
     );
 
-    captureOutput(() => cmdClean([], worktreeDir, repo, mockMux));
+    captureOutput(() => cmdClean([], worktreeDir, repo, mockMux, deps));
 
     // Should only close workspace:1 (H-CI-1 is merged), NOT workspace:2
     expect(mockMux.closeWorkspace).toHaveBeenCalledTimes(1);
     expect(mockMux.closeWorkspace).toHaveBeenCalledWith("workspace:1");
     // Worktree removal should only happen for the merged item
-    expect(git.removeWorktree as Mock).toHaveBeenCalledTimes(1);
+    expect(deps.removeWorktree).toHaveBeenCalledTimes(1);
   });
 
   it("preserves active workers for non-merged items", () => {
     const mockMux = createMockMux();
+    const deps = createMockCleanDeps();
     const repo = setupTempRepo();
     const worktreeDir = join(repo, ".worktrees");
     // Three items: all have active workspaces, none are merged
@@ -376,29 +382,30 @@ describe("cmdClean", () => {
     mockMux.listWorkspaces.mockReturnValue(
       "workspace:1 TODO H-CI-1 first\nworkspace:2 TODO H-CI-2 second\nworkspace:3 TODO H-CI-3 third",
     );
-    (git.isBranchMerged as Mock).mockReturnValue(false);
+    deps.isBranchMerged.mockReturnValue(false);
 
-    captureOutput(() => cmdClean([], worktreeDir, repo, mockMux));
+    captureOutput(() => cmdClean([], worktreeDir, repo, mockMux, deps));
 
     // No workspaces should be closed -- all items are still active
     expect(mockMux.closeWorkspace).not.toHaveBeenCalled();
     // No worktrees should be removed
-    expect(git.removeWorktree as Mock).not.toHaveBeenCalled();
+    expect(deps.removeWorktree).not.toHaveBeenCalled();
   });
 
   it("logs warning when removeWorktree fails in cleanItem", () => {
     const mockMux = createMockMux();
+    const deps = createMockCleanDeps();
     const repo = setupTempRepo();
     const worktreeDir = join(repo, ".worktrees");
     mkdirSync(join(worktreeDir, "ninthwave-H-CI-2"), { recursive: true });
 
-    (git.isBranchMerged as Mock).mockReturnValue(true);
-    (git.removeWorktree as Mock).mockImplementation(() => {
+    deps.isBranchMerged.mockReturnValue(true);
+    deps.removeWorktree.mockImplementation(() => {
       throw new Error("worktree remove failed");
     });
 
     const output = captureOutput(() =>
-      cmdClean([], worktreeDir, repo, mockMux),
+      cmdClean([], worktreeDir, repo, mockMux, deps),
     );
 
     expect(output).toContain("Cleaned 1 worktree(s)");
@@ -408,17 +415,18 @@ describe("cmdClean", () => {
 
   it("logs warning when deleteBranch fails in cleanItem", () => {
     const mockMux = createMockMux();
+    const deps = createMockCleanDeps();
     const repo = setupTempRepo();
     const worktreeDir = join(repo, ".worktrees");
     mkdirSync(join(worktreeDir, "ninthwave-H-CI-2"), { recursive: true });
 
-    (git.isBranchMerged as Mock).mockReturnValue(true);
-    (git.deleteBranch as Mock).mockImplementation(() => {
+    deps.isBranchMerged.mockReturnValue(true);
+    deps.deleteBranch.mockImplementation(() => {
       throw new Error("branch not found");
     });
 
     const output = captureOutput(() =>
-      cmdClean([], worktreeDir, repo, mockMux),
+      cmdClean([], worktreeDir, repo, mockMux, deps),
     );
 
     expect(output).toContain("Cleaned 1 worktree(s)");
@@ -427,17 +435,18 @@ describe("cmdClean", () => {
 
   it("logs warning when deleteRemoteBranch fails in cleanItem", () => {
     const mockMux = createMockMux();
+    const deps = createMockCleanDeps();
     const repo = setupTempRepo();
     const worktreeDir = join(repo, ".worktrees");
     mkdirSync(join(worktreeDir, "ninthwave-H-CI-2"), { recursive: true });
 
-    (git.isBranchMerged as Mock).mockReturnValue(true);
-    (git.deleteRemoteBranch as Mock).mockImplementation(() => {
+    deps.isBranchMerged.mockReturnValue(true);
+    deps.deleteRemoteBranch.mockImplementation(() => {
       throw new Error("remote branch not found");
     });
 
     const output = captureOutput(() =>
-      cmdClean([], worktreeDir, repo, mockMux),
+      cmdClean([], worktreeDir, repo, mockMux, deps),
     );
 
     expect(output).toContain("Cleaned 1 worktree(s)");
@@ -446,23 +455,24 @@ describe("cmdClean", () => {
 
   it("completes cleanItem when all operations fail", () => {
     const mockMux = createMockMux();
+    const deps = createMockCleanDeps();
     const repo = setupTempRepo();
     const worktreeDir = join(repo, ".worktrees");
     mkdirSync(join(worktreeDir, "ninthwave-H-CI-2"), { recursive: true });
 
-    (git.isBranchMerged as Mock).mockReturnValue(true);
-    (git.removeWorktree as Mock).mockImplementation(() => {
+    deps.isBranchMerged.mockReturnValue(true);
+    deps.removeWorktree.mockImplementation(() => {
       throw new Error("worktree failed");
     });
-    (git.deleteBranch as Mock).mockImplementation(() => {
+    deps.deleteBranch.mockImplementation(() => {
       throw new Error("branch failed");
     });
-    (git.deleteRemoteBranch as Mock).mockImplementation(() => {
+    deps.deleteRemoteBranch.mockImplementation(() => {
       throw new Error("remote failed");
     });
 
     const output = captureOutput(() =>
-      cmdClean([], worktreeDir, repo, mockMux),
+      cmdClean([], worktreeDir, repo, mockMux, deps),
     );
 
     // Should still complete and report cleaned
@@ -475,6 +485,7 @@ describe("cmdClean", () => {
 
   it("cleans cross-repo worktrees from index file", () => {
     const mockMux = createMockMux();
+    const deps = createMockCleanDeps();
     const repo = setupTempRepo();
     const worktreeDir = join(repo, ".worktrees");
     mkdirSync(worktreeDir, { recursive: true });
@@ -490,23 +501,23 @@ describe("cmdClean", () => {
     writeFileSync(indexPath, `X-CR-1\t${crossRepoRoot}\t${crossRepoPath}\n`);
 
     // Mark the branch as merged so cmdClean will clean it
-    (git.isBranchMerged as Mock).mockReturnValue(true);
+    deps.isBranchMerged.mockReturnValue(true);
 
     const output = captureOutput(() =>
-      cmdClean([], worktreeDir, repo, mockMux),
+      cmdClean([], worktreeDir, repo, mockMux, deps),
     );
 
     expect(output).toContain("Cleaned 1 worktree(s)");
-    expect(git.removeWorktree as Mock).toHaveBeenCalledWith(
+    expect(deps.removeWorktree).toHaveBeenCalledWith(
       crossRepoRoot,
       crossRepoPath,
       true,
     );
-    expect(git.deleteBranch as Mock).toHaveBeenCalledWith(
+    expect(deps.deleteBranch).toHaveBeenCalledWith(
       crossRepoRoot,
       "ninthwave/X-CR-1",
     );
-    expect(git.deleteRemoteBranch as Mock).toHaveBeenCalledWith(
+    expect(deps.deleteRemoteBranch).toHaveBeenCalledWith(
       crossRepoRoot,
       "ninthwave/X-CR-1",
     );
@@ -514,6 +525,7 @@ describe("cmdClean", () => {
 
   it("skips malformed cross-repo index entries", () => {
     const mockMux = createMockMux();
+    const deps = createMockCleanDeps();
     const repo = setupTempRepo();
     const worktreeDir = join(repo, ".worktrees");
     mkdirSync(worktreeDir, { recursive: true });
@@ -531,19 +543,20 @@ describe("cmdClean", () => {
       ].join("\n"),
     );
 
-    (git.isBranchMerged as Mock).mockReturnValue(true);
+    deps.isBranchMerged.mockReturnValue(true);
 
     const output = captureOutput(() =>
-      cmdClean([], worktreeDir, repo, mockMux),
+      cmdClean([], worktreeDir, repo, mockMux, deps),
     );
 
     // None of the malformed entries should be cleaned
     expect(output).toContain("Cleaned 0 worktree(s)");
-    expect(git.removeWorktree as Mock).not.toHaveBeenCalled();
+    expect(deps.removeWorktree).not.toHaveBeenCalled();
   });
 
   it("skips cross-repo index entries where worktree path does not exist", () => {
     const mockMux = createMockMux();
+    const deps = createMockCleanDeps();
     const repo = setupTempRepo();
     const worktreeDir = join(repo, ".worktrees");
     mkdirSync(worktreeDir, { recursive: true });
@@ -555,19 +568,20 @@ describe("cmdClean", () => {
       `X-GONE-1\t/nonexistent/repo\t/nonexistent/worktree\n`,
     );
 
-    (git.isBranchMerged as Mock).mockReturnValue(true);
+    deps.isBranchMerged.mockReturnValue(true);
 
     const output = captureOutput(() =>
-      cmdClean([], worktreeDir, repo, mockMux),
+      cmdClean([], worktreeDir, repo, mockMux, deps),
     );
 
     // The entry should be skipped because the worktree path doesn't exist
     expect(output).toContain("Cleaned 0 worktree(s)");
-    expect(git.removeWorktree as Mock).not.toHaveBeenCalled();
+    expect(deps.removeWorktree).not.toHaveBeenCalled();
   });
 
   it("cleans specific cross-repo worktree by target ID", () => {
     const mockMux = createMockMux();
+    const deps = createMockCleanDeps();
     const repo = setupTempRepo();
     const worktreeDir = join(repo, ".worktrees");
     mkdirSync(worktreeDir, { recursive: true });
@@ -592,19 +606,19 @@ describe("cmdClean", () => {
     );
 
     // Target only X-CR-1 -- should clean regardless of merge status
-    (git.isBranchMerged as Mock).mockReturnValue(false);
+    deps.isBranchMerged.mockReturnValue(false);
 
     const output = captureOutput(() =>
-      cmdClean(["X-CR-1"], worktreeDir, repo, mockMux),
+      cmdClean(["X-CR-1"], worktreeDir, repo, mockMux, deps),
     );
 
     expect(output).toContain("Cleaned 1 worktree(s)");
-    expect(git.removeWorktree as Mock).toHaveBeenCalledWith(
+    expect(deps.removeWorktree).toHaveBeenCalledWith(
       crossRepoRoot1,
       crossRepoPath1,
       true,
     );
     // Should NOT have cleaned X-CR-2
-    expect(git.removeWorktree as Mock).toHaveBeenCalledTimes(1);
+    expect(deps.removeWorktree).toHaveBeenCalledTimes(1);
   });
 });

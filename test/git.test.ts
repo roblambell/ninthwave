@@ -1,15 +1,6 @@
 // Tests for core/git.ts -- direct tests of error handling paths.
 //
 // Uses real temp git repos to trigger failures naturally.
-//
-// Mock leakage note: clean.test.ts and start.test.ts vi.mock("../core/git.ts"),
-// which leaks into other files in bun's test runner. Functions that are mocked
-// elsewhere (branchExists, fetchOrigin, ffMerge, deleteBranch, isBranchMerged,
-// findWorktreeForBranch, removeWorktree, attachWorktree, etc.) are tested via
-// run() from shell.ts to exercise the same error handling logic without
-// import-level interference. Functions NOT mocked elsewhere (commitCount,
-// diffStat, getStagedFiles, gitCommit, hasChanges) are imported and tested
-// directly.
 
 import { describe, it, expect } from "vitest";
 import { spawnSync } from "child_process";

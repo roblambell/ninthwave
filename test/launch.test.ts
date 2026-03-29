@@ -6,36 +6,10 @@ import { writeFileSync, mkdirSync, readFileSync } from "fs";
 import { spawnSync } from "child_process";
 import { setupTempRepo, cleanupTempRepos, captureOutputAsync } from "./helpers.ts";
 import type { Multiplexer } from "../core/mux.ts";
-
-// Only mock modules that don't have their own test files and aren't
-// transitive dependencies of other tested modules.
-// Avoid mocking shell.ts (used by version-bump.test.ts via git.ts)
-// and partitions.ts / cross-repo.ts (have dedicated test files).
-// lint-ignore: no-leaked-mock
-vi.mock("../core/git.ts", () => ({
-  fetchOrigin: vi.fn(),
-  ffMerge: vi.fn(),
-  branchExists: vi.fn(() => false),
-  deleteBranch: vi.fn(),
-  deleteRemoteBranch: vi.fn(),
-  createWorktree: vi.fn((_repo: string, wtPath: string) => {
-    mkdirSync(wtPath, { recursive: true });
-  }),
-  attachWorktree: vi.fn(),
-  removeWorktree: vi.fn(),
-  findWorktreeForBranch: vi.fn(() => null),
-}));
-// NOTE: findWorktreeForBranch and removeWorktree are added to the mock but
-// are also tested directly in git.test.ts. git.test.ts handles mock leakage
-// by using shell.ts run() for functions mocked elsewhere. If adding new
-// functions to this mock, update the comment in git.test.ts lines 5-11.
-
-
-import { launchSingleItem, launchAiSession, launchReviewWorker, sanitizeTitle, extractItemText } from "../core/commands/launch.ts";
+import { type LaunchGitDeps, launchSingleItem, launchAiSession, launchReviewWorker, sanitizeTitle, extractItemText } from "../core/commands/launch.ts";
 import { detectAiTool, cmdStart, cmdRunItems, WORK_ITEM_ID_CLI_PATTERN } from "../core/commands/run-items.ts";
 import { cleanStaleBranchForReuse } from "../core/branch-cleanup.ts";
 import { parseWorkItems } from "../core/parser.ts";
-import { fetchOrigin, ffMerge, createWorktree, branchExists, deleteBranch, findWorktreeForBranch, removeWorktree } from "../core/git.ts";
 
 /** Create a mock Multiplexer for dependency injection (avoids vi.mock leaking). */
 function createMockMux(): Multiplexer & Record<string, Mock> {
@@ -49,6 +23,23 @@ function createMockMux(): Multiplexer & Record<string, Mock> {
     readScreen: vi.fn(() => "line1\nline2\nline3\nline4\n"),
     listWorkspaces: vi.fn(() => ""),
     closeWorkspace: vi.fn(() => true),
+  };
+}
+
+/** Create mock LaunchGitDeps for dependency injection. */
+function createMockLaunchDeps(): LaunchGitDeps & Record<string, Mock> {
+  return {
+    fetchOrigin: vi.fn(),
+    ffMerge: vi.fn(),
+    branchExists: vi.fn(() => false),
+    createWorktree: vi.fn((_repo: string, wtPath: string) => {
+      mkdirSync(wtPath, { recursive: true });
+    }),
+    attachWorktree: vi.fn(),
+    removeWorktree: vi.fn(),
+    deleteBranch: vi.fn(),
+    findWorktreeForBranch: vi.fn(() => null),
+    prList: vi.fn(() => ({ ok: true as const, data: [] as Array<{ number: number; title: string }> })),
   };
 }
 
@@ -287,8 +278,6 @@ describe("cmdStart", () => {
     expect(output).toContain("cmux is not available");
     // Should NOT have attempted to launch a workspace
     expect(mockMux.launchWorkspace).not.toHaveBeenCalled();
-    // Should NOT have attempted worktree creation
-    expect(createWorktree).not.toHaveBeenCalled();
   });
 });
 
@@ -307,6 +296,7 @@ describe("launchSingleItem", () => {
 
   it("creates worktree and launches session for a single item", async () => {
     const mockMux = createMockMux();
+    const deps = createMockLaunchDeps();
     const repo = setupTempRepo();
     const workDir = setupWorkItemsDir(repo);
     const worktreeDir = join(repo, ".worktrees");
@@ -314,7 +304,7 @@ describe("launchSingleItem", () => {
     const item = items.find((i) => i.id === "M-CI-1")!;
 
     const result = await captureOutput(() => {
-      const res = launchSingleItem(item, workDir, worktreeDir, repo, "claude", mockMux);
+      const res = launchSingleItem(item, workDir, worktreeDir, repo, "claude", mockMux, {}, deps);
       expect(res).not.toBeNull();
       expect(res!.worktreePath).toContain("ninthwave-M-CI-1");
       expect(res!.workspaceRef).toBe("workspace:1");
@@ -326,6 +316,7 @@ describe("launchSingleItem", () => {
 
   it("returns null and cleans up when mux launch fails", async () => {
     const mockMux = createMockMux();
+    const deps = createMockLaunchDeps();
     mockMux.launchWorkspace.mockReturnValueOnce(null);
 
     const repo = setupTempRepo();
@@ -335,14 +326,14 @@ describe("launchSingleItem", () => {
     const item = items.find((i) => i.id === "M-CI-1")!;
 
     const result = await captureOutput(() => {
-      const res = launchSingleItem(item, workDir, worktreeDir, repo, "claude", mockMux);
+      const res = launchSingleItem(item, workDir, worktreeDir, repo, "claude", mockMux, {}, deps);
       expect(res).toBeNull();
     });
 
     expect(result).toContain("cmux launch failed");
     // Cleanup should run after launch failure
     expect(result).toContain("Launch failed for M-CI-1, cleaning up");
-    expect(removeWorktree).toHaveBeenCalledWith(
+    expect(deps.removeWorktree).toHaveBeenCalledWith(
       repo,
       join(worktreeDir, "ninthwave-M-CI-1"),
       true,
@@ -351,6 +342,7 @@ describe("launchSingleItem", () => {
 
   it("allocates a partition for the item", async () => {
     const mockMux = createMockMux();
+    const deps = createMockLaunchDeps();
     const repo = setupTempRepo();
     const workDir = setupWorkItemsDir(repo);
     const worktreeDir = join(repo, ".worktrees");
@@ -358,7 +350,7 @@ describe("launchSingleItem", () => {
     const item = items.find((i) => i.id === "M-CI-1")!;
 
     const result = await captureOutput(() => {
-      launchSingleItem(item, workDir, worktreeDir, repo, "claude", mockMux);
+      launchSingleItem(item, workDir, worktreeDir, repo, "claude", mockMux, {}, deps);
     });
 
     // Partition 1 should be allocated (first available)
@@ -367,6 +359,7 @@ describe("launchSingleItem", () => {
 
   it("ensures worktree directory is created", async () => {
     const mockMux = createMockMux();
+    const deps = createMockLaunchDeps();
     const repo = setupTempRepo();
     const workDir = setupWorkItemsDir(repo);
     const worktreeDir = join(repo, ".worktrees");
@@ -375,7 +368,7 @@ describe("launchSingleItem", () => {
 
     // worktreeDir doesn't exist yet -- launchSingleItem should create it
     await captureOutput(() => {
-      launchSingleItem(item, workDir, worktreeDir, repo, "claude", mockMux);
+      launchSingleItem(item, workDir, worktreeDir, repo, "claude", mockMux, {}, deps);
     });
 
     const { existsSync } = require("fs");
@@ -384,18 +377,19 @@ describe("launchSingleItem", () => {
 
   it("logs warning when fetchOrigin fails but still creates worktree", async () => {
     const mockMux = createMockMux();
+    const deps = createMockLaunchDeps();
     const repo = setupTempRepo();
     const workDir = setupWorkItemsDir(repo);
     const worktreeDir = join(repo, ".worktrees");
     const items = parseWorkItems(workDir, worktreeDir);
     const item = items.find((i) => i.id === "M-CI-1")!;
 
-    (fetchOrigin as Mock).mockImplementationOnce(() => {
+    deps.fetchOrigin.mockImplementationOnce(() => {
       throw new Error("network timeout");
     });
 
     const output = await captureOutput(() => {
-      const res = launchSingleItem(item, workDir, worktreeDir, repo, "claude", mockMux);
+      const res = launchSingleItem(item, workDir, worktreeDir, repo, "claude", mockMux, {}, deps);
       expect(res).not.toBeNull();
       expect(res!.worktreePath).toContain("ninthwave-M-CI-1");
     });
@@ -408,18 +402,19 @@ describe("launchSingleItem", () => {
 
   it("logs warning when ffMerge fails but still creates worktree", async () => {
     const mockMux = createMockMux();
+    const deps = createMockLaunchDeps();
     const repo = setupTempRepo();
     const workDir = setupWorkItemsDir(repo);
     const worktreeDir = join(repo, ".worktrees");
     const items = parseWorkItems(workDir, worktreeDir);
     const item = items.find((i) => i.id === "M-CI-1")!;
 
-    (ffMerge as Mock).mockImplementationOnce(() => {
+    deps.ffMerge.mockImplementationOnce(() => {
       throw new Error("not a fast-forward");
     });
 
     const output = await captureOutput(() => {
-      const res = launchSingleItem(item, workDir, worktreeDir, repo, "claude", mockMux);
+      const res = launchSingleItem(item, workDir, worktreeDir, repo, "claude", mockMux, {}, deps);
       expect(res).not.toBeNull();
       expect(res!.worktreePath).toContain("ninthwave-M-CI-1");
     });
@@ -432,21 +427,22 @@ describe("launchSingleItem", () => {
 
   it("warning includes actionable context about stale worktree", async () => {
     const mockMux = createMockMux();
+    const deps = createMockLaunchDeps();
     const repo = setupTempRepo();
     const workDir = setupWorkItemsDir(repo);
     const worktreeDir = join(repo, ".worktrees");
     const items = parseWorkItems(workDir, worktreeDir);
     const item = items.find((i) => i.id === "M-CI-1")!;
 
-    (fetchOrigin as Mock).mockImplementationOnce(() => {
+    deps.fetchOrigin.mockImplementationOnce(() => {
       throw new Error("Could not resolve host: github.com");
     });
-    (ffMerge as Mock).mockImplementationOnce(() => {
+    deps.ffMerge.mockImplementationOnce(() => {
       throw new Error("diverged branches");
     });
 
     const output = await captureOutput(() => {
-      launchSingleItem(item, workDir, worktreeDir, repo, "claude", mockMux);
+      launchSingleItem(item, workDir, worktreeDir, repo, "claude", mockMux, {}, deps);
     });
 
     // Both warnings should appear
@@ -460,6 +456,7 @@ describe("launchSingleItem", () => {
 
   it("returns correct worktreePath for hub repo items", async () => {
     const mockMux = createMockMux();
+    const deps = createMockLaunchDeps();
     const repo = setupTempRepo();
     const workDir = setupWorkItemsDir(repo);
     const worktreeDir = join(repo, ".worktrees");
@@ -467,7 +464,7 @@ describe("launchSingleItem", () => {
     const item = items.find((i) => i.id === "M-CI-1")!;
 
     await captureOutput(() => {
-      const res = launchSingleItem(item, workDir, worktreeDir, repo, "claude", mockMux);
+      const res = launchSingleItem(item, workDir, worktreeDir, repo, "claude", mockMux, {}, deps);
       expect(res).not.toBeNull();
       expect(res!.worktreePath).toBe(join(worktreeDir, "ninthwave-M-CI-1"));
     });
@@ -475,6 +472,7 @@ describe("launchSingleItem", () => {
 
   it("creates worktree from dep branch when baseBranch is set", async () => {
     const mockMux = createMockMux();
+    const deps = createMockLaunchDeps();
     const repo = setupTempRepo();
     const workDir = setupWorkItemsDir(repo);
     const worktreeDir = join(repo, ".worktrees");
@@ -484,12 +482,12 @@ describe("launchSingleItem", () => {
     await captureOutput(() => {
       const res = launchSingleItem(item, workDir, worktreeDir, repo, "claude", mockMux, {
         baseBranch: "ninthwave/H-1-1",
-      });
+      }, deps);
       expect(res).not.toBeNull();
     });
 
     // createWorktree should be called with the dep branch as startPoint
-    expect(createWorktree).toHaveBeenCalledWith(
+    expect(deps.createWorktree).toHaveBeenCalledWith(
       repo,
       expect.stringContaining("ninthwave-M-CI-1"),
       "ninthwave/M-CI-1",
@@ -499,6 +497,7 @@ describe("launchSingleItem", () => {
 
   it("fetches dep branch instead of main when baseBranch is set", async () => {
     const mockMux = createMockMux();
+    const deps = createMockLaunchDeps();
     const repo = setupTempRepo();
     const workDir = setupWorkItemsDir(repo);
     const worktreeDir = join(repo, ".worktrees");
@@ -508,21 +507,22 @@ describe("launchSingleItem", () => {
     const output = await captureOutput(() => {
       launchSingleItem(item, workDir, worktreeDir, repo, "claude", mockMux, {
         baseBranch: "ninthwave/H-1-1",
-      });
+      }, deps);
     });
 
     // Should fetch the dep branch, not main
-    expect(fetchOrigin).toHaveBeenCalledWith(repo, "ninthwave/H-1-1");
+    expect(deps.fetchOrigin).toHaveBeenCalledWith(repo, "ninthwave/H-1-1");
     // Should NOT fetch main
-    expect(fetchOrigin).not.toHaveBeenCalledWith(repo, "main");
+    expect(deps.fetchOrigin).not.toHaveBeenCalledWith(repo, "main");
     // Should NOT call ffMerge (stacked launches skip main ff-merge)
-    expect(ffMerge).not.toHaveBeenCalled();
+    expect(deps.ffMerge).not.toHaveBeenCalled();
     // Output should mention the dep branch
     expect(output).toContain("Fetching dependency branch ninthwave/H-1-1");
   });
 
   it("includes BASE_BRANCH in system prompt when baseBranch is set", async () => {
     const mockMux = createMockMux();
+    const deps = createMockLaunchDeps();
     const repo = setupTempRepo();
     const workDir = setupWorkItemsDir(repo);
     const worktreeDir = join(repo, ".worktrees");
@@ -533,7 +533,7 @@ describe("launchSingleItem", () => {
     await captureOutput(() => {
       launchSingleItem(item, workDir, worktreeDir, repo, "opencode", mockMux, {
         baseBranch: "ninthwave/H-1-1",
-      });
+      }, deps);
     });
 
     // For opencode, the system prompt is included in the initial message sent via sendMessage
@@ -545,6 +545,7 @@ describe("launchSingleItem", () => {
 
   it("does not include BASE_BRANCH in system prompt when baseBranch is not set", async () => {
     const mockMux = createMockMux();
+    const deps = createMockLaunchDeps();
     const repo = setupTempRepo();
     const workDir = setupWorkItemsDir(repo);
     const worktreeDir = join(repo, ".worktrees");
@@ -553,7 +554,7 @@ describe("launchSingleItem", () => {
 
     // Use opencode so the full system prompt is sent via sendMessage
     await captureOutput(() => {
-      launchSingleItem(item, workDir, worktreeDir, repo, "opencode", mockMux);
+      launchSingleItem(item, workDir, worktreeDir, repo, "opencode", mockMux, {}, deps);
     });
 
     // The system prompt should NOT contain BASE_BRANCH
@@ -565,6 +566,7 @@ describe("launchSingleItem", () => {
 
   it("non-stacked launch still fetches main and calls ffMerge", async () => {
     const mockMux = createMockMux();
+    const deps = createMockLaunchDeps();
     const repo = setupTempRepo();
     const workDir = setupWorkItemsDir(repo);
     const worktreeDir = join(repo, ".worktrees");
@@ -572,14 +574,14 @@ describe("launchSingleItem", () => {
     const item = items.find((i) => i.id === "M-CI-1")!;
 
     await captureOutput(() => {
-      launchSingleItem(item, workDir, worktreeDir, repo, "claude", mockMux);
+      launchSingleItem(item, workDir, worktreeDir, repo, "claude", mockMux, {}, deps);
     });
 
     // Non-stacked: should fetch main and call ffMerge
-    expect(fetchOrigin).toHaveBeenCalledWith(repo, "main");
-    expect(ffMerge).toHaveBeenCalledWith(repo, "main");
+    expect(deps.fetchOrigin).toHaveBeenCalledWith(repo, "main");
+    expect(deps.ffMerge).toHaveBeenCalledWith(repo, "main");
     // createWorktree should use default startPoint "HEAD"
-    expect(createWorktree).toHaveBeenCalledWith(
+    expect(deps.createWorktree).toHaveBeenCalledWith(
       repo,
       expect.stringContaining("ninthwave-M-CI-1"),
       "ninthwave/M-CI-1",
@@ -598,16 +600,12 @@ describe("launchSingleItem external worktree handling", () => {
 
   afterEach(() => {
     process.env = { ...originalEnv };
-    // Restore default mock return values to prevent leaking into other tests
-    (branchExists as Mock).mockReturnValue(false);
-    (findWorktreeForBranch as Mock).mockReturnValue(null);
-    (deleteBranch as Mock).mockReset();
-    (removeWorktree as Mock).mockReset();
     cleanupTempRepos();
   });
 
   it("removes external worktree and retries branch deletion on failure", async () => {
     const mockMux = createMockMux();
+    const deps = createMockLaunchDeps();
     const repo = setupTempRepo();
     const workDir = setupWorkItemsDir(repo);
     const worktreeDir = join(repo, ".worktrees");
@@ -615,50 +613,51 @@ describe("launchSingleItem external worktree handling", () => {
     const item = items.find((i) => i.id === "M-CI-1")!;
 
     // Branch exists and is checked out in an external worktree
-    (branchExists as Mock).mockReturnValue(true);
+    deps.branchExists.mockReturnValue(true);
     // First deleteBranch fails (branch checked out in worktree)
-    (deleteBranch as Mock)
+    deps.deleteBranch
       .mockImplementationOnce(() => { throw new Error("Cannot delete branch checked out in worktree"); })
       .mockImplementationOnce(() => {}); // Retry succeeds
     // findWorktreeForBranch returns an external worktree path
     const externalWtPath = "/tmp/fake-external-worktree";
-    (findWorktreeForBranch as Mock)
-      .mockReturnValueOnce(externalWtPath)  // First call (line 456 -- pre-check)
+    deps.findWorktreeForBranch
+      .mockReturnValueOnce(externalWtPath)  // First call (pre-check)
       .mockReturnValueOnce(externalWtPath); // Second call (in catch block)
 
     const output = await captureOutput(() => {
-      const res = launchSingleItem(item, workDir, worktreeDir, repo, "claude", mockMux);
+      const res = launchSingleItem(item, workDir, worktreeDir, repo, "claude", mockMux, {}, deps);
       expect(res).not.toBeNull();
     });
 
-    // removeWorktree should have been called twice: once in the pre-check (line 462) and once in the catch retry
-    expect(removeWorktree).toHaveBeenCalledWith(repo, externalWtPath, true);
+    // removeWorktree should have been called twice: once in the pre-check and once in the catch retry
+    expect(deps.removeWorktree).toHaveBeenCalledWith(repo, externalWtPath, true);
     // deleteBranch should have been called twice (initial + retry)
-    expect(deleteBranch).toHaveBeenCalledTimes(2);
+    expect(deps.deleteBranch).toHaveBeenCalledTimes(2);
     // createWorktree should have been called (branch deletion succeeded on retry)
-    expect(createWorktree).toHaveBeenCalled();
+    expect(deps.createWorktree).toHaveBeenCalled();
     expect(output).toContain("Removing and retrying");
   });
 
   it("propagates error when external worktree removal fails on retry", async () => {
     const mockMux = createMockMux();
+    const deps = createMockLaunchDeps();
     const repo = setupTempRepo();
     const workDir = setupWorkItemsDir(repo);
     const worktreeDir = join(repo, ".worktrees");
     const items = parseWorkItems(workDir, worktreeDir);
     const item = items.find((i) => i.id === "M-CI-1")!;
 
-    (branchExists as Mock).mockReturnValue(true);
+    deps.branchExists.mockReturnValue(true);
     // deleteBranch always fails
-    (deleteBranch as Mock).mockImplementation(() => {
+    deps.deleteBranch.mockImplementation(() => {
       throw new Error("Cannot delete branch checked out in worktree");
     });
     const externalWtPath = "/tmp/fake-external-worktree";
-    (findWorktreeForBranch as Mock)
+    deps.findWorktreeForBranch
       .mockReturnValueOnce(externalWtPath)  // pre-check
       .mockReturnValueOnce(externalWtPath); // catch block
     // removeWorktree fails on the retry (in catch block)
-    (removeWorktree as Mock)
+    deps.removeWorktree
       .mockImplementationOnce(() => {})  // pre-check succeeds
       .mockImplementationOnce(() => { throw new Error("permission denied"); }); // retry fails
 
@@ -666,7 +665,7 @@ describe("launchSingleItem external worktree handling", () => {
     let thrownError: Error | null = null;
     await captureOutput(() => {
       try {
-        launchSingleItem(item, workDir, worktreeDir, repo, "claude", mockMux);
+        launchSingleItem(item, workDir, worktreeDir, repo, "claude", mockMux, {}, deps);
       } catch (e) {
         thrownError = e as Error;
       }
@@ -676,29 +675,30 @@ describe("launchSingleItem external worktree handling", () => {
     expect(thrownError!.message).toContain("Failed to delete branch");
     expect(thrownError!.message).toContain("after worktree removal");
     // createWorktree should NOT have been called (error propagated)
-    expect(createWorktree).not.toHaveBeenCalled();
+    expect(deps.createWorktree).not.toHaveBeenCalled();
   });
 
   it("propagates error when no external worktree found but branch deletion fails", async () => {
     const mockMux = createMockMux();
+    const deps = createMockLaunchDeps();
     const repo = setupTempRepo();
     const workDir = setupWorkItemsDir(repo);
     const worktreeDir = join(repo, ".worktrees");
     const items = parseWorkItems(workDir, worktreeDir);
     const item = items.find((i) => i.id === "M-CI-1")!;
 
-    (branchExists as Mock).mockReturnValue(true);
+    deps.branchExists.mockReturnValue(true);
     // deleteBranch fails for non-worktree reason
-    (deleteBranch as Mock).mockImplementation(() => {
+    deps.deleteBranch.mockImplementation(() => {
       throw new Error("branch is protected");
     });
     // No external worktree found
-    (findWorktreeForBranch as Mock).mockReturnValue(null);
+    deps.findWorktreeForBranch.mockReturnValue(null);
 
     let thrownError: Error | null = null;
     await captureOutput(() => {
       try {
-        launchSingleItem(item, workDir, worktreeDir, repo, "claude", mockMux);
+        launchSingleItem(item, workDir, worktreeDir, repo, "claude", mockMux, {}, deps);
       } catch (e) {
         thrownError = e as Error;
       }
@@ -707,11 +707,12 @@ describe("launchSingleItem external worktree handling", () => {
     expect(thrownError).not.toBeNull();
     expect(thrownError!.message).toContain("Failed to delete branch");
     expect(thrownError!.message).toContain("branch is protected");
-    expect(createWorktree).not.toHaveBeenCalled();
+    expect(deps.createWorktree).not.toHaveBeenCalled();
   });
 
   it("handles branch in both orchestrator worktree and external worktree", async () => {
     const mockMux = createMockMux();
+    const deps = createMockLaunchDeps();
     const repo = setupTempRepo();
     const workDir = setupWorkItemsDir(repo);
     const worktreeDir = join(repo, ".worktrees");
@@ -719,23 +720,23 @@ describe("launchSingleItem external worktree handling", () => {
     const item = items.find((i) => i.id === "M-CI-1")!;
     const expectedWorktreePath = join(worktreeDir, "ninthwave-M-CI-1");
 
-    (branchExists as Mock).mockReturnValue(true);
+    deps.branchExists.mockReturnValue(true);
 
     // First findWorktreeForBranch: returns the orchestrator's own worktree path
     // (should be skipped since it matches worktreePath)
-    (findWorktreeForBranch as Mock)
+    deps.findWorktreeForBranch
       .mockReturnValueOnce(expectedWorktreePath)  // pre-check: same as target, skip
       .mockReturnValueOnce(null); // catch block: no external worktree found
 
     // deleteBranch fails (branch exists but no external worktree to remove)
-    (deleteBranch as Mock).mockImplementation(() => {
+    deps.deleteBranch.mockImplementation(() => {
       throw new Error("Cannot delete branch");
     });
 
     let thrownError: Error | null = null;
     await captureOutput(() => {
       try {
-        launchSingleItem(item, workDir, worktreeDir, repo, "claude", mockMux);
+        launchSingleItem(item, workDir, worktreeDir, repo, "claude", mockMux, {}, deps);
       } catch (e) {
         thrownError = e as Error;
       }
@@ -762,6 +763,7 @@ describe("launchSingleItem resource cleanup on failure", () => {
 
   it("cleans up partition and worktree when launchAiSession returns null", async () => {
     const mockMux = createMockMux();
+    const deps = createMockLaunchDeps();
     // launchAiSession returns null when mux.launchWorkspace fails
     mockMux.launchWorkspace.mockReturnValueOnce(null);
 
@@ -772,14 +774,14 @@ describe("launchSingleItem resource cleanup on failure", () => {
     const item = items.find((i) => i.id === "M-CI-1")!;
 
     const output = await captureOutput(() => {
-      const res = launchSingleItem(item, workDir, worktreeDir, repo, "claude", mockMux);
+      const res = launchSingleItem(item, workDir, worktreeDir, repo, "claude", mockMux, {}, deps);
       expect(res).toBeNull();
     });
 
     // Cleanup should have been attempted
     expect(output).toContain("Launch failed for M-CI-1, cleaning up");
     // removeWorktree should be called for cleanup
-    expect(removeWorktree).toHaveBeenCalledWith(
+    expect(deps.removeWorktree).toHaveBeenCalledWith(
       repo,
       join(worktreeDir, "ninthwave-M-CI-1"),
       true,
@@ -798,6 +800,7 @@ describe("launchSingleItem resource cleanup on failure", () => {
 
   it("cleans up partition and worktree when prompt file write throws", async () => {
     const mockMux = createMockMux();
+    const deps = createMockLaunchDeps();
 
     const repo = setupTempRepo();
     const workDir = setupWorkItemsDir(repo);
@@ -806,22 +809,21 @@ describe("launchSingleItem resource cleanup on failure", () => {
     const item = items.find((i) => i.id === "M-CI-1")!;
 
     // Make the worktree path a file instead of directory so writeFileSync on .nw-prompt throws
-    // First, prevent createWorktree from creating the dir (we need it to fail at prompt write)
-    (createWorktree as Mock).mockImplementationOnce((_repo: string, wtPath: string) => {
+    deps.createWorktree.mockImplementationOnce((_repo: string, wtPath: string) => {
       // Create worktree dir, but make .nw-prompt a directory so writeFileSync fails
       mkdirSync(wtPath, { recursive: true });
       mkdirSync(join(wtPath, ".nw-prompt"), { recursive: true });
     });
 
     const output = await captureOutput(() => {
-      const res = launchSingleItem(item, workDir, worktreeDir, repo, "claude", mockMux);
+      const res = launchSingleItem(item, workDir, worktreeDir, repo, "claude", mockMux, {}, deps);
       expect(res).toBeNull();
     });
 
     // Cleanup should have been attempted
     expect(output).toContain("Launch failed for M-CI-1, cleaning up");
     // removeWorktree called for cleanup
-    expect(removeWorktree).toHaveBeenCalledWith(
+    expect(deps.removeWorktree).toHaveBeenCalledWith(
       repo,
       join(worktreeDir, "ninthwave-M-CI-1"),
       true,
@@ -840,6 +842,7 @@ describe("launchSingleItem resource cleanup on failure", () => {
 
   it("cleanup continues even when individual cleanup steps fail", async () => {
     const mockMux = createMockMux();
+    const deps = createMockLaunchDeps();
     mockMux.launchWorkspace.mockReturnValueOnce(null);
 
     const repo = setupTempRepo();
@@ -849,12 +852,12 @@ describe("launchSingleItem resource cleanup on failure", () => {
     const item = items.find((i) => i.id === "M-CI-1")!;
 
     // Make removeWorktree throw to verify cleanup continues
-    (removeWorktree as Mock).mockImplementationOnce(() => {
+    deps.removeWorktree.mockImplementationOnce(() => {
       throw new Error("worktree removal failed");
     });
 
     const output = await captureOutput(() => {
-      const res = launchSingleItem(item, workDir, worktreeDir, repo, "claude", mockMux);
+      const res = launchSingleItem(item, workDir, worktreeDir, repo, "claude", mockMux, {}, deps);
       // Should still return null (not throw)
       expect(res).toBeNull();
     });
@@ -1289,19 +1292,20 @@ describe("launchReviewWorker", () => {
 
   it("off mode does not create a worktree and returns worktreePath null", async () => {
     const mockMux = createMockMux();
+    const deps = createMockLaunchDeps();
     const repo = setupTempRepo();
 
     const result = await captureOutput(() => {
-      const res = launchReviewWorker(42, "H-RVW-1", "off", repo, "claude", mockMux);
+      const res = launchReviewWorker(42, "H-RVW-1", "off", repo, "claude", mockMux, {}, deps);
       expect(res).not.toBeNull();
       expect(res!.worktreePath).toBeNull();
       expect(res!.workspaceRef).toBe("workspace:1");
     });
 
     // Should NOT create a worktree (no createWorktree call)
-    expect(createWorktree).not.toHaveBeenCalled();
+    expect(deps.createWorktree).not.toHaveBeenCalled();
     // Should NOT call fetchOrigin (no branch to fetch)
-    expect(fetchOrigin).not.toHaveBeenCalled();
+    expect(deps.fetchOrigin).not.toHaveBeenCalled();
     // Should launch with ninthwave-reviewer agent
     const launchCall = mockMux.launchWorkspace.mock.calls[0];
     const cmd = launchCall[1] as string;
@@ -1312,19 +1316,20 @@ describe("launchReviewWorker", () => {
 
   it("direct mode creates worktree from ninthwave/{id} branch", async () => {
     const mockMux = createMockMux();
+    const deps = createMockLaunchDeps();
     const repo = setupTempRepo();
 
     const result = await captureOutput(() => {
-      const res = launchReviewWorker(42, "H-RVW-1", "direct", repo, "claude", mockMux);
+      const res = launchReviewWorker(42, "H-RVW-1", "direct", repo, "claude", mockMux, {}, deps);
       expect(res).not.toBeNull();
       expect(res!.worktreePath).toContain("review-H-RVW-1");
       expect(res!.workspaceRef).toBe("workspace:1");
     });
 
     // Should fetch the item branch
-    expect(fetchOrigin).toHaveBeenCalledWith(repo, "ninthwave/H-RVW-1");
+    expect(deps.fetchOrigin).toHaveBeenCalledWith(repo, "ninthwave/H-RVW-1");
     // Should create worktree with review branch from origin/ninthwave/{id}
-    expect(createWorktree).toHaveBeenCalledWith(
+    expect(deps.createWorktree).toHaveBeenCalledWith(
       repo,
       expect.stringContaining("review-H-RVW-1"),
       "review/H-RVW-1",
@@ -1336,17 +1341,18 @@ describe("launchReviewWorker", () => {
 
   it("pr mode creates worktree same as direct mode", async () => {
     const mockMux = createMockMux();
+    const deps = createMockLaunchDeps();
     const repo = setupTempRepo();
 
     await captureOutput(() => {
-      const res = launchReviewWorker(42, "H-RVW-1", "pr", repo, "claude", mockMux);
+      const res = launchReviewWorker(42, "H-RVW-1", "pr", repo, "claude", mockMux, {}, deps);
       expect(res).not.toBeNull();
       expect(res!.worktreePath).toContain("review-H-RVW-1");
     });
 
     // Same worktree creation as direct mode
-    expect(fetchOrigin).toHaveBeenCalledWith(repo, "ninthwave/H-RVW-1");
-    expect(createWorktree).toHaveBeenCalledWith(
+    expect(deps.fetchOrigin).toHaveBeenCalledWith(repo, "ninthwave/H-RVW-1");
+    expect(deps.createWorktree).toHaveBeenCalledWith(
       repo,
       expect.stringContaining("review-H-RVW-1"),
       "review/H-RVW-1",
@@ -1356,11 +1362,12 @@ describe("launchReviewWorker", () => {
 
   it("system prompt contains correct YOUR_REVIEW_PR and AUTO_FIX_MODE", async () => {
     const mockMux = createMockMux();
+    const deps = createMockLaunchDeps();
     const repo = setupTempRepo();
 
     // Use opencode so the system prompt is sent via sendMessage
     await captureOutput(() => {
-      launchReviewWorker(99, "H-RVW-2", "direct", repo, "opencode", mockMux);
+      launchReviewWorker(99, "H-RVW-2", "direct", repo, "opencode", mockMux, {}, deps);
     });
 
     const sendCall = mockMux.sendMessage.mock.calls[0];
@@ -1375,10 +1382,11 @@ describe("launchReviewWorker", () => {
 
   it("system prompt contains AUTO_FIX_MODE off for off mode", async () => {
     const mockMux = createMockMux();
+    const deps = createMockLaunchDeps();
     const repo = setupTempRepo();
 
     await captureOutput(() => {
-      launchReviewWorker(50, "H-RVW-3", "off", repo, "opencode", mockMux);
+      launchReviewWorker(50, "H-RVW-3", "off", repo, "opencode", mockMux, {}, deps);
     });
 
     const sendCall = mockMux.sendMessage.mock.calls[0];
@@ -1390,12 +1398,13 @@ describe("launchReviewWorker", () => {
 
   it("includes BASE_BRANCH in system prompt when baseBranch is set", async () => {
     const mockMux = createMockMux();
+    const deps = createMockLaunchDeps();
     const repo = setupTempRepo();
 
     await captureOutput(() => {
       launchReviewWorker(42, "H-RVW-1", "off", repo, "opencode", mockMux, {
         baseBranch: "ninthwave/H-DEP-1",
-      });
+      }, deps);
     });
 
     const sendCall = mockMux.sendMessage.mock.calls[0];
@@ -1406,10 +1415,11 @@ describe("launchReviewWorker", () => {
 
   it("does not include BASE_BRANCH when baseBranch is not set", async () => {
     const mockMux = createMockMux();
+    const deps = createMockLaunchDeps();
     const repo = setupTempRepo();
 
     await captureOutput(() => {
-      launchReviewWorker(42, "H-RVW-1", "off", repo, "opencode", mockMux);
+      launchReviewWorker(42, "H-RVW-1", "off", repo, "opencode", mockMux, {}, deps);
     });
 
     const sendCall = mockMux.sendMessage.mock.calls[0];
@@ -1420,12 +1430,13 @@ describe("launchReviewWorker", () => {
 
   it("launches with --agent ninthwave-reviewer for all modes", async () => {
     const mockMux = createMockMux();
+    const deps = createMockLaunchDeps();
     const repo = setupTempRepo();
 
     for (const mode of ["off", "direct", "pr"] as const) {
       vi.clearAllMocks();
       await captureOutput(() => {
-        launchReviewWorker(42, "H-RVW-1", mode, repo, "claude", mockMux);
+        launchReviewWorker(42, "H-RVW-1", mode, repo, "claude", mockMux, {}, deps);
       });
 
       const launchCall = mockMux.launchWorkspace.mock.calls[0];
@@ -1438,14 +1449,15 @@ describe("launchReviewWorker", () => {
 
   it("returns null when fetch fails in direct mode", async () => {
     const mockMux = createMockMux();
+    const deps = createMockLaunchDeps();
     const repo = setupTempRepo();
 
-    (fetchOrigin as Mock).mockImplementationOnce(() => {
+    deps.fetchOrigin.mockImplementationOnce(() => {
       throw new Error("branch not found");
     });
 
     const result = await captureOutput(() => {
-      const res = launchReviewWorker(42, "H-RVW-1", "direct", repo, "claude", mockMux);
+      const res = launchReviewWorker(42, "H-RVW-1", "direct", repo, "claude", mockMux, {}, deps);
       expect(res).toBeNull();
     });
 
@@ -1455,11 +1467,12 @@ describe("launchReviewWorker", () => {
 
   it("returns null when mux launch fails", async () => {
     const mockMux = createMockMux();
+    const deps = createMockLaunchDeps();
     mockMux.launchWorkspace.mockReturnValueOnce(null);
     const repo = setupTempRepo();
 
     await captureOutput(() => {
-      const res = launchReviewWorker(42, "H-RVW-1", "off", repo, "claude", mockMux);
+      const res = launchReviewWorker(42, "H-RVW-1", "off", repo, "claude", mockMux, {}, deps);
       expect(res).toBeNull();
     });
 
@@ -1468,20 +1481,21 @@ describe("launchReviewWorker", () => {
 
   it("deletes stale review branch before creating worktree", async () => {
     const mockMux = createMockMux();
+    const deps = createMockLaunchDeps();
     const repo = setupTempRepo();
 
-    (branchExists as Mock).mockReturnValueOnce(true);
+    deps.branchExists.mockReturnValueOnce(true);
 
     await captureOutput(() => {
-      launchReviewWorker(42, "H-RVW-1", "direct", repo, "claude", mockMux);
+      launchReviewWorker(42, "H-RVW-1", "direct", repo, "claude", mockMux, {}, deps);
     });
 
-    const { deleteBranch } = require("../core/git.ts");
-    expect(deleteBranch).toHaveBeenCalledWith(repo, "review/H-RVW-1");
+    expect(deps.deleteBranch).toHaveBeenCalledWith(repo, "review/H-RVW-1");
   });
 
   it("off mode uses implementerWorktreePath when provided, does not create a new directory", async () => {
     const mockMux = createMockMux();
+    const deps = createMockLaunchDeps();
     const repo = setupTempRepo();
     const implWorktree = join(repo, ".worktrees", "ninthwave-H-RVW-1");
     mkdirSync(implWorktree, { recursive: true });
@@ -1489,15 +1503,15 @@ describe("launchReviewWorker", () => {
     await captureOutput(() => {
       const res = launchReviewWorker(42, "H-RVW-1", "off", repo, "claude", mockMux, {
         implementerWorktreePath: implWorktree,
-      });
+      }, deps);
       expect(res).not.toBeNull();
       expect(res!.worktreePath).toBeNull();
     });
 
     // Should NOT create a worktree (no createWorktree call)
-    expect(createWorktree).not.toHaveBeenCalled();
+    expect(deps.createWorktree).not.toHaveBeenCalled();
     // Should NOT call fetchOrigin
-    expect(fetchOrigin).not.toHaveBeenCalled();
+    expect(deps.fetchOrigin).not.toHaveBeenCalled();
     // The review-{id} directory should NOT have been created
     const { existsSync } = require("fs");
     expect(existsSync(join(repo, ".worktrees", "review-H-RVW-1"))).toBe(false);
@@ -1508,10 +1522,11 @@ describe("launchReviewWorker", () => {
 
   it("off mode without implementerWorktreePath falls back to creating plain directory", async () => {
     const mockMux = createMockMux();
+    const deps = createMockLaunchDeps();
     const repo = setupTempRepo();
 
     await captureOutput(() => {
-      const res = launchReviewWorker(42, "H-RVW-1", "off", repo, "claude", mockMux);
+      const res = launchReviewWorker(42, "H-RVW-1", "off", repo, "claude", mockMux, {}, deps);
       expect(res).not.toBeNull();
       expect(res!.worktreePath).toBeNull();
     });
@@ -1899,8 +1914,6 @@ describe("cmdRunItems", () => {
     expect(output).toContain("cmux is not available");
     // Should NOT have attempted to launch a workspace
     expect(mockMux.launchWorkspace).not.toHaveBeenCalled();
-    // Should NOT have attempted worktree creation
-    expect(createWorktree).not.toHaveBeenCalled();
   });
 
   it("uses same error message as diagnoseUnavailable()", async () => {

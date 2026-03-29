@@ -3,9 +3,56 @@
 import { existsSync, readdirSync } from "fs";
 import { join } from "path";
 import { die } from "../output.ts";
-import { prList, prView, prChecks, prListAsync, prViewAsync, prChecksAsync, getRepoOwner, apiGet, ghInRepo } from "../gh.ts";
-import * as gh from "../gh.ts";
+import {
+  prList as defaultPrList,
+  prView as defaultPrView,
+  prChecks as defaultPrChecks,
+  prListAsync as defaultPrListAsync,
+  prViewAsync as defaultPrViewAsync,
+  prChecksAsync as defaultPrChecksAsync,
+  getRepoOwner as defaultGetRepoOwner,
+  apiGet as defaultApiGet,
+  isAvailable as defaultIsAvailable,
+  ghInRepo,
+} from "../gh.ts";
+import * as ghModule from "../gh.ts";
 import type { WatchResult, Transition } from "../types.ts";
+
+/** Injectable dependencies for PR monitoring commands, for testing. */
+export interface PrMonitorDeps {
+  prList: typeof defaultPrList;
+  prView: typeof defaultPrView;
+  prChecks: typeof defaultPrChecks;
+  isAvailable: typeof defaultIsAvailable;
+  getRepoOwner: typeof defaultGetRepoOwner;
+  apiGet: typeof defaultApiGet;
+}
+
+/** Async variant of PrMonitorDeps for checkPrStatusAsync. */
+export interface PrMonitorAsyncDeps {
+  prListAsync: typeof defaultPrListAsync;
+  prViewAsync: typeof defaultPrViewAsync;
+  prChecksAsync: typeof defaultPrChecksAsync;
+  isAvailable: typeof defaultIsAvailable;
+}
+
+// Defaults read from the module namespace so vi.spyOn in tests works.
+const defaultPrMonitorDeps: PrMonitorDeps = {
+  prList: (...args) => ghModule.prList(...args),
+  prView: (...args) => ghModule.prView(...args),
+  prChecks: (...args) => ghModule.prChecks(...args),
+  isAvailable: () => ghModule.isAvailable(),
+  getRepoOwner: (...args) => ghModule.getRepoOwner(...args),
+  apiGet: (...args) => ghModule.apiGet(...args),
+};
+
+// Async defaults read from the module namespace so vi.spyOn in tests works.
+const defaultPrMonitorAsyncDeps: PrMonitorAsyncDeps = {
+  prListAsync: (...args) => ghModule.prListAsync(...args),
+  prViewAsync: (...args) => ghModule.prViewAsync(...args),
+  prChecksAsync: (...args) => ghModule.prChecksAsync(...args),
+  isAvailable: () => ghModule.isAvailable(),
+};
 import { listCrossRepoEntries } from "../cross-repo.ts";
 
 // ── External PR scanning ──────────────────────────────────────────────
@@ -40,8 +87,8 @@ export interface ScanExternalPRsDeps {
 
 const defaultScanDeps: ScanExternalPRsDeps = {
   ghRunner: ghInRepo,
-  isAvailable: () => gh.isAvailable(),
-  getOwnerRepo: getRepoOwner,
+  isAvailable: defaultIsAvailable,
+  getOwnerRepo: defaultGetRepoOwner,
 };
 
 /**
@@ -106,6 +153,7 @@ export function cmdWatchReady(
   worktreeDir: string,
   projectRoot: string,
   print: boolean = true,
+  deps: PrMonitorDeps = defaultPrMonitorDeps,
 ): string {
   if (!existsSync(worktreeDir)) {
     if (print) console.log("No active worktrees");
@@ -122,7 +170,7 @@ export function cmdWatchReady(
       const wtDir = join(worktreeDir, entry);
       if (!existsSync(wtDir)) continue;
       const id = entry.slice(10);
-      const line = checkPrStatus(id, projectRoot);
+      const line = checkPrStatus(id, projectRoot, deps);
       if (line) results.push(line);
     }
   } catch {
@@ -133,7 +181,7 @@ export function cmdWatchReady(
   const hubCheckedIds = new Set(results.map((r) => r.split("\t")[0]));
   for (const entry of listCrossRepoEntries(crossRepoIndex)) {
     if (hubCheckedIds.has(entry.itemId)) continue;
-    const statusLine = checkPrStatus(entry.itemId, entry.repoRoot);
+    const statusLine = checkPrStatus(entry.itemId, entry.repoRoot, deps);
     if (statusLine) results.push(statusLine);
   }
 
@@ -202,18 +250,18 @@ function derivePrStatus(ciStatus: string, isMergeable: string, reviewDecision: s
   return "pending";
 }
 
-export function checkPrStatus(id: string, repoRoot: string): string {
+export function checkPrStatus(id: string, repoRoot: string, deps: PrMonitorDeps = defaultPrMonitorDeps): string {
   const branch = `ninthwave/${id}`;
 
-  if (!gh.isAvailable()) return "";
+  if (!deps.isAvailable()) return "";
 
   // Check for open PR -- distinguish API error from "no PRs"
-  const openResult = prList(repoRoot, branch, "open");
+  const openResult = deps.prList(repoRoot, branch, "open");
   if (!openResult.ok) return ""; // API error: hold state (return empty to signal no data)
   const openPrs = openResult.data;
   if (openPrs.length === 0) {
     // Check if merged
-    const mergedResult = prList(repoRoot, branch, "merged");
+    const mergedResult = deps.prList(repoRoot, branch, "merged");
     if (!mergedResult.ok) return ""; // API error: hold state
     const mergedPrs = mergedResult.data;
     if (mergedPrs.length > 0) {
@@ -226,14 +274,14 @@ export function checkPrStatus(id: string, repoRoot: string): string {
   const prNumber = openPrs[0]!.number;
 
   // Check CI and review status (include updatedAt for detection latency)
-  const prViewResult = prView(repoRoot, prNumber, ["reviewDecision", "mergeable", "updatedAt"]);
+  const prViewResult = deps.prView(repoRoot, prNumber, ["reviewDecision", "mergeable", "updatedAt"]);
   if (!prViewResult.ok) return ""; // API error: hold state
   const prData = prViewResult.data;
   const reviewDecision = (prData.reviewDecision as string) ?? "";
   const isMergeable = (prData.mergeable as string) ?? "";
   const prUpdatedAt = (prData.updatedAt as string) ?? "";
 
-  const checksResult = prChecks(repoRoot, prNumber);
+  const checksResult = deps.prChecks(repoRoot, prNumber);
   if (!checksResult.ok) return ""; // API error: hold state
 
   const { ciStatus, eventTime: ciEventTime } = processChecks(checksResult.data);
@@ -249,17 +297,17 @@ export function checkPrStatus(id: string, repoRoot: string): string {
  * network call yields to the event loop, keeping the TUI responsive.
  * Returns the same tab-separated string format as the sync version.
  */
-export async function checkPrStatusAsync(id: string, repoRoot: string): Promise<string> {
+export async function checkPrStatusAsync(id: string, repoRoot: string, deps: PrMonitorAsyncDeps = defaultPrMonitorAsyncDeps): Promise<string> {
   const branch = `ninthwave/${id}`;
 
-  if (!gh.isAvailable()) return "";
+  if (!deps.isAvailable()) return "";
 
   // Check for open PR -- distinguish API error from "no PRs"
-  const openResult = await prListAsync(repoRoot, branch, "open");
+  const openResult = await deps.prListAsync(repoRoot, branch, "open");
   if (!openResult.ok) return ""; // API error: hold state
   const openPrs = openResult.data;
   if (openPrs.length === 0) {
-    const mergedResult = await prListAsync(repoRoot, branch, "merged");
+    const mergedResult = await deps.prListAsync(repoRoot, branch, "merged");
     if (!mergedResult.ok) return ""; // API error: hold state
     const mergedPrs = mergedResult.data;
     if (mergedPrs.length > 0) {
@@ -271,14 +319,14 @@ export async function checkPrStatusAsync(id: string, repoRoot: string): Promise<
 
   const prNumber = openPrs[0]!.number;
 
-  const prViewResult = await prViewAsync(repoRoot, prNumber, ["reviewDecision", "mergeable", "updatedAt"]);
+  const prViewResult = await deps.prViewAsync(repoRoot, prNumber, ["reviewDecision", "mergeable", "updatedAt"]);
   if (!prViewResult.ok) return ""; // API error: hold state
   const prData = prViewResult.data;
   const reviewDecision = (prData.reviewDecision as string) ?? "";
   const isMergeable = (prData.mergeable as string) ?? "";
   const prUpdatedAt = (prData.updatedAt as string) ?? "";
 
-  const checksResult = await prChecksAsync(repoRoot, prNumber);
+  const checksResult = await deps.prChecksAsync(repoRoot, prNumber);
   if (!checksResult.ok) return ""; // API error: hold state
 
   const { ciStatus, eventTime: ciEventTime } = processChecks(checksResult.data);
@@ -340,6 +388,7 @@ export function findGoneItems(currentState: string, prevState: string): string {
 export async function cmdPrWatch(
   args: string[],
   projectRoot: string,
+  deps: PrMonitorDeps = defaultPrMonitorDeps,
 ): Promise<void> {
   let prNumber = "";
   let interval = 120;
@@ -381,7 +430,7 @@ export async function cmdPrWatch(
 
     let ownerRepo: string;
     try {
-      ownerRepo = getRepoOwner(projectRoot);
+      ownerRepo = deps.getRepoOwner(projectRoot);
     } catch {
       continue;
     }
@@ -389,7 +438,7 @@ export async function cmdPrWatch(
     // Check for new reviews (trusted authors only)
     let newReviews = 0;
     try {
-      const result = apiGet(
+      const result = deps.apiGet(
         projectRoot,
         `repos/${ownerRepo}/pulls/${prNumber}/reviews`,
         `[.[] | select(.submitted_at > "${since}" and ${TRUSTED_ASSOC})] | length`,
@@ -402,7 +451,7 @@ export async function cmdPrWatch(
     // Check for new comments (trusted authors only)
     let newComments = 0;
     try {
-      const result = apiGet(
+      const result = deps.apiGet(
         projectRoot,
         `repos/${ownerRepo}/issues/${prNumber}/comments`,
         `[.[] | select(.created_at > "${since}" and ${TRUSTED_ASSOC})] | length`,
@@ -415,7 +464,7 @@ export async function cmdPrWatch(
     // Check for new review comments (trusted authors only)
     let newReviewComments = 0;
     try {
-      const result = apiGet(
+      const result = deps.apiGet(
         projectRoot,
         `repos/${ownerRepo}/pulls/${prNumber}/comments`,
         `[.[] | select(.created_at > "${since}" and ${TRUSTED_ASSOC})] | length`,
@@ -433,7 +482,7 @@ export async function cmdPrWatch(
 
     // Check if PR state changed
     try {
-      const viewResult = prView(projectRoot, parseInt(prNumber, 10), ["state"]);
+      const viewResult = deps.prView(projectRoot, parseInt(prNumber, 10), ["state"]);
       if (viewResult.ok) {
         const state = viewResult.data.state as string;
         if (state === "MERGED" || state === "CLOSED") {
@@ -456,6 +505,7 @@ export async function cmdPrWatch(
 export function cmdPrActivity(
   args: string[],
   projectRoot: string,
+  deps: PrMonitorDeps = defaultPrMonitorDeps,
 ): void {
   const prs: string[] = [];
   let since = "";
@@ -483,7 +533,7 @@ export function cmdPrActivity(
 
   let ownerRepo: string;
   try {
-    ownerRepo = getRepoOwner(projectRoot);
+    ownerRepo = deps.getRepoOwner(projectRoot);
   } catch {
     die("Could not determine repository");
   }
@@ -493,7 +543,7 @@ export function cmdPrActivity(
 
     // Check for review decisions (trusted authors only)
     try {
-      const reviewState = apiGet(
+      const reviewState = deps.apiGet(
         projectRoot,
         `repos/${ownerRepo}/pulls/${pr}/reviews`,
         `[.[] | select(.submitted_at > "${since}" and ${TRUSTED_ASSOC})] | last | .state`,
@@ -509,7 +559,7 @@ export function cmdPrActivity(
 
     // Check for new comments (trusted authors only)
     try {
-      const result = apiGet(
+      const result = deps.apiGet(
         projectRoot,
         `repos/${ownerRepo}/issues/${pr}/comments`,
         `[.[] | select(.created_at > "${since}" and ${TRUSTED_ASSOC})] | length`,
@@ -524,7 +574,7 @@ export function cmdPrActivity(
 
     // Check for new review comments (trusted authors only, inline)
     try {
-      const result = apiGet(
+      const result = deps.apiGet(
         projectRoot,
         `repos/${ownerRepo}/pulls/${pr}/comments`,
         `[.[] | select(.created_at > "${since}" and ${TRUSTED_ASSOC})] | length`,

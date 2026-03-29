@@ -1,16 +1,26 @@
 // ci-failures command: show failing CI check details for a PR.
 
 import { die } from "../output.ts";
-import { prChecks } from "../gh.ts";
+import { prChecks as defaultPrChecks } from "../gh.ts";
+
+/** Injectable dependencies for CI commands, for testing. */
+export interface CiDeps {
+  prChecks: typeof defaultPrChecks;
+}
+
+const defaultCiDeps: CiDeps = {
+  prChecks: defaultPrChecks,
+};
 
 export function cmdCiFailures(
   args: string[],
   projectRoot: string,
+  deps: CiDeps = defaultCiDeps,
 ): void {
   const prNumber = args[0] ?? "";
   if (!prNumber) die("Usage: ninthwave ci-failures <PR_NUMBER>");
 
-  const checksResult = prChecks(projectRoot, parseInt(prNumber, 10));
+  const checksResult = deps.prChecks(projectRoot, parseInt(prNumber, 10));
   if (!checksResult.ok) {
     die(`Failed to get CI checks: ${checksResult.error}`);
   }
