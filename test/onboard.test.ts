@@ -585,7 +585,7 @@ describe("cmdNoArgs", () => {
       isTTY: true,
       parseWorkItems: () => items,
       isDaemonRunning: () => null,
-      loadConfig: () => ({ locExtensions: "" }),
+      loadConfig: () => ({ review_external: false, schedule_enabled: false }),
       runInteractiveFlow: async () => interactiveResult,
       runWatch: async (args) => {
         watchCalled = true;
@@ -615,7 +615,7 @@ describe("cmdNoArgs", () => {
       isTTY: true,
       parseWorkItems: () => [fakeWorkItem("H-1", "Task")],
       isDaemonRunning: () => null,
-      loadConfig: () => ({ locExtensions: "" }),
+      loadConfig: () => ({ review_external: false, schedule_enabled: false }),
       runInteractiveFlow: async () => ({
         itemIds: ["H-1"],
         mergeStrategy: "auto" as MergeStrategy,
@@ -640,7 +640,7 @@ describe("cmdNoArgs", () => {
       isTTY: true,
       parseWorkItems: () => [fakeWorkItem("H-1", "Task")],
       isDaemonRunning: () => null,
-      loadConfig: () => ({ locExtensions: "" }),
+      loadConfig: () => ({ review_external: false, schedule_enabled: false }),
       runInteractiveFlow: async () => ({
         itemIds: ["H-1"],
         mergeStrategy: "auto" as MergeStrategy,
@@ -665,7 +665,7 @@ describe("cmdNoArgs", () => {
       isTTY: true,
       parseWorkItems: () => [fakeWorkItem("H-1", "Task")],
       isDaemonRunning: () => null,
-      loadConfig: () => ({ locExtensions: "" }),
+      loadConfig: () => ({ review_external: false, schedule_enabled: false }),
       runInteractiveFlow: async () => ({
         itemIds: ["H-1"],
         mergeStrategy: "auto" as MergeStrategy,
@@ -691,7 +691,7 @@ describe("cmdNoArgs", () => {
       isTTY: true,
       parseWorkItems: () => [fakeWorkItem("H-1", "Task")],
       isDaemonRunning: () => null,
-      loadConfig: () => ({ locExtensions: "" }),
+      loadConfig: () => ({ review_external: false, schedule_enabled: false }),
       runInteractiveFlow: async () => ({
         itemIds: ["H-1"],
         mergeStrategy: "auto" as MergeStrategy,
@@ -717,7 +717,7 @@ describe("cmdNoArgs", () => {
       isTTY: true,
       parseWorkItems: () => [fakeWorkItem("H-1", "Task")],
       isDaemonRunning: () => null,
-      loadConfig: () => ({ locExtensions: "" }),
+      loadConfig: () => ({ review_external: false, schedule_enabled: false }),
       runInteractiveFlow: async () => ({
         itemIds: ["H-1"],
         mergeStrategy: "auto" as MergeStrategy,
@@ -743,7 +743,7 @@ describe("cmdNoArgs", () => {
       isTTY: true,
       parseWorkItems: () => [fakeWorkItem("H-1", "Task")],
       isDaemonRunning: () => null,
-      loadConfig: () => ({ locExtensions: "" }),
+      loadConfig: () => ({ review_external: false, schedule_enabled: false }),
       runInteractiveFlow: async () => ({
         itemIds: ["H-1"],
         mergeStrategy: "auto" as MergeStrategy,
@@ -768,7 +768,7 @@ describe("cmdNoArgs", () => {
       isTTY: true,
       parseWorkItems: () => [fakeWorkItem("H-1", "Task")],
       isDaemonRunning: () => null,
-      loadConfig: () => ({ locExtensions: "" }),
+      loadConfig: () => ({ review_external: false, schedule_enabled: false }),
       runInteractiveFlow: async () => null, // User cancelled
       runWatch: async () => { watchCalled = true; },
     });
@@ -786,7 +786,7 @@ describe("cmdNoArgs", () => {
       isTTY: true,
       parseWorkItems: () => [fakeWorkItem("H-1", "Task")],
       isDaemonRunning: () => null,
-      loadConfig: () => ({ locExtensions: "" }),
+      loadConfig: () => ({ review_external: false, schedule_enabled: false }),
       runInteractiveFlow: async () => {
         interactiveCalled = true;
         return {
@@ -814,7 +814,7 @@ describe("cmdNoArgs", () => {
       isTTY: true,
       parseWorkItems: () => [fakeWorkItem("H-1", "Task")],
       isDaemonRunning: () => null,
-      loadConfig: () => ({ locExtensions: "", reviewExternal: "true" }),
+      loadConfig: () => ({ review_external: true, schedule_enabled: false }),
       runInteractiveFlow: async (_todos, _wip, deps) => {
         interactiveCalled = true;
         // Verify that the deps include the correct defaultReviewMode

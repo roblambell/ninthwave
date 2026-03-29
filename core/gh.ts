@@ -1,6 +1,5 @@
 import { run, runAsync } from "./shell.ts";
 import type { RunResult } from "./types.ts";
-import { loadConfig } from "./config.ts";
 
 // ── Result type ─────────────────────────────────────────────────────
 
@@ -305,17 +304,10 @@ export function apiGet(
 
 /**
  * Resolve the GitHub token to use for gh CLI commands.
- * Priority: NINTHWAVE_GITHUB_TOKEN env var > github_token config key > undefined (use default gh auth).
+ * Only checks the NINTHWAVE_GITHUB_TOKEN env var.
  */
-export function resolveGithubToken(projectRoot: string): string | undefined {
-  const envToken = process.env.NINTHWAVE_GITHUB_TOKEN;
-  if (envToken) return envToken;
-
-  const config = loadConfig(projectRoot);
-  const configToken = config.githubToken;
-  if (configToken) return configToken;
-
-  return undefined;
+export function resolveGithubToken(_projectRoot: string): string | undefined {
+  return process.env.NINTHWAVE_GITHUB_TOKEN ?? undefined;
 }
 
 // ── Merge commit SHA ────────────────────────────────────────────────

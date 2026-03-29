@@ -209,15 +209,15 @@ describe("checkGitConfig", () => {
 });
 
 describe("checkNinthwaveConfig", () => {
-  it("passes when .ninthwave/config exists", () => {
+  it("passes when .ninthwave/config.json exists", () => {
     const repo = setupTempRepo();
     mkdirSync(join(repo, ".ninthwave"), { recursive: true });
-    writeFileSync(join(repo, ".ninthwave", "config"), "# config\n");
+    writeFileSync(join(repo, ".ninthwave", "config.json"), '{"review_external":false}\n');
     const result = checkNinthwaveConfig(repo);
     expect(result.status).toBe("pass");
   });
 
-  it("warns when .ninthwave/config does not exist", () => {
+  it("warns when .ninthwave/config.json does not exist", () => {
     const repo = setupTempRepo();
     const result = checkNinthwaveConfig(repo);
     expect(result.status).toBe("warn");
@@ -330,24 +330,11 @@ describe("checkGithubIdentity", () => {
     expect(result.message).toContain("fine-grained PAT");
   });
 
-  it("reports config file as source when env var is not set", () => {
+  it("returns info when env var is not set (no config file fallback)", () => {
     const repo = setupTempRepo();
-    mkdirSync(join(repo, ".ninthwave"), { recursive: true });
-    writeFileSync(
-      join(repo, ".ninthwave", "config"),
-      "github_token=ghp_from_config\n",
-    );
-    const runner = mockRunner({
-      "gh api -i /user": {
-        stdout: 'HTTP/2.0 200 OK\nX-OAuth-Scopes: repo, read:org\n\n{"login":"config-user"}',
-        stderr: "",
-        exitCode: 0,
-      },
-    });
-    const result = checkGithubIdentity(repo, runner);
-    expect(result.status).toBe("pass");
-    expect(result.message).toContain("config file");
-    expect(result.message).toContain("config-user");
+    const result = checkGithubIdentity(repo, allPassRunner());
+    expect(result.status).toBe("info");
+    expect(result.message).toContain("No custom GitHub token");
   });
 });
 
@@ -393,7 +380,7 @@ describe("runDoctor", () => {
   it("returns exit code 0 when all required checks pass", () => {
     const repo = setupTempRepo();
     mkdirSync(join(repo, ".ninthwave"), { recursive: true });
-    writeFileSync(join(repo, ".ninthwave", "config"), "# config\n");
+    writeFileSync(join(repo, ".ninthwave", "config.json"), '{"review_external":false}\n');
 
     const doctor = runDoctor(repo, allPassRunner());
     expect(doctor.exitCode).toBe(0);
@@ -411,10 +398,10 @@ describe("runDoctor", () => {
 
   it("counts warnings from recommended checks", () => {
     const repo = setupTempRepo();
-    // No .ninthwave/config, no pre-commit hook
+    // No .ninthwave/config.json, no pre-commit hook
     // All required pass, but recommended items warn
     const doctor = runDoctor(repo, allPassRunner());
-    // .ninthwave/config doesn't exist -> warn
+    // .ninthwave/config.json doesn't exist -> warn
     // Let's create config so we can count warnings from other checks
     expect(doctor.warnings).toBeGreaterThanOrEqual(0);
   });

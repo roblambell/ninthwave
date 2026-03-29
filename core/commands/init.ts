@@ -2,7 +2,7 @@
 //
 // Detects: (1) repo structure (monorepo vs single), (2) CI system (GitHub Actions),
 // (3) multiplexer (cmux), (4) AI tool config (.claude/, .opencode/, copilot).
-// Writes .ninthwave/config with detected settings, runs setup scaffolding,
+// Writes .ninthwave/config.json with detected settings, runs setup scaffolding,
 // creates agent symlinks, nw alias, and prints a summary.
 //
 // Merged from setup.ts: also handles prerequisite checking (warn mode),
@@ -515,54 +515,14 @@ export function detectAll(
 // --- Config generation ---
 
 /**
- * Generate .ninthwave/config content with detected settings.
+ * Generate .ninthwave/config.json content.
  */
-export function generateConfig(detection: DetectionResult): string {
-  const lines: string[] = [
-    "# ninthwave project configuration",
-    "# Auto-detected by `ninthwave init`",
-    "",
-  ];
-
-  // CI provider
-  if (detection.ci) {
-    lines.push(`ci_provider=${detection.ci}`);
-  } else {
-    lines.push("# ci_provider=github-actions");
-  }
-
-  // Test command
-  if (detection.testCommand) {
-    lines.push(`test_command=${detection.testCommand}`);
-  } else {
-    lines.push("# test_command=bun test");
-  }
-
-  // Mux
-  if (detection.mux) {
-    lines.push(`MUX=${detection.mux}`);
-  } else {
-    lines.push("# MUX=cmux");
-  }
-
-  // Repo type
-  lines.push(`REPO_TYPE=${detection.repoType}`);
-
-  // AI tools
-  if (detection.aiTools.length > 0) {
-    lines.push(`AI_TOOLS=${detection.aiTools.join(",")}`);
-  } else {
-    lines.push(`# AI_TOOLS=${AI_TOOL_PROFILES.map((p) => p.command).join(",")}`);
-  }
-
-  lines.push("");
-  lines.push(
-    "# File extensions for LOC counting in version-bump (space-separated glob patterns)",
-  );
-  lines.push('# LOC_EXTENSIONS="*.ts *.tsx *.js *.jsx *.py *.go"');
-  lines.push("");
-
-  return lines.join("\n") + "\n";
+export function generateConfig(_detection: DetectionResult): string {
+  const config = {
+    review_external: false,
+    schedule_enabled: false,
+  };
+  return JSON.stringify(config, null, 2) + "\n";
 }
 
 // --- Summary printing ---
@@ -823,19 +783,11 @@ export function initProject(
   );
 
   // 4. Write config with detected values (always overwrite -- init is authoritative)
-  const configPath = join(projectDir, ".ninthwave/config");
+  const configPath = join(projectDir, ".ninthwave/config.json");
   mkdirSync(join(projectDir, ".ninthwave"), { recursive: true });
   writeFileSync(configPath, generateConfig(detection));
   console.log("Configured:");
-  console.log(`  .ninthwave/config ${DIM}(auto-detected settings)${RESET}`);
-
-  // 4b. Write workspace config as JSON (structured data)
-  if (detection.workspace) {
-    const configJsonPath = join(projectDir, ".ninthwave/config.json");
-    const configJson = { workspace: detection.workspace };
-    writeFileSync(configJsonPath, JSON.stringify(configJson, null, 2) + "\n");
-    console.log(`  .ninthwave/config.json ${DIM}(workspace packages)${RESET}`);
-  }
+  console.log(`  .ninthwave/config.json ${DIM}(project settings)${RESET}`);
 
   // 5. Run scaffolding (with agent selection)
   scaffold(projectDir, bundleDir, opts?.agentSelection);

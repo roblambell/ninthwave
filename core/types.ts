@@ -48,13 +48,6 @@ export interface WorkspaceConfig {
   packages: WorkspacePackage[];
 }
 
-export interface ProjectConfig {
-  locExtensions: string;
-  reviewExternal?: string;
-  githubToken?: string;
-  scheduleEnabled?: string;
-}
-
 export interface WorktreeInfo {
   itemId: string;
   repoRoot: string;
@@ -96,10 +89,6 @@ export const ID_PATTERN_SOURCE = "[A-Z]-[A-Za-z0-9]+-[0-9]+[a-z]*";
 // Wildcard dependency pattern: matches patterns like "MUX-*", "H-MUX-*", "DF-*"
 // Captures an uppercase start, optional hyphen-separated segments, ending with -*
 export const WILDCARD_DEP_PATTERN = /[A-Z](?:[A-Za-z0-9]*-)*\*/g;
-
-// Default LOC extensions for version-bump
-export const DEFAULT_LOC_EXTENSIONS =
-  "*.ex *.exs *.ts *.tsx *.js *.jsx *.py *.go *.rs *.rb *.java *.kt *.swift";
 
 // ── Scheduled tasks ──────────────────────────────────────────────────
 

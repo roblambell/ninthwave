@@ -20,7 +20,8 @@ import {
   RESET,
 } from "../output.ts";
 import { run } from "../shell.ts";
-import type { RunResult, WorkItem, ProjectConfig } from "../types.ts";
+import type { RunResult, WorkItem } from "../types.ts";
+import type { ProjectConfig } from "../config.ts";
 import { initProject } from "./init.ts";
 import { getBundleDir } from "../paths.ts";
 import { isDaemonRunning } from "../daemon.ts";
@@ -453,7 +454,7 @@ export async function cmdNoArgs(
   // Load project config to determine review default
   const doLoadConfig = deps.loadConfig ?? loadConfig;
   const projectConfig = doLoadConfig(projectRoot);
-  const defaultReviewMode = projectConfig.reviewExternal === "true" ? "all" as const : "mine" as const;
+  const defaultReviewMode = projectConfig.review_external ? "all" as const : "mine" as const;
 
   const doInteractive = deps.runInteractiveFlow ?? runInteractiveFlow;
   const result = await doInteractive(todos, 4, { defaultReviewMode });

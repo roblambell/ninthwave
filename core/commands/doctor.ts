@@ -58,14 +58,14 @@ import { run as defaultRun } from "../shell.ts";
 const defaultShellRunner: ShellRunner = (cmd, args, opts) =>
   defaultRun(cmd, args, opts);
 
-/** Check: .ninthwave/config exists in the project. */
+/** Check: .ninthwave/config.json exists in the project. */
 export function checkNinthwaveConfig(projectRoot: string): CheckResult {
-  if (existsSync(join(projectRoot, ".ninthwave", "config"))) {
-    return { status: "pass", message: ".ninthwave/config found" };
+  if (existsSync(join(projectRoot, ".ninthwave", "config.json"))) {
+    return { status: "pass", message: ".ninthwave/config.json found" };
   }
   return {
     status: "warn",
-    message: ".ninthwave/config not found",
+    message: ".ninthwave/config.json not found",
     detail: "Run: nw init",
   };
 }
@@ -98,7 +98,7 @@ export function checkGithubIdentity(
     };
   }
 
-  const source = process.env.NINTHWAVE_GITHUB_TOKEN ? "env var" : "config file";
+  const source = "env var";
 
   // Validate the token by calling the /user endpoint with response headers
   const result = runner("gh", ["api", "-i", "/user"]);

@@ -128,6 +128,7 @@ afterEach(() => {
 
 // Intercept process.exit so `die()` throws instead of killing the test runner
 const origExit = process.exit;
+const origPrompt = globalThis.prompt;
 beforeAll(() => {
   process.exit = ((code?: number) => {
     throw new Error(`process.exit(${code})`);
@@ -135,12 +136,19 @@ beforeAll(() => {
 });
 afterAll(() => {
   process.exit = origExit;
+  globalThis.prompt = origPrompt;
 });
 
+/** Mock prompt to return a specific choice (1=PATCH, 2=MINOR, 3=MAJOR). */
+function mockPrompt(choice: string): void {
+  (globalThis as any).prompt = (_msg?: string) => choice;
+}
+
 describe("cmdVersionBump", { timeout: 30_000 }, () => {
-  it("< 50 LOC triggers PATCH bump", () => {
+  it("PATCH bump via prompt choice 1", () => {
     const repo = setupVersionRepo();
     addLocChanges(repo, 20);
+    mockPrompt("1"); // Choose PATCH
 
     const logs: string[] = [];
     const origLog = console.log;
@@ -162,9 +170,10 @@ describe("cmdVersionBump", { timeout: 30_000 }, () => {
     expect(changelog).toContain("[1.2.4]");
   });
 
-  it("50-200 LOC triggers PATCH bump", () => {
+  it("MINOR bump via prompt choice 2", () => {
     const repo = setupVersionRepo();
     addLocChanges(repo, 100);
+    mockPrompt("2"); // Choose MINOR
 
     const logs: string[] = [];
     const origLog = console.log;
@@ -176,16 +185,16 @@ describe("cmdVersionBump", { timeout: 30_000 }, () => {
     }
 
     const output = logs.join("\n");
-    expect(output).toContain("PATCH");
-    expect(output).toContain("1.2.4");
+    expect(output).toContain("1.3.0");
 
     const version = readFileSync(join(repo, "VERSION"), "utf-8").trim();
-    expect(version).toBe("1.2.4");
+    expect(version).toBe("1.3.0");
   });
 
-  it("exactly 50 LOC triggers PATCH bump (boundary)", () => {
+  it("MAJOR bump via prompt choice 3", () => {
     const repo = setupVersionRepo();
     addLocChanges(repo, 50);
+    mockPrompt("3"); // Choose MAJOR
 
     const logs: string[] = [];
     const origLog = console.log;
@@ -197,8 +206,10 @@ describe("cmdVersionBump", { timeout: 30_000 }, () => {
     }
 
     const output = logs.join("\n");
-    expect(output).toContain("PATCH");
-    expect(output).toContain("1.2.4");
+    expect(output).toContain("2.0.0");
+
+    const version = readFileSync(join(repo, "VERSION"), "utf-8").trim();
+    expect(version).toBe("2.0.0");
   });
 
   it("no commits since last bump reports nothing to do", () => {
@@ -243,6 +254,8 @@ describe("cmdVersionBump", { timeout: 30_000 }, () => {
       "--quiet",
     ]);
 
+    mockPrompt("1"); // Choose PATCH
+
     const logs: string[] = [];
     const origLog = console.log;
     console.log = (msg: string) => logs.push(String(msg));
@@ -272,6 +285,7 @@ describe("cmdVersionBump", { timeout: 30_000 }, () => {
 
   it("sequential PATCH bumps increment correctly", () => {
     const repo = setupVersionRepo();
+    mockPrompt("1"); // Choose PATCH
 
     // First bump: 1.2.3 -> 1.2.4
     addLocChanges(repo, 10);
@@ -301,5 +315,27 @@ describe("cmdVersionBump", { timeout: 30_000 }, () => {
 
     const v2 = readFileSync(join(repo, "VERSION"), "utf-8").trim();
     expect(v2).toBe("1.2.5");
+  });
+
+  it("always prompts for bump level regardless of LOC count", () => {
+    const repo = setupVersionRepo();
+    addLocChanges(repo, 5); // Very small change
+    mockPrompt("1"); // Choose PATCH
+
+    const logs: string[] = [];
+    const origLog = console.log;
+    console.log = (msg: string) => logs.push(String(msg));
+    try {
+      cmdVersionBump(repo);
+    } finally {
+      console.log = origLog;
+    }
+
+    const output = logs.join("\n");
+    // Should show prompt choices, not auto-bump
+    expect(output).toContain("Choose bump level");
+    expect(output).toContain("PATCH");
+    expect(output).toContain("MINOR");
+    expect(output).toContain("MAJOR");
   });
 });

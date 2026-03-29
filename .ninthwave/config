@@ -1,5 +1,0 @@
-# ninthwave project configuration
-# All settings are optional -- sensible defaults are used.
-
-# File extensions for LOC counting in version-bump (space-separated glob patterns)
-# LOC_EXTENSIONS="*.ts *.tsx *.js *.jsx *.py *.go"

@@ -8,10 +8,8 @@ import { die, info, BOLD, YELLOW, GREEN, RESET } from "../core/output.ts";
 import {
   getCurrentBranch,
   logOneline,
-  diffStat,
 } from "../core/git.ts";
 import { run } from "../core/shell.ts";
-import { loadConfig } from "../core/config.ts";
 
 export function cmdVersionBump(projectRoot: string): void {
   const versionFile = join(projectRoot, "VERSION");
@@ -102,58 +100,36 @@ export function cmdVersionBump(projectRoot: string): void {
     }
   }
 
-  // Calculate net LOC changed
-  const config = loadConfig(projectRoot);
-  const extensions = config.locExtensions.split(/\s+/).filter(Boolean);
-  const { insertions, deletions } = diffStat(
-    projectRoot,
-    commitRange,
-    extensions,
-  );
-  const totalLoc = insertions + deletions;
-
-  console.log(
-    `Net LOC changed: ${BOLD}${totalLoc}${RESET} (+${insertions} -${deletions})`,
-  );
-
   // Parse version parts: MAJOR.MINOR.PATCH
   const parts = currentVersion.split(".");
   let vMajor = parseInt(parts[0] ?? "0", 10);
   let vMinor = parseInt(parts[1] ?? "0", 10);
   let vPatch = parseInt(parts[2] ?? "0", 10);
 
-  let newVersion = "";
-  if (totalLoc <= 200) {
-    vPatch++;
-    newVersion = `${vMajor}.${vMinor}.${vPatch}`;
-    info(
-      `Auto-bumping PATCH (<= 200 LOC): ${currentVersion} -> ${newVersion}`,
-    );
-  } else {
-    console.log();
-    console.log(
-      `${YELLOW}> 200 LOC changed. Choose bump level:${RESET}`,
-    );
-    console.log(`  1) MINOR (${vMajor}.${vMinor + 1}.0)`);
-    console.log(`  2) MAJOR (${vMajor + 1}.0.0)`);
-    console.log(`  3) PATCH (${vMajor}.${vMinor}.${vPatch + 1})`);
+  console.log();
+  console.log(
+    `${YELLOW}Choose bump level:${RESET}`,
+  );
+  console.log(`  1) PATCH (${vMajor}.${vMinor}.${vPatch + 1})`);
+  console.log(`  2) MINOR (${vMajor}.${vMinor + 1}.0)`);
+  console.log(`  3) MAJOR (${vMajor + 1}.0.0)`);
 
-    const choice = prompt("Choice [1/2/3]: ");
-    switch (choice) {
-      case "1":
-        newVersion = `${vMajor}.${vMinor + 1}.0`;
-        break;
-      case "2":
-        newVersion = `${vMajor + 1}.0.0`;
-        break;
-      case "3":
-        newVersion = `${vMajor}.${vMinor}.${vPatch + 1}`;
-        break;
-      default:
-        die("Invalid choice");
-    }
-    info(`Bumping to: ${newVersion}`);
+  let newVersion = "";
+  const choice = prompt("Choice [1/2/3]: ");
+  switch (choice) {
+    case "1":
+      newVersion = `${vMajor}.${vMinor}.${vPatch + 1}`;
+      break;
+    case "2":
+      newVersion = `${vMajor}.${vMinor + 1}.0`;
+      break;
+    case "3":
+      newVersion = `${vMajor + 1}.0.0`;
+      break;
+    default:
+      die("Invalid choice");
   }
+  info(`Bumping to: ${newVersion}`);
 
   // Generate CHANGELOG entry
   const date = new Date().toISOString().slice(0, 10);

@@ -36,7 +36,7 @@ describe("smoke: nw init", () => {
     // Verify directory structure was created
     expect(existsSync(join(repo, ".ninthwave"))).toBe(true);
     expect(existsSync(join(repo, ".ninthwave", "work"))).toBe(true);
-    expect(existsSync(join(repo, ".ninthwave", "config"))).toBe(true);
+    expect(existsSync(join(repo, ".ninthwave", "config.json"))).toBe(true);
     expect(existsSync(join(repo, ".ninthwave", "friction"))).toBe(true);
   });
 

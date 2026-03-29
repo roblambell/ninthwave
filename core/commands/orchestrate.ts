@@ -1950,8 +1950,8 @@ export async function cmdOrchestrate(
   // --review-wip-limit 0 explicitly disables reviews, overriding config
   const reviewExternalEnabled = reviewWipLimit === 0
     ? false
-    : (reviewExternal || projectConfig.reviewExternal === "true");
-  const scheduleEnabled = projectConfig.scheduleEnabled === "true";
+    : (reviewExternal || projectConfig.review_external);
+  const scheduleEnabled = projectConfig.schedule_enabled;
 
   // State persistence: serialize state each poll cycle so the status pane can display all items.
   // Written in both daemon and interactive mode -- the status pane reads this file to show

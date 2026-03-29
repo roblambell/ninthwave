@@ -2,8 +2,6 @@
 // Uses vi.spyOn (not vi.mock) to avoid global module pollution in bun test.
 
 import { describe, it, expect, vi, beforeEach, afterEach, afterAll } from "vitest";
-import { mkdirSync, writeFileSync } from "fs";
-import { join } from "path";
 import * as shell from "../core/shell.ts";
 import { prMerge, prComment, getRepoOwner, resolveGithubToken, applyGithubToken, setCommitStatus, prHeadSha } from "../core/gh.ts";
 import { setupTempRepo, cleanupTempRepos } from "./helpers.ts";
@@ -221,12 +219,6 @@ describe("setCommitStatus", () => {
 // ── prHeadSha ──────────────────────────────────────────────────────
 
 describe("prHeadSha", () => {
-  // prHeadSha delegates to prView which delegates to run -- tested via
-  // the setCommitStatus orchestrator action in orchestrator.test.ts.
-  // Direct unit tests are omitted because bun test's shared-process model
-  // causes vi.spyOn(shell, "run") to leak across files, making prView's
-  // JSON.parse path unreliable in the full suite.
-
   it("returns null when prView fails", () => {
     runSpy.mockReturnValue({ stdout: "", stderr: "not found", exitCode: 1 });
 
@@ -261,41 +253,17 @@ describe("resolveGithubToken", () => {
     expect(token).toBe("ghp_env_token_123");
   });
 
-  it("returns config file token when env var is not set", () => {
+  it("returns undefined when env var is not set", () => {
     const repo = setupTempRepo();
-    const configDir = join(repo, ".ninthwave");
-    mkdirSync(configDir, { recursive: true });
-    writeFileSync(join(configDir, "config"), "github_token=ghp_config_token_456\n");
-
     const token = resolveGithubToken(repo);
-    expect(token).toBe("ghp_config_token_456");
+    expect(token).toBeUndefined();
   });
 
-  it("env var takes precedence over config file", () => {
+  it("env var is the only source", () => {
     process.env.NINTHWAVE_GITHUB_TOKEN = "ghp_env_wins";
     const repo = setupTempRepo();
-    const configDir = join(repo, ".ninthwave");
-    mkdirSync(configDir, { recursive: true });
-    writeFileSync(join(configDir, "config"), "github_token=ghp_config_loses\n");
-
     const token = resolveGithubToken(repo);
     expect(token).toBe("ghp_env_wins");
-  });
-
-  it("returns undefined when no custom token is configured", () => {
-    const repo = setupTempRepo();
-    const token = resolveGithubToken(repo);
-    expect(token).toBeUndefined();
-  });
-
-  it("returns undefined when config exists but has no github_token key", () => {
-    const repo = setupTempRepo();
-    const configDir = join(repo, ".ninthwave");
-    mkdirSync(configDir, { recursive: true });
-    writeFileSync(join(configDir, "config"), "review_external=true\n");
-
-    const token = resolveGithubToken(repo);
-    expect(token).toBeUndefined();
   });
 });
 
@@ -332,17 +300,6 @@ describe("applyGithubToken", () => {
     applyGithubToken(repo);
 
     expect(process.env.GH_TOKEN).toBe("ghp_apply_test");
-  });
-
-  it("sets GH_TOKEN from config file", () => {
-    const repo = setupTempRepo();
-    const configDir = join(repo, ".ninthwave");
-    mkdirSync(configDir, { recursive: true });
-    writeFileSync(join(configDir, "config"), "github_token=ghp_from_config\n");
-
-    applyGithubToken(repo);
-
-    expect(process.env.GH_TOKEN).toBe("ghp_from_config");
   });
 
   it("does not set GH_TOKEN when no custom token is configured", () => {

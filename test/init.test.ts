@@ -422,7 +422,7 @@ describe("detectTestCommand", () => {
 // --- generateConfig ---
 
 describe("generateConfig", () => {
-  it("writes detected CI value", () => {
+  it("outputs valid JSON with both config keys", () => {
     const detection: DetectionResult = {
       ci: "github-actions",
       testCommand: "bun test",
@@ -434,109 +434,40 @@ describe("generateConfig", () => {
     };
 
     const config = generateConfig(detection);
+    const parsed = JSON.parse(config);
 
-    expect(config).toContain("ci_provider=github-actions");
+    expect(parsed.review_external).toBe(false);
+    expect(parsed.schedule_enabled).toBe(false);
   });
 
-  it("comments out ci_provider when not detected", () => {
+  it("does not include dead config keys", () => {
     const detection: DetectionResult = {
-      ci: null,
-      testCommand: null,
+      ci: "github-actions",
+      testCommand: "bun test",
       mux: "cmux",
-      aiTools: [],
-      repoType: "single",
-      observabilityBackends: [],
-      workspace: null,
-    };
-
-    const config = generateConfig(detection);
-
-    expect(config).toContain("# ci_provider=github-actions");
-    expect(config).not.toMatch(/^ci_provider=/m);
-  });
-
-  it("writes detected MUX value", () => {
-    const detection: DetectionResult = {
-      ci: null,
-      testCommand: null,
-      mux: "cmux",
-      aiTools: [],
-      repoType: "single",
-      observabilityBackends: [],
-      workspace: null,
-    };
-
-    const config = generateConfig(detection);
-
-    expect(config).toContain("MUX=cmux");
-  });
-
-  it("comments out MUX when not detected", () => {
-    const detection: DetectionResult = {
-      ci: null,
-      testCommand: null,
-      mux: null,
-      aiTools: [],
-      repoType: "single",
-      observabilityBackends: [],
-      workspace: null,
-    };
-
-    const config = generateConfig(detection);
-
-    expect(config).toContain("# MUX=cmux");
-    expect(config).not.toMatch(/^MUX=/m);
-  });
-
-  it("writes REPO_TYPE", () => {
-    const detection: DetectionResult = {
-      ci: null,
-      testCommand: null,
-      mux: null,
-      aiTools: [],
+      aiTools: ["claude", "opencode"],
       repoType: "monorepo",
       observabilityBackends: [],
       workspace: null,
     };
 
     const config = generateConfig(detection);
+    const parsed = JSON.parse(config);
 
-    expect(config).toContain("REPO_TYPE=monorepo");
+    // Dead keys should not appear
+    expect(parsed).not.toHaveProperty("ci_provider");
+    expect(parsed).not.toHaveProperty("test_command");
+    expect(parsed).not.toHaveProperty("MUX");
+    expect(parsed).not.toHaveProperty("REPO_TYPE");
+    expect(parsed).not.toHaveProperty("AI_TOOLS");
+    expect(parsed).not.toHaveProperty("LOC_EXTENSIONS");
+    expect(parsed).not.toHaveProperty("github_token");
+
+    // Only known keys
+    expect(Object.keys(parsed)).toEqual(["review_external", "schedule_enabled"]);
   });
 
-  it("writes AI_TOOLS as comma-separated list", () => {
-    const detection: DetectionResult = {
-      ci: null,
-      testCommand: null,
-      mux: null,
-      aiTools: ["claude", "opencode"],
-      repoType: "single",
-      observabilityBackends: [],
-      workspace: null,
-    };
-
-    const config = generateConfig(detection);
-
-    expect(config).toContain("AI_TOOLS=claude,opencode");
-  });
-
-  it("writes test_command when detected", () => {
-    const detection: DetectionResult = {
-      ci: "github-actions",
-      testCommand: "bun test",
-      mux: null,
-      aiTools: [],
-      repoType: "single",
-      observabilityBackends: [],
-      workspace: null,
-    };
-
-    const config = generateConfig(detection);
-
-    expect(config).toContain("test_command=bun test");
-  });
-
-  it("comments out test_command when not detected", () => {
+  it("produces pretty-printed JSON ending with newline", () => {
     const detection: DetectionResult = {
       ci: null,
       testCommand: null,
@@ -549,25 +480,10 @@ describe("generateConfig", () => {
 
     const config = generateConfig(detection);
 
-    expect(config).toContain("# test_command=bun test");
-    expect(config).not.toMatch(/^test_command=/m);
-  });
-
-  it("writes both ci_provider and test_command together", () => {
-    const detection: DetectionResult = {
-      ci: "github-actions",
-      testCommand: "bun test",
-      mux: "cmux",
-      aiTools: ["claude"],
-      repoType: "single",
-      observabilityBackends: [],
-      workspace: null,
-    };
-
-    const config = generateConfig(detection);
-
-    expect(config).toContain("ci_provider=github-actions");
-    expect(config).toContain("test_command=bun test");
+    // Pretty-printed with 2-space indent
+    expect(config).toContain("  ");
+    // Ends with newline
+    expect(config.endsWith("\n")).toBe(true);
   });
 });
 
@@ -624,7 +540,7 @@ describe("detectObservabilityBackends", () => {
 // --- generateConfig with observability backends ---
 
 describe("generateConfig observability", () => {
-  it("omits observability config keys (removed in 0.2.0)", () => {
+  it("omits observability config keys", () => {
     const detection: DetectionResult = {
       ci: null,
       testCommand: null,
@@ -636,12 +552,10 @@ describe("generateConfig observability", () => {
     };
 
     const config = generateConfig(detection);
+    const parsed = JSON.parse(config);
 
-    expect(config).not.toContain("sentry_org");
-    expect(config).not.toContain("sentry_project");
-    expect(config).not.toContain("pagerduty_service_id");
-    expect(config).not.toContain("pagerduty_from_email");
-    expect(config).not.toContain("Observability backends");
+    expect(parsed).not.toHaveProperty("sentry_org");
+    expect(parsed).not.toHaveProperty("pagerduty_service_id");
   });
 });
 
@@ -680,7 +594,7 @@ describe("detectAll", () => {
 // --- initProject (integration) ---
 
 describe("initProject", () => {
-  it("writes .ninthwave/config with detected values", () => {
+  it("writes .ninthwave/config.json with JSON content", () => {
     const projectDir = setupTempRepo();
     const bundleDir = createFakeBundle(projectDir + "-bundle-parent");
 
@@ -704,13 +618,12 @@ describe("initProject", () => {
     initProject(projectDir, bundleDir, deps);
 
     const config = readFileSync(
-      join(projectDir, ".ninthwave/config"),
+      join(projectDir, ".ninthwave/config.json"),
       "utf-8",
     );
-    expect(config).toContain("ci_provider=github-actions");
-    expect(config).toContain("test_command=bun test");
-    expect(config).toContain("MUX=cmux");
-    expect(config).toContain("REPO_TYPE=single");
+    const parsed = JSON.parse(config);
+    expect(parsed.review_external).toBe(false);
+    expect(parsed.schedule_enabled).toBe(false);
   });
 
   it("creates a full working setup on a fresh repo", () => {
@@ -725,7 +638,7 @@ describe("initProject", () => {
     const detection = initProject(projectDir, bundleDir, deps);
 
     // Config written
-    expect(existsSync(join(projectDir, ".ninthwave/config"))).toBe(true);
+    expect(existsSync(join(projectDir, ".ninthwave/config.json"))).toBe(true);
 
     // Scaffolding completed
     expect(existsSync(join(projectDir, ".ninthwave/work/.gitkeep"))).toBe(true);
@@ -773,7 +686,7 @@ describe("initProject", () => {
 
     expect(detection.mux).toBeNull();
     // Setup still completed
-    expect(existsSync(join(projectDir, ".ninthwave/config"))).toBe(true);
+    expect(existsSync(join(projectDir, ".ninthwave/config.json"))).toBe(true);
     expect(existsSync(join(projectDir, ".ninthwave/work/.gitkeep"))).toBe(true);
     expect(existsSync(join(projectDir, ".ninthwave/friction/.gitkeep"))).toBe(true);
   });
@@ -802,21 +715,16 @@ describe("initProject", () => {
     expect(readFileSync(join(projectDir, ".ninthwave/friction/.gitkeep"), "utf-8")).toBe("");
   });
 
-  it("overwrites .ninthwave/config with fresh detection (init is authoritative)", () => {
+  it("overwrites .ninthwave/config.json with fresh detection (init is authoritative)", () => {
     const projectDir = setupTempRepo();
     const bundleDir = createFakeBundle(projectDir + "-bundle-parent");
 
-    // Pre-create config with old values
+    // Pre-create config.json with old values
     mkdirSync(join(projectDir, ".ninthwave"), { recursive: true });
     writeFileSync(
-      join(projectDir, ".ninthwave/config"),
-      "CI=circleci\nMUX=old-value\n",
+      join(projectDir, ".ninthwave/config.json"),
+      JSON.stringify({ review_external: true, schedule_enabled: true }),
     );
-
-    // Create GitHub Actions so CI detection finds something
-    const workflowsDir = join(projectDir, ".github", "workflows");
-    mkdirSync(workflowsDir, { recursive: true });
-    writeFileSync(join(workflowsDir, "ci.yml"), "name: CI\n");
 
     const deps: InitDeps = {
       commandExists: ((cmd: string) => cmd === "cmux") as CommandChecker,
@@ -825,14 +733,13 @@ describe("initProject", () => {
 
     initProject(projectDir, bundleDir, deps);
 
-    const config = readFileSync(
-      join(projectDir, ".ninthwave/config"),
+    const config = JSON.parse(readFileSync(
+      join(projectDir, ".ninthwave/config.json"),
       "utf-8",
-    );
-    // Should reflect new detection, not old values
-    expect(config).toContain("ci_provider=github-actions");
-    expect(config).toContain("MUX=cmux");
-    expect(config).not.toContain("circleci");
+    ));
+    // Should reflect fresh defaults (init always writes defaults)
+    expect(config.review_external).toBe(false);
+    expect(config.schedule_enabled).toBe(false);
   });
 
   it("prints detection summary to console", () => {
@@ -1403,27 +1310,12 @@ describe("detectWorkspace", () => {
   });
 });
 
-// --- initProject workspace config.json ---
+// --- initProject config.json ---
 
-describe("initProject workspace config.json", () => {
-  it("writes .ninthwave/config.json for pnpm monorepo", () => {
+describe("initProject config.json", () => {
+  it("writes .ninthwave/config.json with project settings", () => {
     const projectDir = setupTempRepo();
     const bundleDir = createFakeBundle(projectDir + "-bundle-parent");
-
-    writeFileSync(
-      join(projectDir, "pnpm-workspace.yaml"),
-      "packages:\n  - packages/*\n",
-    );
-    mkdirSync(join(projectDir, "packages", "api"), { recursive: true });
-    mkdirSync(join(projectDir, "packages", "web"), { recursive: true });
-    writeFileSync(
-      join(projectDir, "packages", "api", "package.json"),
-      JSON.stringify({ name: "api", scripts: { test: "vitest" } }),
-    );
-    writeFileSync(
-      join(projectDir, "packages", "web", "package.json"),
-      JSON.stringify({ name: "web", scripts: { "test:ci": "vitest --ci" } }),
-    );
 
     const deps: InitDeps = {
       commandExists: (() => false) as CommandChecker,
@@ -1436,56 +1328,15 @@ describe("initProject workspace config.json", () => {
     expect(existsSync(configJsonPath)).toBe(true);
 
     const configJson = JSON.parse(readFileSync(configJsonPath, "utf-8"));
-    expect(configJson.workspace).toBeDefined();
-    expect(configJson.workspace.tool).toBe("pnpm");
-    expect(configJson.workspace.root).toBe(".");
-    expect(configJson.workspace.packages).toHaveLength(2);
-
-    const api = configJson.workspace.packages.find(
-      (p: { name: string }) => p.name === "api",
-    );
-    expect(api.path).toBe("packages/api");
-    expect(api.testCmd).toBe("pnpm test --filter api");
-
-    const web = configJson.workspace.packages.find(
-      (p: { name: string }) => p.name === "web",
-    );
-    expect(web.testCmd).toBe("pnpm run test:ci --filter web");
-  });
-
-  it("does not write .ninthwave/config.json for single-package repo", () => {
-    const projectDir = setupTempRepo();
-    const bundleDir = createFakeBundle(projectDir + "-bundle-parent");
-
-    writeFileSync(
-      join(projectDir, "package.json"),
-      JSON.stringify({ name: "my-app", scripts: { test: "jest" } }),
-    );
-
-    const deps: InitDeps = {
-      commandExists: (() => false) as CommandChecker,
-      getEnv: () => undefined,
-    };
-
-    initProject(projectDir, bundleDir, deps);
-
-    expect(existsSync(join(projectDir, ".ninthwave/config.json"))).toBe(false);
+    expect(configJson.review_external).toBe(false);
+    expect(configJson.schedule_enabled).toBe(false);
+    // No workspace data in config.json
+    expect(configJson).not.toHaveProperty("workspace");
   });
 
   it("config.json round-trips correctly", () => {
     const projectDir = setupTempRepo();
     const bundleDir = createFakeBundle(projectDir + "-bundle-parent");
-
-    writeFileSync(
-      join(projectDir, "package.json"),
-      JSON.stringify({ workspaces: ["packages/*"] }),
-    );
-    writeFileSync(join(projectDir, "yarn.lock"), "");
-    mkdirSync(join(projectDir, "packages", "ui"), { recursive: true });
-    writeFileSync(
-      join(projectDir, "packages", "ui", "package.json"),
-      JSON.stringify({ name: "ui", scripts: { test: "jest" } }),
-    );
 
     const deps: InitDeps = {
       commandExists: (() => false) as CommandChecker,
@@ -1502,7 +1353,7 @@ describe("initProject workspace config.json", () => {
     expect(rewritten).toBe(written);
   });
 
-  it("writes config.json for yarn workspaces with turborepo", () => {
+  it("config.json does not contain workspace data", () => {
     const projectDir = setupTempRepo();
     const bundleDir = createFakeBundle(projectDir + "-bundle-parent");
 
@@ -1531,10 +1382,9 @@ describe("initProject workspace config.json", () => {
     const configJson = JSON.parse(
       readFileSync(join(projectDir, ".ninthwave/config.json"), "utf-8"),
     );
-    expect(configJson.workspace.tool).toBe("turborepo");
-    expect(configJson.workspace.packages[0].testCmd).toBe(
-      "yarn workspace app test",
-    );
+    // Workspace data is no longer written to config.json
+    expect(configJson).not.toHaveProperty("workspace");
+    expect(Object.keys(configJson)).toEqual(["review_external", "schedule_enabled"]);
   });
 });
 
@@ -1573,7 +1423,7 @@ describe("initProject -- prerequisite checking", () => {
     const detection = initProject(projectDir, bundleDir, deps);
 
     // Setup still completed
-    expect(existsSync(join(projectDir, ".ninthwave/config"))).toBe(true);
+    expect(existsSync(join(projectDir, ".ninthwave/config.json"))).toBe(true);
     expect(existsSync(join(projectDir, ".ninthwave/work/.gitkeep"))).toBe(true);
     expect(existsSync(join(projectDir, ".ninthwave/friction/.gitkeep"))).toBe(true);
     expect(detection).toBeDefined();
@@ -1621,7 +1471,7 @@ describe("initProject -- prerequisite checking", () => {
     const detection = initProject(projectDir, bundleDir, deps, opts);
 
     expect(detection).toBeDefined();
-    expect(existsSync(join(projectDir, ".ninthwave/config"))).toBe(true);
+    expect(existsSync(join(projectDir, ".ninthwave/config.json"))).toBe(true);
   });
 });
 
@@ -1871,7 +1721,7 @@ describe("initProject -- idempotency", () => {
 
     // Capture steady state
     const steadyConfig = readFileSync(
-      join(projectDir, ".ninthwave/config"),
+      join(projectDir, ".ninthwave/config.json"),
       "utf-8",
     );
     const steadyGitignore = readFileSync(
@@ -1883,7 +1733,7 @@ describe("initProject -- idempotency", () => {
     initProject(projectDir, bundleDir, deps);
 
     // Verify state is identical to second run
-    expect(readFileSync(join(projectDir, ".ninthwave/config"), "utf-8")).toBe(
+    expect(readFileSync(join(projectDir, ".ninthwave/config.json"), "utf-8")).toBe(
       steadyConfig,
     );
     expect(readFileSync(join(projectDir, ".gitignore"), "utf-8")).toBe(
@@ -1942,8 +1792,8 @@ describe("initProject -- preserves existing files", () => {
 
     initProject(projectDir, bundleDir, deps);
 
-    // .ninthwave/config exists
-    expect(existsSync(join(projectDir, ".ninthwave/config"))).toBe(true);
+    // .ninthwave/config.json exists
+    expect(existsSync(join(projectDir, ".ninthwave/config.json"))).toBe(true);
   });
 
   it("creates .ninthwave/work/ directory", () => {
