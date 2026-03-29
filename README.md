@@ -12,7 +12,7 @@
 </p>
 
 <p align="center">
-  <a href="https://ninthwave.sh"><img src="docs/assets/hero.gif" alt="Ninthwave: Orchestrator, Implementer, and Reviewer in parallel cmux sessions" width="800" /></a>
+  <a href="https://ninthwave.sh"><img src="docs/assets/hero-orchestrator.png" alt="Ninthwave orchestrator: status table showing parallel work items with states, throughput, and merged PRs" width="740" /></a>
 </p>
 
 Ninthwave orchestrates parallel AI coding sessions from markdown work items.
