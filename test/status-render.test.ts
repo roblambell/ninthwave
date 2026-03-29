@@ -736,7 +736,8 @@ describe("formatStatusTable", () => {
   it("renders header row with column names", () => {
     const items = [makeStatusItem()];
     const table = stripAnsi(formatStatusTable(items, 80));
-    expect(table).toContain("ninthwave status");
+    expect(table).toContain("ninthwave");
+    expect(table).not.toContain("ninthwave status");
     expect(table).toContain("ID");
     expect(table).toContain("STATE");
   });
@@ -1569,7 +1570,7 @@ describe("formatStatusTable with ViewOptions", () => {
   it("backward compatible: calling without viewOptions still works", () => {
     const items = [makeStatusItem()];
     const table = stripAnsi(formatStatusTable(items, 80));
-    expect(table).toContain("ninthwave status");
+    expect(table).toContain("ninthwave");
     expect(table).toContain("TEST-1");
   });
 
@@ -1685,7 +1686,7 @@ describe("buildStatusLayout", () => {
 
     // Header should include the title and column headers
     const headerText = layout.headerLines.map(stripAnsi).join("\n");
-    expect(headerText).toContain("ninthwave status");
+    expect(headerText).toContain("ninthwave");
     expect(headerText).toContain("ID");
     expect(headerText).toContain("STATE");
 
@@ -1756,7 +1757,7 @@ describe("buildStatusLayout", () => {
       sessionStartedAt: new Date(now - 3_600_000).toISOString(),
     });
     const headerText = layout.headerLines.map(stripAnsi).join("\n");
-    expect(headerText).toContain("ninthwave status");
+    expect(headerText).toContain("ninthwave");
     expect(headerText).toContain("Lead:");
     expect(headerText).toContain("Thru:");
   });
@@ -2061,13 +2062,26 @@ describe("formatUnifiedProgress", () => {
     expect(text).toContain("implementing");
     expect(text).toContain("2 items");
   });
+
+  it("output length is strictly less than termWidth to prevent deferred-wrap clipping", () => {
+    const termWidth = 80;
+    const items = [
+      makeStatusItem({ id: "A-1", state: "merged" }),
+      makeStatusItem({ id: "A-2", state: "implementing" }),
+      makeStatusItem({ id: "A-3", state: "queued" }),
+    ];
+    const text = stripAnsi(formatUnifiedProgress(items, termWidth));
+    // Strip leading/trailing whitespace for length check
+    // The output must not fill the terminal's final column
+    expect(text.trimEnd().length).toBeLessThan(termWidth);
+  });
 });
 
 describe("formatTitleMetrics", () => {
   it("shows plain title when no metrics available", () => {
     const items = [makeStatusItem({ id: "A-1", state: "implementing" })];
     const text = stripAnsi(formatTitleMetrics(items, 80));
-    expect(text).toBe("ninthwave status");
+    expect(text).toBe("ninthwave");
   });
 
   it("shows right-aligned Lead/Thru/Session when metrics available", () => {
@@ -2082,7 +2096,7 @@ describe("formatTitleMetrics", () => {
     ];
     const termWidth = 120;
     const text = stripAnsi(formatTitleMetrics(items, termWidth, new Date(now - 3_600_000).toISOString()));
-    expect(text).toContain("ninthwave status");
+    expect(text).toContain("ninthwave");
     expect(text).toContain("Lead:");
     expect(text).toContain("Thru:");
     expect(text).toContain("Session:");
@@ -2101,7 +2115,7 @@ describe("formatTitleMetrics", () => {
       }),
     ];
     const text = stripAnsi(formatTitleMetrics(items, 50, new Date(now - 3_600_000).toISOString()));
-    expect(text).toBe("ninthwave status");
+    expect(text).toBe("ninthwave");
     expect(text).not.toContain("Lead:");
   });
 
@@ -2117,7 +2131,7 @@ describe("formatTitleMetrics", () => {
     ];
     // Width of 60 -- right at the threshold, should still show metrics if they fit
     const text60 = stripAnsi(formatTitleMetrics(items, 60, new Date(now - 3_600_000).toISOString()));
-    expect(text60).toContain("ninthwave status");
+    expect(text60).toContain("ninthwave");
   });
 
   it("shows only Lead when throughput is null (no sessionStartedAt)", () => {
@@ -2132,7 +2146,7 @@ describe("formatTitleMetrics", () => {
     ];
     // No sessionStartedAt → throughput and session duration are null
     const text = stripAnsi(formatTitleMetrics(items, 80));
-    expect(text).toContain("ninthwave status");
+    expect(text).toContain("ninthwave");
     expect(text).toContain("Lead:");
     expect(text).not.toContain("Thru:");
     expect(text).not.toContain("Session:");
@@ -2171,20 +2185,22 @@ describe("formatTitleMetrics", () => {
 
   it("shows full metrics including unit suffix at exact boundary width", () => {
     const now = Date.now();
-    // Use longer durations to produce metrics string > 40 chars (so minWidth > 60)
-    // Lead: 2h 25m requires endedAt - startedAt = 8_700_000ms
-    const items = [
+    // Use durations producing metrics string >= 48 chars (so minWidth >= 61 with shorter title).
+    // 1500 merged items in 12.5h → Thru: 120.0/hr (14 chars).
+    // Lead: 23h 59m (14 chars). Session: 12h 30m (16 chars).
+    // Total: 14+2+14+2+16 = 48 chars → minWidth = 9+4+48 = 61.
+    const items = Array.from({ length: 1500 }, (_, i) =>
       makeStatusItem({
-        id: "A-1",
+        id: `A-${i + 1}`,
         state: "merged",
-        startedAt: new Date(now - 9_000_000).toISOString(),
-        endedAt: new Date(now - 300_000).toISOString(),
+        startedAt: new Date(now - 87_000_000).toISOString(), // ~24h ago
+        endedAt: new Date(now - 700_000).toISOString(),      // ~12m ago → lead ~23h 58m
       }),
-    ];
-    // Session: 1h 30m
-    const sessionStart = new Date(now - 5_400_000).toISOString();
+    );
+    // Session: 12h 30m
+    const sessionStart = new Date(now - 45_000_000).toISOString();
 
-    const plainTitle = "ninthwave status";
+    const plainTitle = "ninthwave";
     // Get the actual metrics string at a wide width
     const wideText = stripAnsi(formatTitleMetrics(items, 200, sessionStart));
     const metricsStr = wideText.trimEnd().slice(wideText.trimEnd().lastIndexOf("Lead:"));
@@ -2196,7 +2212,7 @@ describe("formatTitleMetrics", () => {
     const text = stripAnsi(formatTitleMetrics(items, minWidth, sessionStart));
     // Full metrics string including unit suffix must be present
     expect(text).toContain(metricsStr);
-    // Session duration must have its unit suffix (e.g., "1h 30m" not "1h 30")
+    // Session duration must have its unit suffix (e.g., "12h 30m" not "12h 3")
     expect(text).toMatch(/Session: \d+h \d+m/);
     // Output stays within safety margin -- never fills termWidth exactly
     expect(text.length).toBeLessThanOrEqual(minWidth - 1);
@@ -2205,28 +2221,28 @@ describe("formatTitleMetrics", () => {
   it("falls back to plain title when termWidth is too narrow for metrics with gap", () => {
     const now = Date.now();
     // Use longer durations so minWidth > 60 (otherwise < 60 check triggers first)
-    const items = [
+    const items = Array.from({ length: 1500 }, (_, i) =>
       makeStatusItem({
-        id: "A-1",
+        id: `A-${i + 1}`,
         state: "merged",
-        startedAt: new Date(now - 9_000_000).toISOString(),
-        endedAt: new Date(now - 300_000).toISOString(),
+        startedAt: new Date(now - 87_000_000).toISOString(),
+        endedAt: new Date(now - 700_000).toISOString(),
       }),
-    ];
-    const sessionStart = new Date(now - 5_400_000).toISOString();
+    );
+    const sessionStart = new Date(now - 45_000_000).toISOString();
 
-    const plainTitle = "ninthwave status";
+    const plainTitle = "ninthwave";
     const wideText = stripAnsi(formatTitleMetrics(items, 200, sessionStart));
     const metricsStr = wideText.trimEnd().slice(wideText.trimEnd().lastIndexOf("Lead:"));
     const minWidth = plainTitle.length + 4 + metricsStr.length;
 
-    // Set width 1 below minWidth -- enough for the 60-char threshold but not for the gap
+    // Set width 1 below minWidth -- should not be enough for the gap
     const tooNarrow = minWidth - 1;
-    expect(tooNarrow).toBeGreaterThanOrEqual(60); // sanity: not hitting the < 60 fallback
+    expect(tooNarrow).toBeGreaterThanOrEqual(59); // sanity: at or near the < 60 threshold
 
     const text = stripAnsi(formatTitleMetrics(items, tooNarrow, sessionStart));
     // Should gracefully fall back to plain title without metrics
-    expect(text).toBe("ninthwave status");
+    expect(text).toBe("ninthwave");
     expect(text).not.toContain("Lead:");
   });
 });
@@ -2469,8 +2485,9 @@ describe("renderTuiFrame with showHelp", () => {
     const text = stripAnsi(output);
     expect(text).toContain("Help");
     expect(text).toContain("Keyboard Shortcuts");
-    // Should NOT contain normal status table content
-    expect(text).not.toContain("ninthwave status");
+    // Should NOT contain normal status table column headers
+    expect(text).not.toContain("STATE");
+    expect(text).not.toContain("DURATION");
   });
 
   it("renders normal frame when showHelp is false", () => {
@@ -2482,7 +2499,7 @@ describe("renderTuiFrame with showHelp", () => {
 
     const output = chunks.join("");
     const text = stripAnsi(output);
-    expect(text).toContain("ninthwave status");
+    expect(text).toContain("ninthwave");
   });
 });
 

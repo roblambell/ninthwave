@@ -362,7 +362,7 @@ describe("formatStatusTable", () => {
       makeItem("H-MUX-2", "merged", "Add mux adapter", 41),
     ];
     const output = stripAnsi(formatStatusTable(items));
-    expect(output).toContain("ninthwave status");
+    expect(output).toContain("ninthwave");
     expect(output).toContain("ID");
     expect(output).toContain("STATE");
     expect(output).toContain("DURATION");
@@ -377,7 +377,7 @@ describe("formatStatusTable", () => {
 
   it("shows no active items message when empty", () => {
     const output = stripAnsi(formatStatusTable([]));
-    expect(output).toContain("ninthwave status");
+    expect(output).toContain("ninthwave");
     expect(output).toContain("No active items");
   });
 
@@ -537,9 +537,9 @@ describe("renderStatus", () => {
   });
 
   it("contains the same content cmdStatus would print", () => {
-    // renderStatus should include 'ninthwave status' header
+    // renderStatus should include 'ninthwave' header
     const result = stripAnsi(renderStatus("/nonexistent/path/.worktrees", "/nonexistent/path"));
-    expect(result).toContain("ninthwave status");
+    expect(result).toContain("ninthwave");
     expect(result).toContain("No active items");
   });
 
@@ -564,7 +564,7 @@ describe("renderStatus", () => {
     try {
       const result = stripAnsi(renderStatus(worktreeDir, tmpDir));
       expect(result).toContain("No active items");
-      expect(result).toContain("ninthwave status");
+      expect(result).toContain("ninthwave");
     } finally {
       rmSync(tmpDir, { recursive: true, force: true });
     }
@@ -597,7 +597,7 @@ describe("cmdStatus", () => {
       cmdStatus("/nonexistent/path/.worktrees", "/nonexistent/path");
       const output = stripAnsi(writeSpy.mock.calls.map((call) => String(call[0])).join(""));
       expect(output).toContain("No active items");
-      expect(output).toContain("ninthwave status");
+      expect(output).toContain("ninthwave");
     } finally {
       writeSpy.mockRestore();
     }
@@ -638,7 +638,7 @@ describe("cmdStatus", () => {
       cmdStatus(worktreeDir, tmpDir);
       const output = stripAnsi(writeSpy.mock.calls.map((call) => String(call[0])).join(""));
       expect(output).toContain("No active items");
-      expect(output).toContain("ninthwave status");
+      expect(output).toContain("ninthwave");
     } finally {
       writeSpy.mockRestore();
       rmSync(tmpDir, { recursive: true, force: true });
@@ -1493,12 +1493,12 @@ describe("renderStatus with ViewOptions", () => {
     // renderStatus with no daemon state and nonexistent worktreeDir uses the empty-items path
     const output = stripAnsi(renderStatus("/nonexistent", "/nonexistent", false, {}));
     // Even with no items, the empty-items formatStatusTable branch should receive viewOptions
-    expect(output).toContain("ninthwave status");
+    expect(output).toContain("ninthwave");
   });
 
   it("backward compatible: calling without viewOptions still works", () => {
     const output = stripAnsi(renderStatus("/nonexistent", "/nonexistent"));
-    expect(output).toContain("ninthwave status");
+    expect(output).toContain("ninthwave");
   });
 });
 
@@ -1561,7 +1561,7 @@ describe("status command flag routing", () => {
     // Static mode should NOT use cursor-home escape
     expect(joined).not.toContain("\x1B[H");
     // Should contain status table content
-    expect(joined).toContain("ninthwave status");
+    expect(joined).toContain("ninthwave");
 
     writeSpy.mockRestore();
   });
@@ -1648,7 +1648,7 @@ describe("cmdStatus (--once mode)", () => {
     const joined = stripAnsi(allWrites.join(""));
 
     // One-shot mode outputs status content directly
-    expect(joined).toContain("ninthwave status");
+    expect(joined).toContain("ninthwave");
 
     // Should NOT use alt-screen or cursor-home (those are TUI-only)
     expect(allWrites.join("")).not.toContain("\x1B[?1049h"); // ALT_SCREEN_ON

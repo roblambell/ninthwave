@@ -1,4 +1,4 @@
-ninthwave status
+ninthwave
 
     ID          STATE           DURATION   TITLE
   ──────────────────────────────────────────────────────────────────────────────
@@ -12,5 +12,5 @@ ninthwave status
   · M-FE-2      Queued          -        ⧗ Dashboard layout refactor
                                          └ H-CA-1, H-CA-2
   ──────────────────────────────────────────────────────────────────────────────
-  ▸ 1 implementing  ✗ 2 ci failed  · 1 queued                            4 items
+  ▸ 1 implementing  ✗ 2 ci failed  · 1 queued                           4 items
   q quit  d deps  ↑/↓ scroll

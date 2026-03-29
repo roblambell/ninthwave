@@ -811,7 +811,7 @@ export function formatStatusTable(
 ): string {
   const lines: string[] = [];
 
-  lines.push(`${BOLD}ninthwave status${RESET}`);
+  lines.push(`${BOLD}ninthwave${RESET}`);
   lines.push("");
 
   if (items.length === 0) {
@@ -1164,7 +1164,7 @@ export function formatUnifiedProgress(
   const minWidth = 2 + leftPlain.length + 2 + totalText.length;
 
   if (termWidth >= minWidth) {
-    const gap = termWidth - 2 - leftPlain.length - totalText.length;
+    const gap = termWidth - 2 - leftPlain.length - totalText.length - 1;
     return `  ${leftSide}${" ".repeat(gap)}${totalText}`;
   }
   // Narrow terminal: just put total after left with 2-space gap
@@ -1174,15 +1174,15 @@ export function formatUnifiedProgress(
 /**
  * Format the title line with right-aligned Lead/Thru/Session metrics (dimmed).
  * Falls back to plain title when no metrics available or terminal is too narrow (< 60 chars).
- * E.g., "ninthwave status                    Lead: 7m  Thru: 20.9/hr  Session: 12m"
+ * E.g., "ninthwave                    Lead: 7m  Thru: 20.9/hr  Session: 12m"
  */
 export function formatTitleMetrics(
   items: StatusItem[],
   termWidth: number = 80,
   sessionStartedAt?: string,
 ): string {
-  const title = `${BOLD}ninthwave status${RESET}`;
-  const titlePlain = "ninthwave status";
+  const title = `${BOLD}ninthwave${RESET}`;
+  const titlePlain = "ninthwave";
 
   // Compute metrics
   const metrics = computeSessionMetrics(items, sessionStartedAt);
@@ -1233,7 +1233,7 @@ export function buildStatusLayout(
   const footerLines: string[] = [];
 
   if (items.length === 0) {
-    headerLines.push(`${BOLD}ninthwave status${RESET}`);
+    headerLines.push(`${BOLD}ninthwave${RESET}`);
     headerLines.push("");
     headerLines.push(`  ${DIM}No active items${RESET}`);
     headerLines.push("");
