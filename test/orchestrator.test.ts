@@ -1949,6 +1949,82 @@ describe("Orchestrator", () => {
       });
     });
 
+    // ── bootstrapping ──────────────────────────────────────────────
+
+    describe("bootstrapping →", () => {
+      it("→ launching when bootstrap succeeds (executeAction path)", () => {
+        const wi = makeWorkItem("X-1-1");
+        wi.bootstrap = true;
+        wi.repoAlias = "other-repo";
+        orch.addItem(wi);
+        orch.getItem("X-1-1")!.reviewCompleted = true;
+        orch.setState("X-1-1", "bootstrapping");
+        const deps = mockDeps({
+          bootstrapRepo: vi.fn(() => ({ status: "cloned" as const, path: "/tmp/other-repo" })),
+        });
+        const result = orch.executeAction(
+          { type: "bootstrap", itemId: "X-1-1" },
+          defaultCtx,
+          deps,
+        );
+        expect(result.success).toBe(true);
+        expect(orch.getItem("X-1-1")!.state).toBe("launching");
+        expect(orch.getItem("X-1-1")!.resolvedRepoRoot).toBe("/tmp/other-repo");
+      });
+
+      it("→ stuck when bootstrap fails", () => {
+        const wi = makeWorkItem("X-1-1");
+        wi.bootstrap = true;
+        wi.repoAlias = "other-repo";
+        orch.addItem(wi);
+        orch.getItem("X-1-1")!.reviewCompleted = true;
+        orch.setState("X-1-1", "bootstrapping");
+        const deps = mockDeps({
+          bootstrapRepo: vi.fn(() => ({ status: "failed" as const, reason: "repo not found" })),
+        });
+        const result = orch.executeAction(
+          { type: "bootstrap", itemId: "X-1-1" },
+          defaultCtx,
+          deps,
+        );
+        expect(result.success).toBe(false);
+        expect(orch.getItem("X-1-1")!.state).toBe("stuck");
+        expect(orch.getItem("X-1-1")!.failureReason).toContain("bootstrap-failed");
+      });
+
+      it("→ stuck when bootstrapRepo dependency not provided", () => {
+        const wi = makeWorkItem("X-1-1");
+        wi.bootstrap = true;
+        wi.repoAlias = "other-repo";
+        orch.addItem(wi);
+        orch.getItem("X-1-1")!.reviewCompleted = true;
+        orch.setState("X-1-1", "bootstrapping");
+        const deps = mockDeps(); // no bootstrapRepo
+        const result = orch.executeAction(
+          { type: "bootstrap", itemId: "X-1-1" },
+          defaultCtx,
+          deps,
+        );
+        expect(result.success).toBe(false);
+        expect(orch.getItem("X-1-1")!.state).toBe("stuck");
+        expect(orch.getItem("X-1-1")!.failureReason).toContain("bootstrapRepo dependency not provided");
+      });
+
+      it("stays bootstrapping in processTransitions (snapshot-based loop is no-op)", () => {
+        const wi = makeWorkItem("X-1-1");
+        wi.bootstrap = true;
+        wi.repoAlias = "other-repo";
+        orch.addItem(wi);
+        orch.getItem("X-1-1")!.reviewCompleted = true;
+        orch.setState("X-1-1", "bootstrapping");
+        const actions = orch.processTransitions(
+          snapshotWith([{ id: "X-1-1", workerAlive: true }]),
+        );
+        expect(orch.getItem("X-1-1")!.state).toBe("bootstrapping");
+        expect(actions).toHaveLength(0);
+      });
+    });
+
     // ── launching ──────────────────────────────────────────────────
 
     describe("launching →", () => {
@@ -2456,6 +2532,90 @@ describe("Orchestrator", () => {
       });
     });
 
+    // ── repairing ──────────────────────────────────────────────────
+
+    describe("repairing →", () => {
+      it("→ ci-pending when repair worker pushes fix (CI restarts with pending)", () => {
+        orch.addItem(makeWorkItem("X-1-1"));
+        orch.getItem("X-1-1")!.reviewCompleted = true;
+        orch.setState("X-1-1", "repairing");
+        orch.getItem("X-1-1")!.repairWorkspaceRef = "workspace:repair-1";
+        const actions = orch.processTransitions(
+          snapshotWith([{ id: "X-1-1", ciStatus: "pending", prState: "open" }]),
+        );
+        expect(orch.getItem("X-1-1")!.state).toBe("ci-pending");
+        expect(orch.getItem("X-1-1")!.rebaseRequested).toBe(false);
+        expect(actions.some((a) => a.type === "clean-repair")).toBe(true);
+      });
+
+      it("→ ci-pending when CI already passed after repair push", () => {
+        orch.addItem(makeWorkItem("X-1-1"));
+        orch.getItem("X-1-1")!.reviewCompleted = true;
+        orch.setState("X-1-1", "repairing");
+        orch.getItem("X-1-1")!.repairWorkspaceRef = "workspace:repair-1";
+        const actions = orch.processTransitions(
+          snapshotWith([{ id: "X-1-1", ciStatus: "pass", prState: "open" }]),
+        );
+        // Even "pass" transitions to ci-pending first (re-evaluated on next tick)
+        expect(orch.getItem("X-1-1")!.state).toBe("ci-pending");
+        expect(actions.some((a) => a.type === "clean-repair")).toBe(true);
+      });
+
+      it("→ ci-pending when repair worker's fix still fails CI", () => {
+        orch.addItem(makeWorkItem("X-1-1"));
+        orch.getItem("X-1-1")!.reviewCompleted = true;
+        orch.setState("X-1-1", "repairing");
+        orch.getItem("X-1-1")!.repairWorkspaceRef = "workspace:repair-1";
+        const actions = orch.processTransitions(
+          snapshotWith([{ id: "X-1-1", ciStatus: "fail", prState: "open" }]),
+        );
+        // Any CI status change means repair pushed -- transition to ci-pending for re-evaluation
+        expect(orch.getItem("X-1-1")!.state).toBe("ci-pending");
+        expect(actions.some((a) => a.type === "clean-repair")).toBe(true);
+      });
+
+      it("→ stuck when repair worker dies without pushing (debounced)", () => {
+        orch.addItem(makeWorkItem("X-1-1"));
+        orch.getItem("X-1-1")!.reviewCompleted = true;
+        orch.setState("X-1-1", "repairing");
+        orch.getItem("X-1-1")!.repairWorkspaceRef = "workspace:repair-1";
+        // Debounce: NOT_ALIVE_THRESHOLD (5) consecutive not-alive checks required
+        for (let i = 0; i < 4; i++) {
+          orch.processTransitions(
+            snapshotWith([{ id: "X-1-1", workerAlive: false }]),
+          );
+          expect(orch.getItem("X-1-1")!.state).toBe("repairing");
+        }
+        const actions = orch.processTransitions(
+          snapshotWith([{ id: "X-1-1", workerAlive: false }]),
+        );
+        expect(orch.getItem("X-1-1")!.state).toBe("stuck");
+        expect(orch.getItem("X-1-1")!.failureReason).toContain("repair-failed");
+        expect(actions.some((a) => a.type === "clean-repair")).toBe(true);
+      });
+
+      it("stays repairing when worker alive and no CI status change", () => {
+        orch.addItem(makeWorkItem("X-1-1"));
+        orch.getItem("X-1-1")!.reviewCompleted = true;
+        orch.setState("X-1-1", "repairing");
+        orch.getItem("X-1-1")!.repairWorkspaceRef = "workspace:repair-1";
+        const actions = orch.processTransitions(
+          snapshotWith([{ id: "X-1-1", workerAlive: true }]),
+        );
+        expect(orch.getItem("X-1-1")!.state).toBe("repairing");
+        expect(actions).toHaveLength(0);
+      });
+
+      it("stays repairing with no snapshot", () => {
+        orch.addItem(makeWorkItem("X-1-1"));
+        orch.getItem("X-1-1")!.reviewCompleted = true;
+        orch.setState("X-1-1", "repairing");
+        const actions = orch.processTransitions(emptySnapshot());
+        expect(orch.getItem("X-1-1")!.state).toBe("repairing");
+        expect(actions).toHaveLength(0);
+      });
+    });
+
     // ── review-pending ─────────────────────────────────────────────
 
     describe("review-pending →", () => {
@@ -2641,6 +2801,30 @@ describe("Orchestrator", () => {
         orch.processTransitions(emptySnapshot());
         expect(orch.getItem("X-1-1")!.state).toBe("merging");
       });
+
+      it("→ stuck when PR closed without merging", () => {
+        orch.addItem(makeWorkItem("X-1-1"));
+        orch.getItem("X-1-1")!.reviewCompleted = true;
+        orch.setState("X-1-1", "merging");
+        orch.processTransitions(
+          snapshotWith([{ id: "X-1-1", prState: "closed" }]),
+        );
+        expect(orch.getItem("X-1-1")!.state).toBe("stuck");
+        expect(orch.getItem("X-1-1")!.failureReason).toContain("merge-aborted");
+        expect(orch.getItem("X-1-1")!.failureReason).toContain("closed without merging");
+      });
+
+      it("stays merging when PR still open (merge in progress)", () => {
+        orch.addItem(makeWorkItem("X-1-1"));
+        orch.getItem("X-1-1")!.reviewCompleted = true;
+        orch.setState("X-1-1", "merging");
+        orch.getItem("X-1-1")!.prNumber = 42;
+        const actions = orch.processTransitions(
+          snapshotWith([{ id: "X-1-1", prState: "open", ciStatus: "pass" }]),
+        );
+        expect(orch.getItem("X-1-1")!.state).toBe("merging");
+        expect(actions).toHaveLength(0);
+      });
     });
 
     // ── merged ─────────────────────────────────────────────────────
@@ -2653,6 +2837,186 @@ describe("Orchestrator", () => {
         const actions = orch.processTransitions(emptySnapshot());
         expect(orch.getItem("X-1-1")!.state).toBe("done");
         expect(actions.every((a) => a.type !== "mark-done")).toBe(true);
+      });
+    });
+
+    // ── verifying ──────────────────────────────────────────────────
+
+    describe("verifying →", () => {
+      it("→ done when merge commit CI passes", () => {
+        orch = new Orchestrator({ verifyMain: true });
+        orch.addItem(makeWorkItem("X-1-1"));
+        orch.getItem("X-1-1")!.reviewCompleted = true;
+        orch.setState("X-1-1", "verifying");
+        orch.getItem("X-1-1")!.mergeCommitSha = "abc123";
+        const actions = orch.processTransitions(
+          snapshotWith([{ id: "X-1-1", mergeCommitCIStatus: "pass" }]),
+        );
+        expect(orch.getItem("X-1-1")!.state).toBe("done");
+        expect(actions).toHaveLength(0);
+      });
+
+      it("→ verify-failed when merge commit CI fails", () => {
+        orch = new Orchestrator({ verifyMain: true });
+        orch.addItem(makeWorkItem("X-1-1"));
+        orch.getItem("X-1-1")!.reviewCompleted = true;
+        orch.setState("X-1-1", "verifying");
+        orch.getItem("X-1-1")!.mergeCommitSha = "abc123";
+        orch.processTransitions(
+          snapshotWith([{ id: "X-1-1", mergeCommitCIStatus: "fail" }]),
+        );
+        expect(orch.getItem("X-1-1")!.state).toBe("verify-failed");
+        expect(orch.getItem("X-1-1")!.verifyFailCount).toBe(1);
+        expect(orch.getItem("X-1-1")!.failureReason).toContain("verify-failed");
+      });
+
+      it("stays verifying when merge commit CI still pending", () => {
+        orch = new Orchestrator({ verifyMain: true });
+        orch.addItem(makeWorkItem("X-1-1"));
+        orch.getItem("X-1-1")!.reviewCompleted = true;
+        orch.setState("X-1-1", "verifying");
+        orch.getItem("X-1-1")!.mergeCommitSha = "abc123";
+        const actions = orch.processTransitions(
+          snapshotWith([{ id: "X-1-1", mergeCommitCIStatus: "pending" }]),
+        );
+        expect(orch.getItem("X-1-1")!.state).toBe("verifying");
+        expect(actions).toHaveLength(0);
+      });
+
+      it("stays verifying when no merge commit CI status yet", () => {
+        orch = new Orchestrator({ verifyMain: true });
+        orch.addItem(makeWorkItem("X-1-1"));
+        orch.getItem("X-1-1")!.reviewCompleted = true;
+        orch.setState("X-1-1", "verifying");
+        orch.getItem("X-1-1")!.mergeCommitSha = "abc123";
+        const actions = orch.processTransitions(
+          snapshotWith([{ id: "X-1-1" }]),
+        );
+        expect(orch.getItem("X-1-1")!.state).toBe("verifying");
+        expect(actions).toHaveLength(0);
+      });
+
+      it("increments verifyFailCount on each failure", () => {
+        orch = new Orchestrator({ verifyMain: true });
+        orch.addItem(makeWorkItem("X-1-1"));
+        orch.getItem("X-1-1")!.reviewCompleted = true;
+        orch.setState("X-1-1", "verifying");
+        orch.getItem("X-1-1")!.mergeCommitSha = "abc123";
+        orch.getItem("X-1-1")!.verifyFailCount = 0;
+        orch.processTransitions(
+          snapshotWith([{ id: "X-1-1", mergeCommitCIStatus: "fail" }]),
+        );
+        expect(orch.getItem("X-1-1")!.verifyFailCount).toBe(1);
+      });
+    });
+
+    // ── verify-failed ─────────────────────────────────────────────
+
+    describe("verify-failed →", () => {
+      it("→ repairing-main when mergeCommitSha present (launches verifier)", () => {
+        orch = new Orchestrator({ verifyMain: true, maxVerifyRetries: 2 });
+        orch.addItem(makeWorkItem("X-1-1"));
+        orch.getItem("X-1-1")!.reviewCompleted = true;
+        orch.setState("X-1-1", "verify-failed");
+        orch.getItem("X-1-1")!.mergeCommitSha = "abc123";
+        orch.getItem("X-1-1")!.verifyFailCount = 1;
+        const actions = orch.processTransitions(
+          snapshotWith([{ id: "X-1-1", mergeCommitCIStatus: "fail" }]),
+        );
+        expect(orch.getItem("X-1-1")!.state).toBe("repairing-main");
+        expect(actions.some((a) => a.type === "launch-verifier" && a.itemId === "X-1-1")).toBe(true);
+      });
+
+      it("→ stuck when max verify retries exhausted", () => {
+        orch = new Orchestrator({ verifyMain: true, maxVerifyRetries: 1 });
+        orch.addItem(makeWorkItem("X-1-1"));
+        orch.getItem("X-1-1")!.reviewCompleted = true;
+        orch.setState("X-1-1", "verify-failed");
+        orch.getItem("X-1-1")!.mergeCommitSha = "abc123";
+        orch.getItem("X-1-1")!.verifyFailCount = 1; // equals maxVerifyRetries
+        orch.processTransitions(
+          snapshotWith([{ id: "X-1-1", mergeCommitCIStatus: "fail" }]),
+        );
+        expect(orch.getItem("X-1-1")!.state).toBe("stuck");
+        expect(orch.getItem("X-1-1")!.failureReason).toContain("exceeded max verify retries");
+      });
+
+      it("→ done when merge commit CI recovers to pass", () => {
+        orch = new Orchestrator({ verifyMain: true, maxVerifyRetries: 2 });
+        orch.addItem(makeWorkItem("X-1-1"));
+        orch.getItem("X-1-1")!.reviewCompleted = true;
+        orch.setState("X-1-1", "verify-failed");
+        orch.getItem("X-1-1")!.mergeCommitSha = "abc123";
+        orch.getItem("X-1-1")!.verifyFailCount = 1;
+        orch.processTransitions(
+          snapshotWith([{ id: "X-1-1", mergeCommitCIStatus: "pass" }]),
+        );
+        expect(orch.getItem("X-1-1")!.state).toBe("done");
+      });
+    });
+
+    // ── repairing-main ────────────────────────────────────────────
+
+    describe("repairing-main →", () => {
+      it("→ done when merge commit CI passes (verifier fix merged)", () => {
+        orch = new Orchestrator({ verifyMain: true });
+        orch.addItem(makeWorkItem("X-1-1"));
+        orch.getItem("X-1-1")!.reviewCompleted = true;
+        orch.setState("X-1-1", "repairing-main");
+        orch.getItem("X-1-1")!.mergeCommitSha = "abc123";
+        orch.getItem("X-1-1")!.verifyWorkspaceRef = "workspace:verifier-1";
+        const actions = orch.processTransitions(
+          snapshotWith([{ id: "X-1-1", mergeCommitCIStatus: "pass" }]),
+        );
+        expect(orch.getItem("X-1-1")!.state).toBe("done");
+        expect(actions.some((a) => a.type === "clean-verifier")).toBe(true);
+      });
+
+      it("→ stuck when verifier worker dies (debounced)", () => {
+        orch = new Orchestrator({ verifyMain: true });
+        orch.addItem(makeWorkItem("X-1-1"));
+        orch.getItem("X-1-1")!.reviewCompleted = true;
+        orch.setState("X-1-1", "repairing-main");
+        orch.getItem("X-1-1")!.mergeCommitSha = "abc123";
+        orch.getItem("X-1-1")!.verifyWorkspaceRef = "workspace:verifier-1";
+        // Debounce: NOT_ALIVE_THRESHOLD (5) consecutive not-alive checks required
+        for (let i = 0; i < 4; i++) {
+          orch.processTransitions(
+            snapshotWith([{ id: "X-1-1", workerAlive: false }]),
+          );
+          expect(orch.getItem("X-1-1")!.state).toBe("repairing-main");
+        }
+        const actions = orch.processTransitions(
+          snapshotWith([{ id: "X-1-1", workerAlive: false }]),
+        );
+        expect(orch.getItem("X-1-1")!.state).toBe("stuck");
+        expect(orch.getItem("X-1-1")!.failureReason).toContain("verify-repair-failed");
+        expect(actions.some((a) => a.type === "clean-verifier")).toBe(true);
+      });
+
+      it("stays repairing-main when worker alive and CI not passing", () => {
+        orch = new Orchestrator({ verifyMain: true });
+        orch.addItem(makeWorkItem("X-1-1"));
+        orch.getItem("X-1-1")!.reviewCompleted = true;
+        orch.setState("X-1-1", "repairing-main");
+        orch.getItem("X-1-1")!.mergeCommitSha = "abc123";
+        orch.getItem("X-1-1")!.verifyWorkspaceRef = "workspace:verifier-1";
+        const actions = orch.processTransitions(
+          snapshotWith([{ id: "X-1-1", workerAlive: true }]),
+        );
+        expect(orch.getItem("X-1-1")!.state).toBe("repairing-main");
+        expect(actions).toHaveLength(0);
+      });
+
+      it("stays repairing-main with no snapshot", () => {
+        orch = new Orchestrator({ verifyMain: true });
+        orch.addItem(makeWorkItem("X-1-1"));
+        orch.getItem("X-1-1")!.reviewCompleted = true;
+        orch.setState("X-1-1", "repairing-main");
+        orch.getItem("X-1-1")!.mergeCommitSha = "abc123";
+        const actions = orch.processTransitions(emptySnapshot());
+        expect(orch.getItem("X-1-1")!.state).toBe("repairing-main");
+        expect(actions).toHaveLength(0);
       });
     });
 
