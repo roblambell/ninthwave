@@ -25,7 +25,7 @@ import {
   cmdPrWatch,
   cmdPrActivity,
   checkPrStatus,
-  getWatchReadyState,
+  processChecks,
   findTransitions,
   findGoneItems,
   TRUSTED_ASSOC,
@@ -587,7 +587,7 @@ describe("cmdWatchReady cross-repo", () => {
   });
 });
 
-describe("getWatchReadyState", () => {
+describe("cmdWatchReady with print=false (replaces getWatchReadyState)", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     (gh.isAvailable as Mock).mockReturnValue(true);
@@ -595,7 +595,7 @@ describe("getWatchReadyState", () => {
   afterEach(() => cleanupTempRepos());
 
   it("returns empty string when worktree dir does not exist", () => {
-    const result = getWatchReadyState("/nonexistent/path", "/fake/repo");
+    const result = cmdWatchReady("/nonexistent/path", "/fake/repo", false);
     expect(result).toBe("");
   });
 
@@ -607,7 +607,7 @@ describe("getWatchReadyState", () => {
 
     (gh.prList as Mock).mockReturnValue({ ok: true, data: [] });
 
-    const result = getWatchReadyState(worktreeDir, repo);
+    const result = cmdWatchReady(worktreeDir, repo, false);
     expect(result).toContain("A-1-1");
     expect(result).toContain("B-2-1");
     expect(result).toContain("no-pr");
@@ -621,13 +621,13 @@ describe("getWatchReadyState", () => {
 
     (gh.prList as Mock).mockReturnValue({ ok: true, data: [] });
 
-    const result = getWatchReadyState(worktreeDir, repo);
+    const result = cmdWatchReady(worktreeDir, repo, false);
     expect(result).toContain("A-1-1");
     expect(result).not.toContain("other-dir");
   });
 });
 
-describe("getWatchReadyState cross-repo", () => {
+describe("cmdWatchReady cross-repo with print=false", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     (gh.isAvailable as Mock).mockReturnValue(true);
@@ -645,9 +645,95 @@ describe("getWatchReadyState cross-repo", () => {
 
     (gh.prList as Mock).mockReturnValue({ ok: true, data: [] });
 
-    const result = getWatchReadyState(worktreeDir, repo);
+    const result = cmdWatchReady(worktreeDir, repo, false);
     expect(result).toContain("X-CR-2");
     expect(result).toContain("no-pr");
+  });
+});
+
+describe("processChecks", () => {
+  it("returns pass when all checks succeed", () => {
+    const result = processChecks([
+      { state: "SUCCESS", name: "test", completedAt: "2026-01-01T01:00:00Z" },
+      { state: "SUCCESS", name: "lint", completedAt: "2026-01-01T01:05:00Z" },
+    ]);
+    expect(result.ciStatus).toBe("pass");
+    expect(result.eventTime).toBe("2026-01-01T01:05:00Z");
+  });
+
+  it("returns fail when any check has a failure state", () => {
+    const result = processChecks([
+      { state: "SUCCESS", name: "lint", completedAt: "2026-01-01T01:00:00Z" },
+      { state: "FAILURE", name: "test", completedAt: "2026-01-01T01:10:00Z" },
+    ]);
+    expect(result.ciStatus).toBe("fail");
+    expect(result.eventTime).toBe("2026-01-01T01:10:00Z");
+  });
+
+  it("returns pending when some checks are still running", () => {
+    const result = processChecks([
+      { state: "SUCCESS", name: "lint", completedAt: "2026-01-01T01:00:00Z" },
+      { state: "PENDING", name: "test" },
+    ]);
+    expect(result.ciStatus).toBe("pending");
+    expect(result.eventTime).toBeUndefined();
+  });
+
+  it("returns unknown when all checks are skipped", () => {
+    const result = processChecks([
+      { state: "SKIPPED", name: "optional-check" },
+    ]);
+    expect(result.ciStatus).toBe("unknown");
+    expect(result.eventTime).toBeUndefined();
+  });
+
+  it("returns unknown when no checks exist", () => {
+    const result = processChecks([]);
+    expect(result.ciStatus).toBe("unknown");
+    expect(result.eventTime).toBeUndefined();
+  });
+
+  it("ignores skipped checks when determining status", () => {
+    const result = processChecks([
+      { state: "SKIPPED", name: "optional" },
+      { state: "SUCCESS", name: "required", completedAt: "2026-01-01T02:00:00Z" },
+    ]);
+    expect(result.ciStatus).toBe("pass");
+    expect(result.eventTime).toBe("2026-01-01T02:00:00Z");
+  });
+
+  it("detects all CI failure states", () => {
+    for (const failState of ["FAILURE", "ERROR", "CANCELLED", "TIMED_OUT", "STARTUP_FAILURE", "ACTION_REQUIRED"]) {
+      const result = processChecks([
+        { state: failState, name: "check", completedAt: "2026-01-01T01:00:00Z" },
+      ]);
+      expect(result.ciStatus).toBe("fail");
+    }
+  });
+
+  it("fail takes precedence over pending", () => {
+    const result = processChecks([
+      { state: "PENDING", name: "lint" },
+      { state: "FAILURE", name: "test", completedAt: "2026-01-01T01:00:00Z" },
+    ]);
+    expect(result.ciStatus).toBe("fail");
+  });
+
+  it("returns eventTime from latest completedAt on pass", () => {
+    const result = processChecks([
+      { state: "SUCCESS", name: "fast", completedAt: "2026-01-01T01:00:00Z" },
+      { state: "SUCCESS", name: "slow", completedAt: "2026-01-01T02:00:00Z" },
+      { state: "SUCCESS", name: "mid", completedAt: "2026-01-01T01:30:00Z" },
+    ]);
+    expect(result.eventTime).toBe("2026-01-01T02:00:00Z");
+  });
+
+  it("returns undefined eventTime when checks have no completedAt", () => {
+    const result = processChecks([
+      { state: "SUCCESS", name: "test" },
+    ]);
+    expect(result.ciStatus).toBe("pass");
+    expect(result.eventTime).toBeUndefined();
   });
 });
 

@@ -98,13 +98,17 @@ export const TRUSTED_ASSOC = '(.author_association == "OWNER" or .author_associa
 /**
  * Check each worktree's PR status (merged/ready/pending/failing/no-pr).
  * Returns tab-separated lines: ID\tPR_NUMBER\tSTATUS
+ *
+ * @param print - When true (default, CLI usage), writes results to console.
+ *   Pass false to get the result string without side effects.
  */
 export function cmdWatchReady(
   worktreeDir: string,
   projectRoot: string,
+  print: boolean = true,
 ): string {
   if (!existsSync(worktreeDir)) {
-    console.log("No active worktrees");
+    if (print) console.log("No active worktrees");
     return "";
   }
 
@@ -134,7 +138,7 @@ export function cmdWatchReady(
   }
 
   const output = results.join("\n");
-  if (output) console.log(output);
+  if (print && output) console.log(output);
   return output;
 }
 
@@ -154,6 +158,50 @@ export const CI_FAILURE_STATES = new Set([
   "ACTION_REQUIRED",
 ]);
 
+/**
+ * Shared CI status processing. Determines ciStatus and event time from a set
+ * of GitHub check runs/status checks. Used by both sync and async check paths
+ * so bug fixes apply to both.
+ */
+export function processChecks(
+  checks: { state: string; name: string; completedAt?: string }[],
+): { ciStatus: string; eventTime: string | undefined } {
+  const nonSkipped = checks.filter((c) => c.state !== "SKIPPED");
+  let ciStatus = "unknown";
+  if (nonSkipped.length > 0) {
+    if (nonSkipped.every((c) => c.state === "SUCCESS")) {
+      ciStatus = "pass";
+    } else if (nonSkipped.some((c) => CI_FAILURE_STATES.has(c.state))) {
+      ciStatus = "fail";
+    } else if (nonSkipped.some((c) => c.state === "PENDING")) {
+      ciStatus = "pending";
+    }
+  }
+
+  // For terminal CI states, derive event time from the latest check completedAt.
+  let eventTime: string | undefined;
+  if (ciStatus === "pass" || ciStatus === "fail") {
+    const completedTimes = nonSkipped
+      .map((c) => c.completedAt)
+      .filter((t): t is string => !!t)
+      .sort();
+    if (completedTimes.length > 0) {
+      eventTime = completedTimes[completedTimes.length - 1]!;
+    }
+  }
+
+  return { ciStatus, eventTime };
+}
+
+/** Derive overall PR status from CI status and review/merge state. */
+function derivePrStatus(ciStatus: string, isMergeable: string, reviewDecision: string): string {
+  if (ciStatus === "fail") return "failing";
+  if (ciStatus === "pass") {
+    return isMergeable === "MERGEABLE" && reviewDecision === "APPROVED" ? "ready" : "ci-passed";
+  }
+  return "pending";
+}
+
 export function checkPrStatus(id: string, repoRoot: string): string {
   const branch = `ninthwave/${id}`;
 
@@ -169,8 +217,6 @@ export function checkPrStatus(id: string, repoRoot: string): string {
     if (!mergedResult.ok) return ""; // API error: hold state
     const mergedPrs = mergedResult.data;
     if (mergedPrs.length > 0) {
-      // Include PR title as 6th field so callers can detect ID collisions
-      // (a new TODO reusing an old merged PR's branch name).
       const prTitle = mergedPrs[0]!.title ?? "";
       return `${id}\t${mergedPrs[0]!.number}\tmerged\t\t\t${prTitle}`;
     }
@@ -180,11 +226,7 @@ export function checkPrStatus(id: string, repoRoot: string): string {
   const prNumber = openPrs[0]!.number;
 
   // Check CI and review status (include updatedAt for detection latency)
-  const prViewResult = prView(repoRoot, prNumber, [
-    "reviewDecision",
-    "mergeable",
-    "updatedAt",
-  ]);
+  const prViewResult = prView(repoRoot, prNumber, ["reviewDecision", "mergeable", "updatedAt"]);
   if (!prViewResult.ok) return ""; // API error: hold state
   const prData = prViewResult.data;
   const reviewDecision = (prData.reviewDecision as string) ?? "";
@@ -193,45 +235,10 @@ export function checkPrStatus(id: string, repoRoot: string): string {
 
   const checksResult = prChecks(repoRoot, prNumber);
   if (!checksResult.ok) return ""; // API error: hold state
-  const checks = checksResult.data;
-  const nonSkipped = checks.filter((c) => c.state !== "SKIPPED");
-  let ciStatus = "unknown";
-  if (nonSkipped.length > 0) {
-    if (nonSkipped.every((c) => c.state === "SUCCESS")) {
-      ciStatus = "pass";
-    } else if (nonSkipped.some((c) => CI_FAILURE_STATES.has(c.state))) {
-      ciStatus = "fail";
-    } else if (nonSkipped.some((c) => c.state === "PENDING")) {
-      ciStatus = "pending";
-    }
-  }
 
-  let status = "pending";
-  if (ciStatus === "fail") {
-    status = "failing";
-  } else if (ciStatus === "pass") {
-    if (isMergeable === "MERGEABLE" && reviewDecision === "APPROVED") {
-      status = "ready";
-    } else {
-      status = "ci-passed";
-    }
-  } else if (ciStatus === "pending") {
-    status = "pending";
-  }
-
-  // Determine event time: use the latest CI check completedAt for terminal CI states,
-  // fall back to PR updatedAt for other states.
-  let eventTime = prUpdatedAt;
-  if (ciStatus === "pass" || ciStatus === "fail") {
-    const completedTimes = nonSkipped
-      .map((c) => c.completedAt)
-      .filter((t): t is string => !!t)
-      .sort();
-    if (completedTimes.length > 0) {
-      // Use the latest completedAt -- the check that determined the final CI status
-      eventTime = completedTimes[completedTimes.length - 1]!;
-    }
-  }
+  const { ciStatus, eventTime: ciEventTime } = processChecks(checksResult.data);
+  const status = derivePrStatus(ciStatus, isMergeable, reviewDecision);
+  const eventTime = ciEventTime ?? prUpdatedAt;
 
   // Fields: ID, PR number, status, mergeable, eventTime (5th field for detection latency)
   return `${id}\t${prNumber}\t${status}\t${isMergeable || "UNKNOWN"}\t${eventTime}`;
@@ -252,7 +259,6 @@ export async function checkPrStatusAsync(id: string, repoRoot: string): Promise<
   if (!openResult.ok) return ""; // API error: hold state
   const openPrs = openResult.data;
   if (openPrs.length === 0) {
-    // Check if merged
     const mergedResult = await prListAsync(repoRoot, branch, "merged");
     if (!mergedResult.ok) return ""; // API error: hold state
     const mergedPrs = mergedResult.data;
@@ -265,12 +271,7 @@ export async function checkPrStatusAsync(id: string, repoRoot: string): Promise<
 
   const prNumber = openPrs[0]!.number;
 
-  // Check CI and review status (include updatedAt for detection latency)
-  const prViewResult = await prViewAsync(repoRoot, prNumber, [
-    "reviewDecision",
-    "mergeable",
-    "updatedAt",
-  ]);
+  const prViewResult = await prViewAsync(repoRoot, prNumber, ["reviewDecision", "mergeable", "updatedAt"]);
   if (!prViewResult.ok) return ""; // API error: hold state
   const prData = prViewResult.data;
   const reviewDecision = (prData.reviewDecision as string) ?? "";
@@ -279,79 +280,12 @@ export async function checkPrStatusAsync(id: string, repoRoot: string): Promise<
 
   const checksResult = await prChecksAsync(repoRoot, prNumber);
   if (!checksResult.ok) return ""; // API error: hold state
-  const checks = checksResult.data;
-  const nonSkipped = checks.filter((c) => c.state !== "SKIPPED");
-  let ciStatus = "unknown";
-  if (nonSkipped.length > 0) {
-    if (nonSkipped.every((c) => c.state === "SUCCESS")) {
-      ciStatus = "pass";
-    } else if (nonSkipped.some((c) => CI_FAILURE_STATES.has(c.state))) {
-      ciStatus = "fail";
-    } else if (nonSkipped.some((c) => c.state === "PENDING")) {
-      ciStatus = "pending";
-    }
-  }
 
-  let status = "pending";
-  if (ciStatus === "fail") {
-    status = "failing";
-  } else if (ciStatus === "pass") {
-    if (isMergeable === "MERGEABLE" && reviewDecision === "APPROVED") {
-      status = "ready";
-    } else {
-      status = "ci-passed";
-    }
-  } else if (ciStatus === "pending") {
-    status = "pending";
-  }
-
-  // Determine event time
-  let eventTime = prUpdatedAt;
-  if (ciStatus === "pass" || ciStatus === "fail") {
-    const completedTimes = nonSkipped
-      .map((c) => c.completedAt)
-      .filter((t): t is string => !!t)
-      .sort();
-    if (completedTimes.length > 0) {
-      eventTime = completedTimes[completedTimes.length - 1]!;
-    }
-  }
+  const { ciStatus, eventTime: ciEventTime } = processChecks(checksResult.data);
+  const status = derivePrStatus(ciStatus, isMergeable, reviewDecision);
+  const eventTime = ciEventTime ?? prUpdatedAt;
 
   return `${id}\t${prNumber}\t${status}\t${isMergeable || "UNKNOWN"}\t${eventTime}`;
-}
-
-/** Get watch-ready state without printing to console. */
-export function getWatchReadyState(
-  worktreeDir: string,
-  projectRoot: string,
-): string {
-  if (!existsSync(worktreeDir)) return "";
-
-  const results: string[] = [];
-  const crossRepoIndex = join(worktreeDir, ".cross-repo-index");
-
-  try {
-    for (const entry of readdirSync(worktreeDir)) {
-      if (!entry.startsWith("ninthwave-")) continue;
-      const wtDir = join(worktreeDir, entry);
-      if (!existsSync(wtDir)) continue;
-      const id = entry.slice(10);
-      const line = checkPrStatus(id, projectRoot);
-      if (line) results.push(line);
-    }
-  } catch {
-    // ignore
-  }
-
-  // Also check cross-repo worktrees
-  const hubCheckedIds = new Set(results.map((r) => r.split("\t")[0]));
-  for (const entry of listCrossRepoEntries(crossRepoIndex)) {
-    if (hubCheckedIds.has(entry.itemId)) continue;
-    const statusLine = checkPrStatus(entry.itemId, entry.repoRoot);
-    if (statusLine) results.push(statusLine);
-  }
-
-  return results.join("\n");
 }
 
 export function findTransitions(currentState: string, prevState: string): string {
