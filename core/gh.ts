@@ -600,7 +600,7 @@ export function upsertOrchestratorComment(
   // Create new comment with header + first row + branding footer
   const body = [
     ORCHESTRATOR_COMMENT_MARKER,
-    `**[Orchestrator]** Status for ${itemId}`,
+    `**[Orchestrator](${ORCHESTRATOR_LINK})** Status for ${itemId}`,
     "",
     "| Time | Event |",
     "|------|-------|",

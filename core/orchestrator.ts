@@ -7,7 +7,7 @@ import { existsSync, unlinkSync } from "fs";
 import type { WorkItem, Priority, WorktreeInfo } from "./types.ts";
 import { getWorktreeInfo, listCrossRepoEntries } from "./cross-repo.ts";
 import { heartbeatFilePath, writeHeartbeat } from "./daemon.ts";
-import { NINTHWAVE_FOOTER } from "./gh.ts";
+import { NINTHWAVE_FOOTER, ORCHESTRATOR_LINK } from "./gh.ts";
 
 // ── Priority rank for merge queue ordering (lower = higher priority) ─
 
@@ -1430,7 +1430,7 @@ export class Orchestrator {
 
     for (const comment of snap.newComments) {
       // Skip orchestrator's own audit-trail comments (both text prefix and HTML marker)
-      if (comment.body.startsWith("**[Orchestrator]**")) continue;
+      if (comment.body.startsWith("**[Orchestrator]")) continue;
       if (comment.body.includes("<!-- ninthwave-orchestrator-status -->")) continue;
       // Skip worker self-comments (any worker ID)
       if (/\*\*\[Worker:/.test(comment.body)) continue;
@@ -1806,7 +1806,7 @@ export class Orchestrator {
     if (deps.upsertOrchestratorComment) {
       deps.upsertOrchestratorComment(repoRoot, prNum, item.id, `Auto-merged PR #${prNum}.`);
     } else {
-      deps.prComment(repoRoot, prNum, `**[Orchestrator]** Auto-merged PR #${prNum} for ${item.id}.`);
+      deps.prComment(repoRoot, prNum, `**[Orchestrator](${ORCHESTRATOR_LINK})** Auto-merged PR #${prNum} for ${item.id}.`);
     }
 
     // Merge was initiated by us, so eventTime is now
@@ -2002,7 +2002,7 @@ export class Orchestrator {
       if (deps.upsertOrchestratorComment) {
         deps.upsertOrchestratorComment(repoRoot, item.prNumber, item.id, "CI failure detected. Worker notified.");
       } else {
-        deps.prComment(repoRoot, item.prNumber, `**[Orchestrator]** CI failure detected for ${item.id}. Worker notified.`);
+        deps.prComment(repoRoot, item.prNumber, `**[Orchestrator](${ORCHESTRATOR_LINK})** CI failure detected for ${item.id}. Worker notified.`);
       }
     }
 

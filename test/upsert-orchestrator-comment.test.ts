@@ -5,6 +5,7 @@ import { describe, it, expect, vi, beforeEach } from "vitest";
 import {
   upsertOrchestratorComment,
   ORCHESTRATOR_COMMENT_MARKER,
+  ORCHESTRATOR_LINK,
   type PrCommentClient,
 } from "../core/gh.ts";
 
@@ -35,7 +36,7 @@ describe("upsertOrchestratorComment", () => {
 
     const body = (client.createComment as ReturnType<typeof vi.fn>).mock.calls[0]![2] as string;
     expect(body).toContain(ORCHESTRATOR_COMMENT_MARKER);
-    expect(body).toContain("**[Orchestrator]** Status for H-FOO-1");
+    expect(body).toContain(`**[Orchestrator](${ORCHESTRATOR_LINK})** Status for H-FOO-1`);
     expect(body).toContain("| Time | Event |");
     expect(body).toContain("|------|-------|");
     expect(body).toContain("CI failure detected. Worker notified.");
@@ -45,7 +46,7 @@ describe("upsertOrchestratorComment", () => {
   it("finds existing marker comment and inserts row before footer", () => {
     const existingBody = [
       ORCHESTRATOR_COMMENT_MARKER,
-      "**[Orchestrator]** Status for H-FOO-1",
+      `**[Orchestrator](${ORCHESTRATOR_LINK})** Status for H-FOO-1`,
       "",
       "| Time | Event |",
       "|------|-------|",
