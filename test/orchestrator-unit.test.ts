@@ -2016,6 +2016,152 @@ describe("executeLaunch stale branch cleanup", () => {
   });
 });
 
+// ── Stacked launch race guard (H-SL-1) ─────────────────────────────
+
+describe("executeLaunch stacked dep race guard", () => {
+  function makeMinimalDeps(overrides: Partial<OrchestratorDeps> = {}): OrchestratorDeps {
+    return {
+      launchSingleItem: () => ({ worktreePath: "/tmp/wt", workspaceRef: "workspace:1" }),
+      cleanSingleWorktree: () => true,
+      prMerge: () => true,
+      prComment: () => true,
+      sendMessage: () => true,
+      closeWorkspace: () => true,
+      fetchOrigin: () => {},
+      ffMerge: () => {},
+      ...overrides,
+    };
+  }
+
+  const ctx: ExecutionContext = {
+    projectRoot: "/tmp/proj",
+    worktreeDir: "/tmp/proj/.worktrees",
+    workDir: "/tmp/proj/.ninthwave/work",
+    aiTool: "claude",
+  };
+
+  it("clears baseBranch when dependency is in done state before launch", () => {
+    const orch = new Orchestrator({ wipLimit: 5, enableStacking: true });
+    orch.addItem(makeWorkItem("A-1"));
+    orch.addItem(makeWorkItem("B-1", ["A-1"]));
+
+    // A completed (done state) -- its branch is deleted from origin
+    orch.setState("A-1", "done");
+
+    // B was promoted to launching with stale baseBranch
+    orch.setState("B-1", "launching");
+    orch.getItem("B-1")!.baseBranch = "ninthwave/A-1";
+
+    const launchCalls: Array<{ baseBranch?: string }> = [];
+    const deps = makeMinimalDeps({
+      launchSingleItem: (_item, _wd, _wtd, _pr, _ai, bb) => {
+        launchCalls.push({ baseBranch: bb });
+        return { worktreePath: "/tmp/wt", workspaceRef: "workspace:1" };
+      },
+    });
+
+    const result = orch.executeAction(
+      { type: "launch", itemId: "B-1", baseBranch: "ninthwave/A-1" },
+      ctx,
+      deps,
+    );
+
+    expect(result.success).toBe(true);
+    // launchSingleItem should receive baseBranch: undefined (cleared)
+    expect(launchCalls).toHaveLength(1);
+    expect(launchCalls[0]!.baseBranch).toBeUndefined();
+    // item.baseBranch should also be cleared
+    expect(orch.getItem("B-1")!.baseBranch).toBeUndefined();
+  });
+
+  it("clears baseBranch when dependency is in merged state before launch", () => {
+    const orch = new Orchestrator({ wipLimit: 5, enableStacking: true });
+    orch.addItem(makeWorkItem("A-1"));
+    orch.addItem(makeWorkItem("B-1", ["A-1"]));
+
+    orch.setState("A-1", "merged");
+
+    orch.setState("B-1", "launching");
+    orch.getItem("B-1")!.baseBranch = "ninthwave/A-1";
+
+    const launchCalls: Array<{ baseBranch?: string }> = [];
+    const deps = makeMinimalDeps({
+      launchSingleItem: (_item, _wd, _wtd, _pr, _ai, bb) => {
+        launchCalls.push({ baseBranch: bb });
+        return { worktreePath: "/tmp/wt", workspaceRef: "workspace:1" };
+      },
+    });
+
+    const result = orch.executeAction(
+      { type: "launch", itemId: "B-1", baseBranch: "ninthwave/A-1" },
+      ctx,
+      deps,
+    );
+
+    expect(result.success).toBe(true);
+    expect(launchCalls[0]!.baseBranch).toBeUndefined();
+    expect(orch.getItem("B-1")!.baseBranch).toBeUndefined();
+  });
+
+  it("preserves baseBranch when dependency is still in ci-passed", () => {
+    const orch = new Orchestrator({ wipLimit: 5, enableStacking: true });
+    orch.addItem(makeWorkItem("A-1"));
+    orch.addItem(makeWorkItem("B-1", ["A-1"]));
+
+    // A is still in flight (ci-passed) -- baseBranch should be preserved
+    orch.setState("A-1", "ci-passed");
+    orch.getItem("A-1")!.prNumber = 10;
+
+    orch.setState("B-1", "launching");
+    orch.getItem("B-1")!.baseBranch = "ninthwave/A-1";
+
+    const launchCalls: Array<{ baseBranch?: string }> = [];
+    const deps = makeMinimalDeps({
+      launchSingleItem: (_item, _wd, _wtd, _pr, _ai, bb) => {
+        launchCalls.push({ baseBranch: bb });
+        return { worktreePath: "/tmp/wt", workspaceRef: "workspace:1" };
+      },
+    });
+
+    const result = orch.executeAction(
+      { type: "launch", itemId: "B-1", baseBranch: "ninthwave/A-1" },
+      ctx,
+      deps,
+    );
+
+    expect(result.success).toBe(true);
+    expect(launchCalls[0]!.baseBranch).toBe("ninthwave/A-1");
+    expect(orch.getItem("B-1")!.baseBranch).toBe("ninthwave/A-1");
+  });
+
+  it("clears baseBranch when dependency item is unknown", () => {
+    const orch = new Orchestrator({ wipLimit: 5, enableStacking: true });
+    // Only add B -- A is unknown (maybe removed from work items)
+    orch.addItem(makeWorkItem("B-1", ["A-1"]));
+
+    orch.setState("B-1", "launching");
+    orch.getItem("B-1")!.baseBranch = "ninthwave/A-1";
+
+    const launchCalls: Array<{ baseBranch?: string }> = [];
+    const deps = makeMinimalDeps({
+      launchSingleItem: (_item, _wd, _wtd, _pr, _ai, bb) => {
+        launchCalls.push({ baseBranch: bb });
+        return { worktreePath: "/tmp/wt", workspaceRef: "workspace:1" };
+      },
+    });
+
+    const result = orch.executeAction(
+      { type: "launch", itemId: "B-1", baseBranch: "ninthwave/A-1" },
+      ctx,
+      deps,
+    );
+
+    expect(result.success).toBe(true);
+    expect(launchCalls[0]!.baseBranch).toBeUndefined();
+    expect(orch.getItem("B-1")!.baseBranch).toBeUndefined();
+  });
+});
+
 describe("executeMerge conflict-aware rebase", () => {
   function makeMinimalDeps(overrides: Partial<OrchestratorDeps> = {}): OrchestratorDeps {
     return {

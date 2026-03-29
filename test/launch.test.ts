@@ -590,6 +590,90 @@ describe("launchSingleItem", () => {
   });
 });
 
+// ── Stacked launch fallback when dep branch is gone (H-SL-1) ───────
+
+describe("launchSingleItem stacked fallback on fetch failure", () => {
+  const originalEnv = { ...process.env };
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+    process.env.NINTHWAVE_AI_TOOL = "claude";
+  });
+
+  afterEach(() => {
+    process.env = { ...originalEnv };
+    cleanupTempRepos();
+  });
+
+  it("falls back to main when fetchOrigin throws on baseBranch", async () => {
+    const mockMux = createMockMux();
+    const deps = createMockLaunchDeps();
+    const repo = setupTempRepo();
+    const workDir = setupWorkItemsDir(repo);
+    const worktreeDir = join(repo, ".worktrees");
+    const items = parseWorkItems(workDir, worktreeDir);
+    const item = items.find((i) => i.id === "M-CI-1")!;
+
+    // fetchOrigin throws when called with the dep branch (simulating deleted branch)
+    deps.fetchOrigin = vi.fn((repoRoot: string, branch: string) => {
+      if (branch === "ninthwave/A-1") {
+        throw new Error("fatal: invalid reference: origin/ninthwave/A-1");
+      }
+      // Allow main fetch to succeed
+    });
+
+    await captureOutput(() => {
+      const res = launchSingleItem(item, workDir, worktreeDir, repo, "claude", mockMux, {
+        baseBranch: "ninthwave/A-1",
+      }, deps);
+      expect(res).not.toBeNull();
+    });
+
+    // Should have attempted to fetch the dep branch, then fallen back to main
+    expect(deps.fetchOrigin).toHaveBeenCalledWith(repo, "ninthwave/A-1");
+    expect(deps.fetchOrigin).toHaveBeenCalledWith(repo, "main");
+
+    // createWorktree should be called with "HEAD" (not "origin/ninthwave/A-1")
+    expect(deps.createWorktree).toHaveBeenCalledWith(
+      repo,
+      expect.stringContaining("ninthwave-M-CI-1"),
+      "ninthwave/M-CI-1",
+      "HEAD",
+    );
+  });
+
+  it("preserves origin/baseBranch startPoint when fetchOrigin succeeds", async () => {
+    const mockMux = createMockMux();
+    const deps = createMockLaunchDeps();
+    const repo = setupTempRepo();
+    const workDir = setupWorkItemsDir(repo);
+    const worktreeDir = join(repo, ".worktrees");
+    const items = parseWorkItems(workDir, worktreeDir);
+    const item = items.find((i) => i.id === "M-CI-1")!;
+
+    // fetchOrigin succeeds for all branches
+    deps.fetchOrigin = vi.fn();
+
+    await captureOutput(() => {
+      launchSingleItem(item, workDir, worktreeDir, repo, "claude", mockMux, {
+        baseBranch: "ninthwave/A-1",
+      }, deps);
+    });
+
+    // Should only fetch the dep branch (not main)
+    expect(deps.fetchOrigin).toHaveBeenCalledWith(repo, "ninthwave/A-1");
+    expect(deps.fetchOrigin).not.toHaveBeenCalledWith(repo, "main");
+
+    // createWorktree should use the dep branch as startPoint
+    expect(deps.createWorktree).toHaveBeenCalledWith(
+      repo,
+      expect.stringContaining("ninthwave-M-CI-1"),
+      "ninthwave/M-CI-1",
+      "origin/ninthwave/A-1",
+    );
+  });
+});
+
 describe("launchSingleItem external worktree handling", () => {
   const originalEnv = { ...process.env };
 
