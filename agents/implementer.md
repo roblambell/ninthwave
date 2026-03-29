@@ -1,7 +1,7 @@
 ---
 name: ninthwave-implementer
 description: "ninthwave orchestration agent -- implements work items during `nw watch` sessions"
-model: inherit
+model: opus
 ---
 
 If no ninthwave work item context is available to you (no item ID,

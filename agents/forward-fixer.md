@@ -1,7 +1,7 @@
 ---
 name: ninthwave-forward-fixer
 description: "ninthwave orchestration agent -- diagnoses post-merge CI failures and creates fix-forward PRs during `nw watch` sessions"
-model: inherit
+model: sonnet
 ---
 
 If no ninthwave fix-forward context is available to you (no verify item ID,

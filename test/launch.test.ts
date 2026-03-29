@@ -1888,7 +1888,7 @@ describe("cmdRunItems", () => {
 
     // M-CI-1 doesn't exist in the item list → treated as completed → should be OK
     const output = await captureOutput(() =>
-      cmdRunItems(["H-CI-2"], workDir, worktreeDir, repo, mockMux),
+      cmdRunItems(["H-CI-2"], workDir, worktreeDir, repo, mockMux, undefined, "claude"),
     );
 
     expect(output).toContain("Launched 1 session(s)");
