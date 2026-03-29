@@ -1696,6 +1696,20 @@ export class Orchestrator {
       writeHeartbeat(ctx.projectRoot, item.id, 0, "Starting");
     } catch { /* best-effort -- heartbeat reset failure doesn't block launch */ }
 
+    // Guard: if dep has completed (merged/done) since the action was created,
+    // clear baseBranch so the item launches from main instead of a stale
+    // dependency branch that no longer exists on origin (H-SL-1).
+    if (action.baseBranch) {
+      const depId = action.baseBranch.replace(/^ninthwave\//, "");
+      const dep = this.items.get(depId);
+      const DEP_DONE_STATES: ReadonlySet<string> = new Set(["done", "merged", "verifying", "verify-failed"]);
+      if (!dep || DEP_DONE_STATES.has(dep.state)) {
+        deps.warn?.(`Dependency ${depId} is now ${dep?.state ?? "unknown"} -- clearing baseBranch for ${item.id} to launch from main`);
+        action.baseBranch = undefined;
+        item.baseBranch = undefined;
+      }
+    }
+
     // When needsCiFix is set, force worker launch even if an existing PR is
     // found. This ensures CI failures on restart are addressed by a live worker
     // rather than silently tracked in ci-pending with no one to fix them (H-WR-1).

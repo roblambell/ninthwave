@@ -4694,7 +4694,12 @@ describe("Orchestrator", () => {
     describe("executeLaunch passes baseBranch", () => {
       it("passes baseBranch through to deps.launchSingleItem", () => {
         const deps = mockDeps();
-        orch.addItem(makeWorkItem("A-1-1"));
+        // Add dep item in a stackable state so guard preserves baseBranch
+        orch.addItem(makeWorkItem("A-1-0"));
+        orch.setState("A-1-0", "ci-passed");
+        orch.getItem("A-1-0")!.prNumber = 10;
+
+        orch.addItem(makeWorkItem("A-1-1", ["A-1-0"]));
         orch.getItem("A-1-1")!.reviewCompleted = true;
         orch.setState("A-1-1", "launching");
 

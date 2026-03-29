@@ -207,7 +207,16 @@ export function ensureWorktreeAndBranch(
   if (baseBranch) {
     info(`Fetching dependency branch ${baseBranch} in ${basename(targetRepo)} for stacked launch of ${item.id}`);
     try { deps.fetchOrigin(targetRepo, baseBranch); } catch (e) {
-      warn(`Failed to fetch origin/${baseBranch} for ${item.id}: ${e instanceof Error ? e.message : e}. Worktree may be outdated.`);
+      // Dependency branch no longer exists on origin (e.g., merged and deleted).
+      // Fall back to main so the worktree isn't created from a stale ref (H-SL-1).
+      warn(`Failed to fetch origin/${baseBranch} for ${item.id}: ${e instanceof Error ? e.message : e}. Falling back to main.`);
+      baseBranch = undefined;
+      try { deps.fetchOrigin(targetRepo, "main"); } catch (e2) {
+        warn(`Failed to fetch origin/main for ${item.id}: ${e2 instanceof Error ? e2.message : e2}. Worktree may be outdated.`);
+      }
+      try { deps.ffMerge(targetRepo, "main"); } catch (e2) {
+        warn(`Failed to fast-forward main for ${item.id}: ${e2 instanceof Error ? e2.message : e2}. Worktree may be outdated.`);
+      }
     }
   } else {
     info(`Fetching latest main in ${basename(targetRepo)} before creating worktree for ${item.id}`);
