@@ -7,6 +7,7 @@ import { setupTempRepo, cleanupTempRepos } from "./helpers.ts";
 import type { Multiplexer } from "../core/mux.ts";
 
 // Only mock modules that don't have their own test files.
+// lint-ignore: no-leaked-mock
 vi.mock("../core/git.ts", () => ({
   isBranchMerged: vi.fn(() => false),
   removeWorktree: vi.fn(),
@@ -14,6 +15,7 @@ vi.mock("../core/git.ts", () => ({
   deleteRemoteBranch: vi.fn(),
 }));
 
+// lint-ignore: no-leaked-mock
 vi.mock("../core/gh.ts", () => ({
   prList: vi.fn(() => []),
 }));

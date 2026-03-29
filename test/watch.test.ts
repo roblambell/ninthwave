@@ -5,7 +5,8 @@ import { join } from "path";
 import { mkdirSync, writeFileSync } from "fs";
 import { setupTempRepo, cleanupTempRepos } from "./helpers.ts";
 
-// Mock gh module (no dedicated test file)
+// Mock gh module
+// lint-ignore: no-leaked-mock
 vi.mock("../core/gh.ts", () => ({
   prList: vi.fn(() => []),
   prView: vi.fn(() => ({})),

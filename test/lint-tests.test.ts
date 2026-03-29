@@ -297,10 +297,66 @@ function checkNoEmDash(
   return violations;
 }
 
+function checkNoLeakedMock(
+  file: { name: string; content: string },
+  testFileNames: Set<string>,
+): Violation[] {
+  const violations: Violation[] = [];
+  const lines = file.content.split("\n");
+  const pattern = /vi\.mock\(["']\.\.\/core\/([^"']+)["']/;
+
+  for (let i = 0; i < lines.length; i++) {
+    const line = lines[i]!;
+    // Skip comment lines -- they mention vi.mock in prose, not code
+    if (line.trimStart().startsWith("//")) continue;
+
+    const match = pattern.exec(line);
+    if (match && !isIgnored(lines, i, "no-leaked-mock")) {
+      const modulePath = match[1]!;
+      const moduleName = modulePath.replace(/\.ts$/, "");
+      const correspondingTestFile = `${moduleName}.test.ts`;
+
+      if (testFileNames.has(correspondingTestFile)) {
+        violations.push({
+          file: file.name,
+          line: i + 1,
+          rule: "no-leaked-mock",
+          message: `vi.mock("../core/${modulePath}") leaks -- ${correspondingTestFile} has its own tests for this module`,
+        });
+      }
+    }
+  }
+
+  return violations;
+}
+
+function checkNoDescribeSkip(
+  file: { name: string; content: string },
+): Violation[] {
+  const violations: Violation[] = [];
+  const lines = file.content.split("\n");
+  const pattern = /\b(describe|it|test)\.skip\b/;
+
+  for (let i = 0; i < lines.length; i++) {
+    const match = pattern.exec(lines[i]!);
+    if (match && !isInsideString(lines[i]!, match.index) && !isIgnored(lines, i, "no-describe-skip")) {
+      violations.push({
+        file: file.name,
+        line: i + 1,
+        rule: "no-describe-skip",
+        message: `${match[1]}.skip disables tests silently -- remove it or add a lint-ignore comment`,
+      });
+    }
+  }
+
+  return violations;
+}
+
 // ── Run all rules ────────────────────────────────────────────────────
 
 function runAllRules(files: { name: string; content: string }[]): Violation[] {
   const violations: Violation[] = [];
+  const testFileNames = new Set(files.map((f) => f.name));
   for (const file of files) {
     violations.push(
       ...checkNoLeakedServer(file),
@@ -309,6 +365,8 @@ function runAllRules(files: { name: string; content: string }[]): Violation[] {
       ...checkNoUnresetGlobals(file),
       ...checkNoUnrestoredProcessExit(file),
       ...checkNoUnboundedOrchestrateLoop(file),
+      ...checkNoLeakedMock(file, testFileNames),
+      ...checkNoDescribeSkip(file),
     );
   }
   return violations;
@@ -699,6 +757,120 @@ describe("test", () => { it("works", () => {}); });`,
         content: `const msg = "hello ${emDash} world"; // lint-ignore: no-em-dash`,
       };
       const violations = checkNoEmDash(file);
+      expect(violations.length).toBe(0);
+    });
+  });
+
+  describe("no-leaked-mock", () => {
+    const testFiles = new Set(["git.test.ts", "gh.test.ts", "cmux.test.ts"]);
+
+    it("detects vi.mock for modules with own test files", () => {
+      const file = {
+        name: "foo.test.ts",
+        content: `vi.mock("../core/git.ts", () => ({ fetch: vi.fn() }));`,
+      };
+      const violations = checkNoLeakedMock(file, testFiles);
+      expect(violations.length).toBe(1);
+      expect(violations[0]!.rule).toBe("no-leaked-mock");
+      expect(violations[0]!.message).toContain("git.test.ts");
+    });
+
+    it("does NOT flag vi.mock for modules without own test files", () => {
+      const file = {
+        name: "foo.test.ts",
+        content: `vi.mock("../core/output.ts", () => ({ log: vi.fn() }));`,
+      };
+      const violations = checkNoLeakedMock(file, testFiles);
+      expect(violations.length).toBe(0);
+    });
+
+    it("respects lint-ignore suppression", () => {
+      const file = {
+        name: "foo.test.ts",
+        content: `// lint-ignore: no-leaked-mock\nvi.mock("../core/git.ts", () => ({}));`,
+      };
+      const violations = checkNoLeakedMock(file, testFiles);
+      expect(violations.length).toBe(0);
+    });
+
+    it("ignores comment lines mentioning vi.mock", () => {
+      const file = {
+        name: "foo.test.ts",
+        content: `// Mock leakage note: clean.test.ts vi.mock("../core/git.ts")`,
+      };
+      const violations = checkNoLeakedMock(file, testFiles);
+      expect(violations.length).toBe(0);
+    });
+
+    it("detects multiple vi.mock calls in one file", () => {
+      const file = {
+        name: "foo.test.ts",
+        content: [
+          `vi.mock("../core/git.ts", () => ({}));`,
+          `vi.mock("../core/gh.ts", () => ({}));`,
+        ].join("\n"),
+      };
+      const violations = checkNoLeakedMock(file, testFiles);
+      expect(violations.length).toBe(2);
+    });
+  });
+
+  describe("no-describe-skip", () => {
+    it("detects describe.skip", () => {
+      const file = {
+        name: "fixture.test.ts",
+        content: `describe.skip("disabled suite", () => { it("never runs", () => {}); });`,
+      };
+      const violations = checkNoDescribeSkip(file);
+      expect(violations.length).toBe(1);
+      expect(violations[0]!.rule).toBe("no-describe-skip");
+      expect(violations[0]!.message).toContain("describe.skip");
+    });
+
+    it("detects it.skip", () => {
+      const file = {
+        name: "fixture.test.ts",
+        content: `describe("suite", () => { it.skip("disabled test", () => {}); });`,
+      };
+      const violations = checkNoDescribeSkip(file);
+      expect(violations.length).toBe(1);
+      expect(violations[0]!.message).toContain("it.skip");
+    });
+
+    it("detects test.skip", () => {
+      const file = {
+        name: "fixture.test.ts",
+        content: `test.skip("disabled test", () => {});`,
+      };
+      const violations = checkNoDescribeSkip(file);
+      expect(violations.length).toBe(1);
+      expect(violations[0]!.message).toContain("test.skip");
+    });
+
+    it("passes when no .skip calls exist", () => {
+      const file = {
+        name: "fixture.test.ts",
+        content: `describe("suite", () => { it("runs", () => {}); });`,
+      };
+      const violations = checkNoDescribeSkip(file);
+      expect(violations.length).toBe(0);
+    });
+
+    it("respects lint-ignore suppression", () => {
+      const file = {
+        name: "fixture.test.ts",
+        content: `// lint-ignore: no-describe-skip\ndescribe.skip("disabled", () => {});`,
+      };
+      const violations = checkNoDescribeSkip(file);
+      expect(violations.length).toBe(0);
+    });
+
+    it("ignores string literals", () => {
+      const file = {
+        name: "fixture.test.ts",
+        content: `expect(output).toContain("describe.skip");`,
+      };
+      const violations = checkNoDescribeSkip(file);
       expect(violations.length).toBe(0);
     });
   });

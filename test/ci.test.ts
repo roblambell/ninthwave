@@ -3,7 +3,8 @@
 import { describe, it, expect, vi, beforeEach, afterEach, type Mock } from "vitest";
 import { setupTempRepo, cleanupTempRepos } from "./helpers.ts";
 
-// Mock gh module (no dedicated test file)
+// Mock gh module
+// lint-ignore: no-leaked-mock
 vi.mock("../core/gh.ts", () => ({
   prChecks: vi.fn(() => []),
 }));

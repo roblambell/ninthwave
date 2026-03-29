@@ -3,6 +3,7 @@
 
 import { describe, it, expect, vi } from "vitest";
 
+// lint-ignore: no-leaked-mock
 vi.mock("../core/cmux.ts", () => ({
   isAvailable: vi.fn(() => true),
   launchWorkspace: vi.fn(() => "workspace:42"),

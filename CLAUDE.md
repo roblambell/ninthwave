@@ -38,7 +38,7 @@ No build step -- Bun executes TypeScript directly. Changes take effect immediate
 - Tests have three layers of timeout protection: 5s per-test (bun default), 90s global process timeout (`test/setup-global.ts` via preload), and 120s shell-level timeout (pre-commit + CI).
 - `--smol` flag is used on all test runs for tighter GC. `--bail` fails fast on first failure.
 - `test/lint-tests.test.ts` scans all test files for dangerous patterns. It runs as part of the regular test suite -- auto-enforced in pre-commit and CI.
-- **Lint rules:** `no-leaked-server` (Bun.serve without cleanup), `no-uncleared-interval` (setInterval without clear), `no-long-timeout` (setTimeout > 30s), `no-unreset-globals` (globalThis override without restore).
+- **Lint rules:** `no-leaked-server` (Bun.serve without cleanup), `no-uncleared-interval` (setInterval without clear), `no-long-timeout` (setTimeout > 30s), `no-unreset-globals` (globalThis override without restore), `no-leaked-mock` (vi.mock of module with its own test file), `no-describe-skip` (describe.skip/it.skip/test.skip).
 - To suppress a lint rule: add `// lint-ignore: <rule-id>` on or above the flagged line.
 
 ## Dogfooding Mode

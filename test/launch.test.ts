@@ -11,6 +11,7 @@ import type { Multiplexer } from "../core/mux.ts";
 // transitive dependencies of other tested modules.
 // Avoid mocking shell.ts (used by version-bump.test.ts via git.ts)
 // and partitions.ts / cross-repo.ts (have dedicated test files).
+// lint-ignore: no-leaked-mock
 vi.mock("../core/git.ts", () => ({
   fetchOrigin: vi.fn(),
   ffMerge: vi.fn(),
