@@ -382,8 +382,8 @@ export async function runTuiSelectionFlow(
       mergeStrategy: result.mergeStrategy,
       wipLimit: result.wipLimit,
       allSelected: result.allSelected,
-      reviewMode: "off",   // temp default until H-WJ-3
-      crewAction: null,    // temp default until H-WJ-3
+      reviewMode: result.reviewMode,
+      crewAction: result.crewAction,
     };
   } finally {
     // Restore terminal state
