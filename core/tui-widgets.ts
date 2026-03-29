@@ -7,6 +7,8 @@ import { BOLD, DIM, GREEN, YELLOW, CYAN, RESET, RED } from "./output.ts";
 import type { WorkItem } from "./types.ts";
 import { PRIORITY_NUM } from "./types.ts";
 import type { MergeStrategy } from "./orchestrator.ts";
+import type { CrewAction } from "./commands/crew.ts";
+import { CREW_CODE_PATTERN } from "./commands/crew.ts";
 
 // ── ANSI escape helpers ─────────────────────────────────────────────
 
@@ -63,12 +65,19 @@ export interface NumberPickerResult {
   cancelled: boolean;
 }
 
+export interface TextInputResult {
+  value: string;
+  cancelled: boolean;
+}
+
 /** Result of the full selection screen flow. */
 export interface SelectionScreenResult {
   itemIds: string[];
   allSelected: boolean;
   mergeStrategy: MergeStrategy;
   wipLimit: number;
+  reviewMode: "all" | "mine" | "off";
+  crewAction: CrewAction | null;
   cancelled: boolean;
 }
 
@@ -397,6 +406,98 @@ export function runNumberPicker(
   });
 }
 
+// ── Text Input Widget ───────────────────────────────────────────────
+
+/**
+ * Minimal raw-mode text input. Captures printable characters, handles
+ * backspace, and validates on Enter with a provided `validate` function.
+ * Returns the typed value or cancels on Esc / Ctrl+C.
+ */
+export function runTextInput(
+  io: WidgetIO,
+  opts: {
+    title?: string;
+    hint?: string;
+    validate?: (value: string) => string | null;
+  } = {},
+): Promise<TextInputResult> {
+  return new Promise((resolve) => {
+    let value = "";
+    let error = "";
+
+    const render = () => {
+      let out = CURSOR_HOME + SHOW_CURSOR;
+
+      const title = opts.title ?? "Enter text";
+      out += `${BOLD}${title}${RESET}${CLEAR_LINE}\n`;
+      out += `${CLEAR_LINE}\n`;
+
+      if (opts.hint) {
+        out += `  ${DIM}${opts.hint}${RESET}${CLEAR_LINE}\n`;
+        out += `${CLEAR_LINE}\n`;
+      }
+
+      out += `  ${CYAN}>${RESET} ${value}${CLEAR_LINE}\n`;
+      out += `${CLEAR_LINE}\n`;
+
+      if (error) {
+        out += `${RED}${error}${RESET}${CLEAR_LINE}\n`;
+      } else {
+        out += `${CLEAR_LINE}\n`;
+      }
+
+      out += `${CLEAR_LINE}\n`;
+      out += `${DIM}Enter confirm  Esc cancel${RESET}${CLEAR_LINE}\n`;
+      out += `${CLEAR_LINE}`;
+
+      io.write(out);
+    };
+
+    const handler = (key: string) => {
+      if (key === "\r") {
+        // Enter: validate
+        if (opts.validate) {
+          const errMsg = opts.validate(value);
+          if (errMsg !== null) {
+            error = errMsg;
+            render();
+            return;
+          }
+        }
+        io.offKey(handler);
+        resolve({ value, cancelled: false });
+        return;
+      }
+
+      if (key === "\x1B" || key === "\x03") {
+        // Escape or Ctrl+C: cancel
+        io.offKey(handler);
+        resolve({ value: "", cancelled: true });
+        return;
+      }
+
+      if (key === "\x7f" || key === "\x08") {
+        // Backspace / DEL
+        value = value.slice(0, -1);
+        error = "";
+        render();
+        return;
+      }
+
+      // Printable character (single byte, code >= 32)
+      if (key.length === 1 && key.charCodeAt(0) >= 32) {
+        value += key;
+        error = "";
+        render();
+        return;
+      }
+    };
+
+    io.onKey(handler);
+    render();
+  });
+}
+
 // ── Confirmation Widget ─────────────────────────────────────────────
 
 /**
@@ -470,6 +571,48 @@ const MERGE_STRATEGY_OPTIONS: SingleSelectOption<MergeStrategy>[] = [
   },
 ];
 
+/** AI review mode options for the picker. */
+const REVIEW_MODE_OPTIONS: SingleSelectOption<"all" | "mine" | "off">[] = [
+  {
+    value: "all",
+    label: "All PRs",
+    description: "review work item PRs and external contributor PRs",
+  },
+  {
+    value: "mine",
+    label: "My PRs",
+    description: "review only ninthwave work item PRs",
+  },
+  {
+    value: "off",
+    label: "Off",
+    description: "no AI reviews",
+  },
+];
+
+/** Crew mode option values for the picker. */
+type CrewOption = "solo" | "join" | "create";
+
+/** Crew collaboration options for the picker. */
+const CREW_OPTIONS: SingleSelectOption<CrewOption>[] = [
+  {
+    value: "solo",
+    label: "Solo",
+    description: "run on this machine only",
+    isDefault: true,
+  },
+  {
+    value: "join",
+    label: "Join crew",
+    description: "enter a code to collaborate",
+  },
+  {
+    value: "create",
+    label: "Create crew",
+    description: "start a new crew session",
+  },
+];
+
 /**
  * Sort work items by priority then ID (same order as the old readline prompts).
  */
@@ -509,7 +652,9 @@ export function toCheckboxItems(items: WorkItem[]): CheckboxItem[] {
  * 1. Checkbox list for item selection
  * 2. Single-select for merge strategy
  * 3. Number picker for WIP limit
- * 4. Summary confirmation
+ * 4. Single-select for AI review mode
+ * 5. Single-select for crew collaboration (skippable)
+ * 6. Summary confirmation
  *
  * Renders entirely in the alt-screen buffer using raw keypresses.
  * Returns null if cancelled at any step.
@@ -521,6 +666,7 @@ export async function runSelectionScreen(
   io: WidgetIO,
   items: WorkItem[],
   defaultWipLimit: number,
+  opts: { defaultReviewMode?: "all" | "mine" | "off"; showCrewStep?: boolean } = {},
 ): Promise<SelectionScreenResult | null> {
   if (items.length === 0) {
     return null;
@@ -579,21 +725,106 @@ export async function runSelectionScreen(
     return null;
   }
 
-  // Step 4: Confirmation summary
+  // Step 4: AI reviews
+  const defaultReviewMode = opts.defaultReviewMode ?? "off";
+  const reviewModeOptions = REVIEW_MODE_OPTIONS.map((o) => ({
+    ...o,
+    isDefault: o.value === defaultReviewMode,
+  }));
+
   io.write(CLEAR_SCREEN);
+  const reviewResult = await runSingleSelect<"all" | "mine" | "off">(
+    io,
+    reviewModeOptions,
+    { title: "Ninthwave \u00b7 AI reviews" },
+  );
+
+  if (reviewResult.cancelled) {
+    io.write(SHOW_CURSOR);
+    return null;
+  }
+
+  // Step 5: Crew collaboration (skippable for run-more re-entry)
+  let crewAction: CrewAction | null = null;
+
+  if (opts.showCrewStep !== false) {
+    io.write(CLEAR_SCREEN);
+    const crewResult = await runSingleSelect<CrewOption>(
+      io,
+      CREW_OPTIONS,
+      { title: "Ninthwave \u00b7 Collaboration" },
+    );
+
+    if (crewResult.cancelled) {
+      io.write(SHOW_CURSOR);
+      return null;
+    }
+
+    if (crewResult.value === "create") {
+      crewAction = { type: "create" };
+    } else if (crewResult.value === "join") {
+      io.write(CLEAR_SCREEN);
+      const textResult = await runTextInput(io, {
+        title: "Ninthwave \u00b7 Join crew",
+        hint: "Format: XXX-XXX (e.g. xK2-9fB)",
+        validate: (v) =>
+          CREW_CODE_PATTERN.test(v)
+            ? null
+            : "Invalid format. Expected XXX-XXX (e.g. xK2-9fB)",
+      });
+      io.write(HIDE_CURSOR);
+
+      if (textResult.cancelled) {
+        io.write(SHOW_CURSOR);
+        return null;
+      }
+
+      crewAction = { type: "join", code: textResult.value };
+    }
+    // "solo" => crewAction remains null
+  }
+
+  // Step 6: Confirmation summary
+  // Items summary
+  let itemLines: string[];
+  if (itemResult.allSelected) {
+    itemLines = [
+      `${BOLD}Items:${RESET}  All ${DIM}(dynamic \u2014 new items auto-included)${RESET}`,
+    ];
+  } else {
+    itemLines = [
+      `${BOLD}Items (${selectedItemIds.length}):${RESET}`,
+      ...selectedItemIds.map((id) => {
+        const item = sorted.find((t) => t.id === id);
+        return `  ${CYAN}${id}${RESET}  ${item?.title ?? ""}`;
+      }),
+    ];
+  }
+
+  // Review mode label
+  const reviewLabel =
+    reviewResult.value === "all" ? "All PRs"
+    : reviewResult.value === "mine" ? "My PRs"
+    : "Off";
+
+  // Crew label
+  const crewLabel =
+    crewAction === null ? "Solo"
+    : crewAction.type === "create" ? "Creating new crew"
+    : `Joining crew ${crewAction.code}`;
+
   const summaryLines = [
-    `${BOLD}Items (${selectedItemIds.length}):${RESET}`,
-    ...selectedItemIds.map((id) => {
-      const item = sorted.find((t) => t.id === id);
-      return `  ${CYAN}${id}${RESET}  ${item?.title ?? ""}`;
-    }),
+    ...itemLines,
     "",
     `${BOLD}Merge strategy:${RESET}  ${strategyResult.value}`,
     `${BOLD}WIP limit:${RESET}       ${wipResult.value}`,
+    `${BOLD}AI reviews:${RESET}      ${reviewLabel}`,
+    `${BOLD}Crew:${RESET}            ${crewLabel}`,
   ];
 
+  io.write(CLEAR_SCREEN);
   const confirmed = await runConfirm(io, {
-    title: "Start orchestration?",
+    title: "Ninthwave \u00b7 Start orchestration?",
     lines: summaryLines,
   });
 
@@ -608,6 +839,8 @@ export async function runSelectionScreen(
     allSelected: itemResult.allSelected,
     mergeStrategy: strategyResult.value,
     wipLimit: wipResult.value,
+    reviewMode: reviewResult.value,
+    crewAction,
     cancelled: false,
   };
 }

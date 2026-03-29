@@ -6,12 +6,14 @@ import {
   runSingleSelect,
   runNumberPicker,
   runConfirm,
+  runTextInput,
   runSelectionScreen,
   sortWorkItems,
   toCheckboxItems,
   type WidgetIO,
   type CheckboxItem,
   type SingleSelectOption,
+  type TextInputResult,
 } from "../core/tui-widgets.ts";
 import type { WorkItem } from "../core/types.ts";
 import type { MergeStrategy } from "../core/orchestrator.ts";
@@ -810,7 +812,7 @@ describe("runSelectionScreen", () => {
     expect(result).toBeNull();
   });
 
-  it("completes full flow: select items → strategy → WIP → confirm", async () => {
+  it("completes full flow: select items → strategy → WIP → review → crew → confirm", async () => {
     const { io, sendKeyBatches } = createMockIO();
     const items = [
       makeWorkItem("A-1", "First task", "high"),
@@ -824,7 +826,9 @@ describe("runSelectionScreen", () => {
       ["\r"],        // Step 1: Confirm all items (all pre-checked)
       ["\r"],        // Step 2: Accept default strategy (auto)
       ["\r"],        // Step 3: Accept default WIP (4)
-      ["\r"],        // Step 4: Confirm summary
+      ["\r"],        // Step 4: Accept default review mode (off)
+      ["\r"],        // Step 5: Accept default crew (Solo)
+      ["\r"],        // Step 6: Confirm summary
     );
 
     const result = await resultPromise;
@@ -887,6 +891,8 @@ describe("runSelectionScreen", () => {
       ["\r"],       // Confirm all items (pre-checked)
       ["\r"],       // Accept strategy
       ["\r"],       // Accept WIP
+      ["\r"],       // Accept review mode
+      ["\r"],       // Accept crew
       ["n"],        // Cancel confirmation
     );
 
@@ -908,6 +914,8 @@ describe("runSelectionScreen", () => {
       ["\r"],        // Confirm all items (pre-checked)
       ["\r"],        // Accept strategy
       ["\r"],        // Accept WIP
+      ["\r"],        // Accept review mode
+      ["\r"],        // Accept crew
       ["\r"],        // Confirm
     );
 
@@ -930,6 +938,8 @@ describe("runSelectionScreen", () => {
       ["\r"],                                      // Confirm all items (pre-checked)
       ["\x1B[B", "\r"],                           // Select manual strategy
       ["\x1B[A", "\x1B[A", "\x1B[A", "\r"],      // Increase WIP to 7
+      ["\r"],                                      // Accept review mode
+      ["\r"],                                      // Accept crew
       ["\r"],                                      // Confirm
     );
 
@@ -948,7 +958,7 @@ describe("runSelectionScreen", () => {
 
     const resultPromise = runSelectionScreen(io, items, 4);
     // All items pre-checked; just confirm each step
-    sendKeyBatches(["\r"], ["\r"], ["\r"], ["\r"]);
+    sendKeyBatches(["\r"], ["\r"], ["\r"], ["\r"], ["\r"], ["\r"]);
 
     const result = await resultPromise;
     expect(result).not.toBeNull();
@@ -966,7 +976,7 @@ describe("runSelectionScreen", () => {
 
     const resultPromise = runSelectionScreen(io, items, 4);
     // All items pre-checked; just confirm each step
-    sendKeyBatches(["\r"], ["\r"], ["\r"], ["\r"]);
+    sendKeyBatches(["\r"], ["\r"], ["\r"], ["\r"], ["\r"], ["\r"]);
 
     const result = await resultPromise;
     expect(result).not.toBeNull();
@@ -981,7 +991,7 @@ describe("runSelectionScreen", () => {
 
     const resultPromise = runSelectionScreen(io, items, 4);
     // Confirm all pre-checked items
-    sendKeyBatches(["\r"], ["\r"], ["\r"], ["\r"]);
+    sendKeyBatches(["\r"], ["\r"], ["\r"], ["\r"], ["\r"], ["\r"]);
 
     const result = await resultPromise;
     expect(result).not.toBeNull();
@@ -995,7 +1005,7 @@ describe("runSelectionScreen", () => {
 
     const resultPromise = runSelectionScreen(io, items, 4);
     // __ALL__ starts checked; confirm all
-    sendKeyBatches(["\r"], ["\r"], ["\r"], ["\r"]);
+    sendKeyBatches(["\r"], ["\r"], ["\r"], ["\r"], ["\r"], ["\r"]);
 
     const result = await resultPromise;
     expect(result).not.toBeNull();
@@ -1015,6 +1025,8 @@ describe("runSelectionScreen", () => {
       ["\x1B[B", "\x1B[B", " ", "\r"],  // Navigate to B-2, uncheck, confirm
       ["\r"],                             // Accept strategy
       ["\r"],                             // Accept WIP
+      ["\r"],                             // Accept review mode
+      ["\r"],                             // Accept crew
       ["\r"],                             // Confirm
     );
 
@@ -1024,6 +1036,549 @@ describe("runSelectionScreen", () => {
     expect(result!.itemIds).toContain("A-1");
     expect(result!.itemIds).not.toContain("B-2");
     expect(result!.itemIds).not.toContain("__ALL__");
+  });
+});
+
+// ── runTextInput widget ─────────────────────────────────────────────
+
+describe("runTextInput", () => {
+  it("accepts valid input on Enter", async () => {
+    const { io, sendKey, sendKeys } = createMockIO();
+    const validate = (v: string) => v.length > 0 ? null : "Required";
+
+    const resultPromise = runTextInput(io, { title: "Enter value", validate });
+    sendKeys(["h", "i", "\r"]);
+
+    const result = await resultPromise;
+    expect(result.cancelled).toBe(false);
+    expect(result.value).toBe("hi");
+  });
+
+  it("rejects invalid input with error and re-prompts", async () => {
+    const { io, sendKeys, getOutput } = createMockIO();
+    const validate = (v: string) =>
+      /^[A-Za-z0-9]{3}-[A-Za-z0-9]{3}$/.test(v) ? null : "Invalid format";
+
+    const resultPromise = runTextInput(io, { hint: "Format: XXX-XXX", validate });
+    // Type invalid ("bad" = 3 chars without hyphen), press Enter (error shown),
+    // backspace all 3 chars, then type valid code, confirm
+    sendKeys(["b", "a", "d", "\r",
+      "\x7f", "\x7f", "\x7f",         // backspace "bad"
+      "a", "B", "3", "-", "x", "Y", "9", "\r",
+    ]);
+
+    const result = await resultPromise;
+    expect(result.cancelled).toBe(false);
+    expect(result.value).toBe("aB3-xY9");
+    // Error message should have been rendered
+    expect(getOutput()).toContain("Invalid format");
+  });
+
+  it("rejects invalid input then accepts corrected input via backspace", async () => {
+    const { io, sendKeys } = createMockIO();
+    const validate = (v: string) =>
+      /^[A-Za-z0-9]{3}-[A-Za-z0-9]{3}$/.test(v) ? null : "Invalid format";
+
+    const resultPromise = runTextInput(io, { validate });
+    // Type valid crew code directly
+    sendKeys(["a", "B", "3", "-", "x", "Y", "9", "\r"]);
+
+    const result = await resultPromise;
+    expect(result.cancelled).toBe(false);
+    expect(result.value).toBe("aB3-xY9");
+  });
+
+  it("backspace removes last character", async () => {
+    const { io, sendKeys } = createMockIO();
+
+    const resultPromise = runTextInput(io);
+    sendKeys(["h", "e", "l", "p", "\x7f", "\r"]);
+
+    const result = await resultPromise;
+    expect(result.cancelled).toBe(false);
+    expect(result.value).toBe("hel");
+  });
+
+  it("backspace via \\x08 also removes last character", async () => {
+    const { io, sendKeys } = createMockIO();
+
+    const resultPromise = runTextInput(io);
+    sendKeys(["a", "b", "\x08", "\r"]);
+
+    const result = await resultPromise;
+    expect(result.cancelled).toBe(false);
+    expect(result.value).toBe("a");
+  });
+
+  it("Esc cancels and returns cancelled: true", async () => {
+    const { io, sendKeys } = createMockIO();
+
+    const resultPromise = runTextInput(io);
+    sendKeys(["h", "i", "\x1B"]);
+
+    const result = await resultPromise;
+    expect(result.cancelled).toBe(true);
+    expect(result.value).toBe("");
+  });
+
+  it("Ctrl+C cancels", async () => {
+    const { io, sendKeys } = createMockIO();
+
+    const resultPromise = runTextInput(io);
+    sendKeys(["\x03"]);
+
+    const result = await resultPromise;
+    expect(result.cancelled).toBe(true);
+  });
+
+  it("empty Enter with validate shows error", async () => {
+    const { io, sendKeys, getOutput } = createMockIO();
+    const validate = (v: string) => v.length > 0 ? null : "Cannot be empty";
+
+    const resultPromise = runTextInput(io, { validate });
+    // Empty Enter shows error, then type something and confirm
+    sendKeys(["\r", "x", "\r"]);
+
+    const result = await resultPromise;
+    expect(result.cancelled).toBe(false);
+    expect(result.value).toBe("x");
+    expect(getOutput()).toContain("Cannot be empty");
+  });
+
+  it("renders title and hint", async () => {
+    const { io, sendKeys, getOutput } = createMockIO();
+
+    const resultPromise = runTextInput(io, {
+      title: "Ninthwave \u00b7 Join crew",
+      hint: "Format: XXX-XXX (e.g. xK2-9fB)",
+    });
+    sendKeys(["\x1B"]);
+
+    await resultPromise;
+    const output = getOutput();
+    expect(output).toContain("Join crew");
+    expect(output).toContain("Format: XXX-XXX");
+  });
+
+  it("accepts without validate function", async () => {
+    const { io, sendKeys } = createMockIO();
+
+    const resultPromise = runTextInput(io);
+    sendKeys(["o", "k", "\r"]);
+
+    const result = await resultPromise;
+    expect(result.cancelled).toBe(false);
+    expect(result.value).toBe("ok");
+  });
+
+  it("ignores non-printable characters (escape sequences)", async () => {
+    const { io, sendKeys } = createMockIO();
+
+    const resultPromise = runTextInput(io);
+    // Arrow key sequences should be ignored, printable chars added
+    sendKeys(["a", "\x1B[A", "b", "\r"]);
+
+    const result = await resultPromise;
+    expect(result.cancelled).toBe(false);
+    expect(result.value).toBe("ab");
+  });
+});
+
+// ── Selection screen: AI review step ───────────────────────────────
+
+describe("runSelectionScreen -- AI review step", () => {
+  it("defaults to 'off' when no defaultReviewMode specified", async () => {
+    const { io, sendKeyBatches } = createMockIO();
+    const items = [makeWorkItem("A-1", "Task")];
+
+    const resultPromise = runSelectionScreen(io, items, 4);
+    sendKeyBatches(
+      ["\r"],  // items
+      ["\r"],  // strategy
+      ["\r"],  // WIP
+      ["\r"],  // review (accept default = off)
+      ["\r"],  // crew
+      ["\r"],  // confirm
+    );
+
+    const result = await resultPromise;
+    expect(result).not.toBeNull();
+    expect(result!.reviewMode).toBe("off");
+  });
+
+  it("defaults to 'all' when defaultReviewMode is 'all'", async () => {
+    const { io, sendKeyBatches } = createMockIO();
+    const items = [makeWorkItem("A-1", "Task")];
+
+    const resultPromise = runSelectionScreen(io, items, 4, { defaultReviewMode: "all" });
+    sendKeyBatches(
+      ["\r"],  // items
+      ["\r"],  // strategy
+      ["\r"],  // WIP
+      ["\r"],  // review (accept default = all)
+      ["\r"],  // crew
+      ["\r"],  // confirm
+    );
+
+    const result = await resultPromise;
+    expect(result).not.toBeNull();
+    expect(result!.reviewMode).toBe("all");
+  });
+
+  it("defaults to 'mine' when defaultReviewMode is 'mine'", async () => {
+    const { io, sendKeyBatches } = createMockIO();
+    const items = [makeWorkItem("A-1", "Task")];
+
+    const resultPromise = runSelectionScreen(io, items, 4, { defaultReviewMode: "mine" });
+    sendKeyBatches(
+      ["\r"],  // items
+      ["\r"],  // strategy
+      ["\r"],  // WIP
+      ["\r"],  // review (accept default = mine)
+      ["\r"],  // crew
+      ["\r"],  // confirm
+    );
+
+    const result = await resultPromise;
+    expect(result).not.toBeNull();
+    expect(result!.reviewMode).toBe("mine");
+  });
+
+  it("navigating to 'All PRs' sets reviewMode to 'all'", async () => {
+    const { io, sendKeyBatches } = createMockIO();
+    const items = [makeWorkItem("A-1", "Task")];
+
+    // default is off (index 2), navigate up twice to get to all (index 0)
+    const resultPromise = runSelectionScreen(io, items, 4);
+    sendKeyBatches(
+      ["\r"],              // items
+      ["\r"],              // strategy
+      ["\r"],              // WIP
+      ["\x1B[A", "\x1B[A", "\r"],  // review: up up → "All PRs" (wraps from off→mine→all)
+      ["\r"],              // crew
+      ["\r"],              // confirm
+    );
+
+    const result = await resultPromise;
+    expect(result).not.toBeNull();
+    expect(result!.reviewMode).toBe("all");
+  });
+
+  it("navigating to 'My PRs' sets reviewMode to 'mine'", async () => {
+    const { io, sendKeyBatches } = createMockIO();
+    const items = [makeWorkItem("A-1", "Task")];
+
+    // default is off (index 2), navigate up once to get to mine (index 1)
+    const resultPromise = runSelectionScreen(io, items, 4);
+    sendKeyBatches(
+      ["\r"],              // items
+      ["\r"],              // strategy
+      ["\r"],              // WIP
+      ["\x1B[A", "\r"],   // review: up → "My PRs"
+      ["\r"],              // crew
+      ["\r"],              // confirm
+    );
+
+    const result = await resultPromise;
+    expect(result).not.toBeNull();
+    expect(result!.reviewMode).toBe("mine");
+  });
+
+  it("navigating to 'Off' sets reviewMode to 'off'", async () => {
+    const { io, sendKeyBatches } = createMockIO();
+    const items = [makeWorkItem("A-1", "Task")];
+
+    const resultPromise = runSelectionScreen(io, items, 4);
+    sendKeyBatches(
+      ["\r"],  // items
+      ["\r"],  // strategy
+      ["\r"],  // WIP
+      ["\r"],  // review: accept default (off)
+      ["\r"],  // crew
+      ["\r"],  // confirm
+    );
+
+    const result = await resultPromise;
+    expect(result).not.toBeNull();
+    expect(result!.reviewMode).toBe("off");
+  });
+
+  it("cancelling at review step returns null", async () => {
+    const { io, sendKeyBatches } = createMockIO();
+    const items = [makeWorkItem("A-1", "Task")];
+
+    const resultPromise = runSelectionScreen(io, items, 4);
+    sendKeyBatches(
+      ["\r"],     // items
+      ["\r"],     // strategy
+      ["\r"],     // WIP
+      ["\x1B"],  // Escape at review
+    );
+
+    const result = await resultPromise;
+    expect(result).toBeNull();
+  });
+});
+
+// ── Selection screen: crew step ─────────────────────────────────────
+
+describe("runSelectionScreen -- crew step", () => {
+  it("solo selection returns null crewAction", async () => {
+    const { io, sendKeyBatches } = createMockIO();
+    const items = [makeWorkItem("A-1", "Task")];
+
+    const resultPromise = runSelectionScreen(io, items, 4);
+    sendKeyBatches(
+      ["\r"],  // items
+      ["\r"],  // strategy
+      ["\r"],  // WIP
+      ["\r"],  // review
+      ["\r"],  // crew: accept default (Solo)
+      ["\r"],  // confirm
+    );
+
+    const result = await resultPromise;
+    expect(result).not.toBeNull();
+    expect(result!.crewAction).toBeNull();
+  });
+
+  it("create crew returns crewAction { type: 'create' }", async () => {
+    const { io, sendKeyBatches } = createMockIO();
+    const items = [makeWorkItem("A-1", "Task")];
+
+    const resultPromise = runSelectionScreen(io, items, 4);
+    sendKeyBatches(
+      ["\r"],              // items
+      ["\r"],              // strategy
+      ["\r"],              // WIP
+      ["\r"],              // review
+      ["\x1B[B", "\x1B[B", "\r"],  // crew: down down → "Create crew"
+      ["\r"],              // confirm
+    );
+
+    const result = await resultPromise;
+    expect(result).not.toBeNull();
+    expect(result!.crewAction).toEqual({ type: "create" });
+  });
+
+  it("join crew triggers text input and returns join action", async () => {
+    const { io, sendKeyBatches } = createMockIO();
+    const items = [makeWorkItem("A-1", "Task")];
+
+    const resultPromise = runSelectionScreen(io, items, 4);
+    sendKeyBatches(
+      ["\r"],              // items
+      ["\r"],              // strategy
+      ["\r"],              // WIP
+      ["\r"],              // review
+      ["\x1B[B", "\r"],   // crew: down → "Join crew"
+      // Text input: type valid crew code
+      ["a", "B", "3", "-", "x", "Y", "9", "\r"],  // type code
+      ["\r"],              // confirm
+    );
+
+    const result = await resultPromise;
+    expect(result).not.toBeNull();
+    expect(result!.crewAction).toEqual({ type: "join", code: "aB3-xY9" });
+  });
+
+  it("join crew text input rejects invalid code then accepts valid code", async () => {
+    const { io, sendKeyBatches, getOutput } = createMockIO();
+    const items = [makeWorkItem("A-1", "Task")];
+
+    const resultPromise = runSelectionScreen(io, items, 4);
+    sendKeyBatches(
+      ["\r"],              // items
+      ["\r"],              // strategy
+      ["\r"],              // WIP
+      ["\r"],              // review
+      ["\x1B[B", "\r"],   // crew: join
+      // Type invalid code, Enter (error), backspace, type valid code, Enter
+      ["b", "a", "d", "\r",
+       "\x7f", "\x7f", "\x7f",                    // backspace "bad"
+       "x", "K", "2", "-", "9", "f", "B", "\r"],  // valid code
+      ["\r"],              // confirm
+    );
+
+    const result = await resultPromise;
+    expect(result).not.toBeNull();
+    expect(getOutput()).toContain("Invalid format");
+    expect(result!.crewAction).toEqual({ type: "join", code: "xK2-9fB" });
+  });
+
+  it("cancelling at crew step returns null", async () => {
+    const { io, sendKeyBatches } = createMockIO();
+    const items = [makeWorkItem("A-1", "Task")];
+
+    const resultPromise = runSelectionScreen(io, items, 4);
+    sendKeyBatches(
+      ["\r"],     // items
+      ["\r"],     // strategy
+      ["\r"],     // WIP
+      ["\r"],     // review
+      ["\x1B"],  // Escape at crew
+    );
+
+    const result = await resultPromise;
+    expect(result).toBeNull();
+  });
+
+  it("cancelling join crew text input returns null", async () => {
+    const { io, sendKeyBatches } = createMockIO();
+    const items = [makeWorkItem("A-1", "Task")];
+
+    const resultPromise = runSelectionScreen(io, items, 4);
+    sendKeyBatches(
+      ["\r"],             // items
+      ["\r"],             // strategy
+      ["\r"],             // WIP
+      ["\r"],             // review
+      ["\x1B[B", "\r"],  // crew: join
+      ["\x1B"],           // Esc in text input
+    );
+
+    const result = await resultPromise;
+    expect(result).toBeNull();
+  });
+
+  it("showCrewStep: false skips crew step and sets crewAction to null", async () => {
+    const { io, sendKeyBatches } = createMockIO();
+    const items = [makeWorkItem("A-1", "Task")];
+
+    const resultPromise = runSelectionScreen(io, items, 4, { showCrewStep: false });
+    // Only 5 batches: items, strategy, WIP, review, confirm (crew is skipped)
+    sendKeyBatches(
+      ["\r"],  // items
+      ["\r"],  // strategy
+      ["\r"],  // WIP
+      ["\r"],  // review
+      ["\r"],  // confirm
+    );
+
+    const result = await resultPromise;
+    expect(result).not.toBeNull();
+    expect(result!.crewAction).toBeNull();
+  });
+});
+
+// ── Selection screen: updated confirmation ──────────────────────────
+
+describe("runSelectionScreen -- updated confirmation", () => {
+  it("confirmation shows 'All (dynamic)' when allSelected", async () => {
+    const { io, sendKeyBatches, getOutput } = createMockIO();
+    const items = [
+      makeWorkItem("A-1", "First task"),
+      makeWorkItem("B-2", "Second task"),
+    ];
+
+    const resultPromise = runSelectionScreen(io, items, 4);
+    // All items start pre-checked (__ALL__ included) → allSelected = true
+    sendKeyBatches(["\r"], ["\r"], ["\r"], ["\r"], ["\r"], ["\r"]);
+
+    const result = await resultPromise;
+    expect(result).not.toBeNull();
+    expect(result!.allSelected).toBe(true);
+    expect(getOutput()).toContain("All");
+    expect(getOutput()).toContain("dynamic");
+  });
+
+  it("confirmation shows individual item list when not allSelected", async () => {
+    const { io, sendKeyBatches, getOutput } = createMockIO();
+    const items = [
+      makeWorkItem("A-1", "First task"),
+      makeWorkItem("B-2", "Second task"),
+    ];
+
+    const resultPromise = runSelectionScreen(io, items, 4);
+    // Uncheck B-2 to make allSelected = false
+    sendKeyBatches(
+      ["\x1B[B", "\x1B[B", " ", "\r"],  // uncheck B-2
+      ["\r"],   // strategy
+      ["\r"],   // WIP
+      ["\r"],   // review
+      ["\r"],   // crew
+      ["\r"],   // confirm
+    );
+
+    const result = await resultPromise;
+    expect(result).not.toBeNull();
+    expect(result!.allSelected).toBe(false);
+    expect(getOutput()).toContain("A-1");
+  });
+
+  it("confirmation shows AI review mode", async () => {
+    const { io, sendKeyBatches, getOutput } = createMockIO();
+    const items = [makeWorkItem("A-1", "Task")];
+
+    const resultPromise = runSelectionScreen(io, items, 4, { defaultReviewMode: "all" });
+    sendKeyBatches(["\r"], ["\r"], ["\r"], ["\r"], ["\r"], ["\r"]);
+
+    const result = await resultPromise;
+    expect(result).not.toBeNull();
+    expect(getOutput()).toContain("All PRs");
+  });
+
+  it("confirmation shows crew: Solo when no crew action", async () => {
+    const { io, sendKeyBatches, getOutput } = createMockIO();
+    const items = [makeWorkItem("A-1", "Task")];
+
+    const resultPromise = runSelectionScreen(io, items, 4);
+    sendKeyBatches(["\r"], ["\r"], ["\r"], ["\r"], ["\r"], ["\r"]);
+
+    const result = await resultPromise;
+    expect(result).not.toBeNull();
+    expect(getOutput()).toContain("Solo");
+  });
+
+  it("confirmation shows crew: Creating new crew", async () => {
+    const { io, sendKeyBatches, getOutput } = createMockIO();
+    const items = [makeWorkItem("A-1", "Task")];
+
+    const resultPromise = runSelectionScreen(io, items, 4);
+    sendKeyBatches(
+      ["\r"],
+      ["\r"],
+      ["\r"],
+      ["\r"],
+      ["\x1B[B", "\x1B[B", "\r"],  // crew: Create crew
+      ["\r"],
+    );
+
+    const result = await resultPromise;
+    expect(result).not.toBeNull();
+    expect(getOutput()).toContain("Creating new crew");
+  });
+
+  it("confirmation shows crew: Joining crew <code>", async () => {
+    const { io, sendKeyBatches, getOutput } = createMockIO();
+    const items = [makeWorkItem("A-1", "Task")];
+
+    const resultPromise = runSelectionScreen(io, items, 4);
+    sendKeyBatches(
+      ["\r"],
+      ["\r"],
+      ["\r"],
+      ["\r"],
+      ["\x1B[B", "\r"],            // crew: Join crew
+      ["a", "B", "3", "-", "x", "Y", "9", "\r"],  // code: aB3-xY9
+      ["\r"],
+    );
+
+    const result = await resultPromise;
+    expect(result).not.toBeNull();
+    expect(getOutput()).toContain("Joining crew aB3-xY9");
+  });
+
+  it("confirmation title is 'Ninthwave · Start orchestration?'", async () => {
+    const { io, sendKeyBatches, getOutput } = createMockIO();
+    const items = [makeWorkItem("A-1", "Task")];
+
+    const resultPromise = runSelectionScreen(io, items, 4);
+    sendKeyBatches(["\r"], ["\r"], ["\r"], ["\r"], ["\r"], ["\r"]);
+
+    const result = await resultPromise;
+    expect(result).not.toBeNull();
+    expect(getOutput()).toContain("Start orchestration");
   });
 });
 
@@ -1050,6 +1605,8 @@ describe("runTuiSelectionFlow (via interactive.ts)", () => {
       ["\r"], // Confirm all items (pre-checked)
       ["\r"], // Accept default strategy
       ["\r"], // Accept default WIP
+      ["\r"], // Accept default review mode (off)
+      ["\r"], // Accept default crew (Solo)
       ["\r"], // Confirm
     );
 
