@@ -1881,6 +1881,26 @@ describe("buildStatusLayout", () => {
     expect(footerText).toContain("3 items");
   });
 
+  it("footer shows GitHub API warning when apiErrorCount > 0", () => {
+    const items = [makeStatusItem({ id: "A-1", state: "implementing" })];
+    const layout = buildStatusLayout(items, 100, undefined, false, {
+      mergeStrategy: "auto",
+      apiErrorCount: 2,
+    });
+    const footerText = layout.footerLines.map(stripAnsi).join("\n");
+    expect(footerText).toContain("GitHub API unreachable");
+  });
+
+  it("footer does not show GitHub API warning when apiErrorCount is 0", () => {
+    const items = [makeStatusItem({ id: "A-1", state: "implementing" })];
+    const layout = buildStatusLayout(items, 100, undefined, false, {
+      mergeStrategy: "auto",
+      apiErrorCount: 0,
+    });
+    const footerText = layout.footerLines.map(stripAnsi).join("\n");
+    expect(footerText).not.toContain("GitHub API unreachable");
+  });
+
   it("title line shows right-aligned Lead/Thru when metrics available", () => {
     const now = Date.now();
     const items = [

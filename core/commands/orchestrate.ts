@@ -1549,6 +1549,7 @@ export async function orchestrateLoop(
       });
     }
 
+
     // Process transitions (pure state machine)
     let actions = orch.processTransitions(snapshot);
     __lastActions = actions;
@@ -2497,7 +2498,10 @@ export async function cmdOrchestrate(
     reconcile,
     readScreen: (ref, lines) => mux.readScreen(ref, lines),
     onPollComplete,
-    syncDisplay: (o, snap) => syncWorkerDisplay(o, snap, mux),
+    syncDisplay: (o, snap) => {
+      syncWorkerDisplay(o, snap, mux);
+      tuiState.viewOptions.apiErrorCount = snap.apiErrorCount ?? 0;
+    },
     externalReviewDeps,
     ...(watchMode ? { scanWorkItems: () => {
       try { fetchOrigin(projectRoot, "main"); } catch { /* non-fatal */ }

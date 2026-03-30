@@ -47,6 +47,8 @@ export interface ViewOptions {
   showHelp?: boolean;
   /** Active schedule workers to display in the TUI. */
   scheduleWorkers?: ScheduleWorkerInfo[];
+  /** Number of items where GitHub API returned errors. When > 0, a warning is shown in the footer. */
+  apiErrorCount?: number;
 }
 
 /**
@@ -1397,11 +1399,22 @@ export function buildStatusLayout(
   footerLines.push(formatUnifiedProgress(items, termWidth));
 
   // Strategy indicator footer (or Ctrl+C confirmation)
+  const apiWarning = (viewOptions?.apiErrorCount ?? 0) > 0
+    ? `${RED}\u26A0 GitHub API unreachable${RESET}`
+    : "";
   if (viewOptions?.ctrlCPending) {
     footerLines.push(`  ${YELLOW}Press Ctrl-C again to exit${RESET}`);
   } else if (viewOptions?.mergeStrategy) {
     const badge = strategyIndicator(viewOptions.mergeStrategy);
-    footerLines.push(`  ${badge} ${DIM}(shift+tab to cycle) · ? for help${RESET}`);
+    const left = `  ${badge} ${DIM}(shift+tab to cycle) · ? for help${RESET}`;
+    if (apiWarning) {
+      const leftLen = stripAnsiForWidth(left).length;
+      const warnLen = stripAnsiForWidth(apiWarning).length;
+      const pad = Math.max(2, termWidth - leftLen - warnLen);
+      footerLines.push(`${left}${" ".repeat(pad)}${apiWarning}`);
+    } else {
+      footerLines.push(left);
+    }
   } else {
     // Fallback for non-TUI callers (e.g., `nw status`)
     const shortcuts = `q quit  d deps  ↑/↓ scroll`;
