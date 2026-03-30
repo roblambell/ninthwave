@@ -30,7 +30,7 @@ Each item gets its own git worktree and a full native instance of [Claude Code](
 
 The orchestrator monitors CI, coordinates between implementer and review agents, external feedback, and merges approved PRs. Dependent items stack as chained PRs - reviewers get clean diffs.
 
-Join a crew to increase capacity. Tasks brokered by [ninthwave.sh](https://ninthwave.sh) with author-affinity preference, and WIP overflow to crew members.
+Tasks are brokered by [ninthwave.sh](https://ninthwave.sh) for collaboration with author-affinity preference, and WIP overflow to your crew.
 
 ## Install
 
