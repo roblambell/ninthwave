@@ -25,16 +25,19 @@ import {
   type DetectMuxDeps,
   type Multiplexer,
 } from "../core/mux.ts";
+import { TmuxAdapter } from "../core/tmux.ts";
 
 // ── Helper: build injectable DetectMuxDeps ──────────────────────────
 
 function makeDeps(
   env: Record<string, string | undefined> = {},
   binaries: string[] = [],
+  warn?: (msg: string) => void,
 ): DetectMuxDeps {
   return {
     env,
     checkBinary: (name: string) => binaries.includes(name),
+    warn,
   };
 }
 
@@ -148,6 +151,87 @@ describe("detectMuxType", () => {
     const deps = makeDeps({ CMUX_WORKSPACE_ID: "abc" }, ["cmux"]);
     expect(detectMuxType(deps)).toBe("cmux");
   });
+
+  // ── NINTHWAVE_MUX override tests ───────────────────────────────────
+
+  it("returns tmux when NINTHWAVE_MUX=tmux", () => {
+    const deps = makeDeps({ NINTHWAVE_MUX: "tmux" });
+    expect(detectMuxType(deps)).toBe("tmux");
+  });
+
+  it("returns cmux when NINTHWAVE_MUX=cmux", () => {
+    const deps = makeDeps({ NINTHWAVE_MUX: "cmux" });
+    expect(detectMuxType(deps)).toBe("cmux");
+  });
+
+  it("warns and falls through on invalid NINTHWAVE_MUX", () => {
+    const warnings: string[] = [];
+    const deps = makeDeps(
+      { NINTHWAVE_MUX: "garbage" },
+      ["tmux"],
+      (msg) => warnings.push(msg),
+    );
+    expect(detectMuxType(deps)).toBe("tmux");
+    expect(warnings).toHaveLength(1);
+    expect(warnings[0]).toContain("Invalid NINTHWAVE_MUX");
+    expect(warnings[0]).toContain("garbage");
+  });
+
+  it("NINTHWAVE_MUX overrides session env vars", () => {
+    const deps = makeDeps({ NINTHWAVE_MUX: "tmux", CMUX_WORKSPACE_ID: "abc" });
+    expect(detectMuxType(deps)).toBe("tmux");
+  });
+
+  it("NINTHWAVE_MUX=cmux overrides $TMUX", () => {
+    const deps = makeDeps({ NINTHWAVE_MUX: "cmux", TMUX: "/tmp/tmux-501/default,12345,0" });
+    expect(detectMuxType(deps)).toBe("cmux");
+  });
+
+  // ── tmux detection tests ───────────────────────────────────────────
+
+  it("returns tmux when $TMUX is set", () => {
+    const deps = makeDeps({ TMUX: "/tmp/tmux-501/default,12345,0" });
+    expect(detectMuxType(deps)).toBe("tmux");
+  });
+
+  it("returns tmux when tmux binary available (no session)", () => {
+    const deps = makeDeps({}, ["tmux"]);
+    expect(detectMuxType(deps)).toBe("tmux");
+  });
+
+  it("prefers tmux over cmux when both binaries available", () => {
+    const deps = makeDeps({}, ["tmux", "cmux"]);
+    expect(detectMuxType(deps)).toBe("tmux");
+  });
+
+  it("CMUX_WORKSPACE_ID takes precedence over $TMUX", () => {
+    const deps = makeDeps({
+      CMUX_WORKSPACE_ID: "workspace:1",
+      TMUX: "/tmp/tmux-501/default,12345,0",
+    });
+    expect(detectMuxType(deps)).toBe("cmux");
+  });
+
+  it("override precedence: NINTHWAVE_MUX > session env > binary", () => {
+    // NINTHWAVE_MUX wins over everything
+    const deps = makeDeps(
+      { NINTHWAVE_MUX: "cmux", CMUX_WORKSPACE_ID: "abc", TMUX: "/tmp/tmux" },
+      ["tmux", "cmux"],
+    );
+    expect(detectMuxType(deps)).toBe("cmux");
+  });
+
+  it("invalid NINTHWAVE_MUX falls through to full detection chain", () => {
+    const warnings: string[] = [];
+    // Invalid override, but CMUX_WORKSPACE_ID is set
+    const deps = makeDeps(
+      { NINTHWAVE_MUX: "invalid", CMUX_WORKSPACE_ID: "abc" },
+      [],
+      (msg) => warnings.push(msg),
+    );
+    expect(detectMuxType(deps)).toBe("cmux");
+    expect(warnings).toHaveLength(1);
+  });
 });
 
 // ── getMux tests ────────────────────────────────────────────────────
@@ -183,6 +267,25 @@ describe("getMux", () => {
     const deps = makeDeps({}, []);
     const mux = getMux(deps);
     // Falls back gracefully -- caller can check isAvailable()
+    expect(mux).toBeInstanceOf(CmuxAdapter);
+  });
+
+  it("returns TmuxAdapter when detection picks tmux", () => {
+    const deps = makeDeps({ TMUX: "/tmp/tmux-501/default,12345,0" });
+    const mux = getMux(deps);
+    expect(mux).toBeInstanceOf(TmuxAdapter);
+    expect(mux.type).toBe("tmux");
+  });
+
+  it("returns TmuxAdapter when NINTHWAVE_MUX=tmux", () => {
+    const deps = makeDeps({ NINTHWAVE_MUX: "tmux" });
+    const mux = getMux(deps);
+    expect(mux).toBeInstanceOf(TmuxAdapter);
+  });
+
+  it("returns CmuxAdapter when NINTHWAVE_MUX=cmux", () => {
+    const deps = makeDeps({ NINTHWAVE_MUX: "cmux" });
+    const mux = getMux(deps);
     expect(mux).toBeInstanceOf(CmuxAdapter);
   });
 });

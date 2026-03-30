@@ -1,9 +1,11 @@
 // Multiplexer interface: abstracts terminal multiplexer operations.
-// Decouples command modules from the concrete cmux implementation.
+// Decouples command modules from the concrete cmux/tmux implementation.
 
 import * as cmux from "./cmux.ts";
-import { die } from "./output.ts";
+import { TmuxAdapter } from "./tmux.ts";
+import { die, warn as defaultWarn } from "./output.ts";
 import { resolveCmuxBinary } from "./cmux-resolve.ts";
+import { run as defaultShellRun } from "./shell.ts";
 import type { RunResult } from "./types.ts";
 
 /** Shell runner signature -- injectable for testing. */
@@ -78,37 +80,67 @@ export class CmuxAdapter implements Multiplexer {
 /** Supported multiplexer backends. */
 export type MuxType = "cmux" | "tmux";
 
+/** Valid values for the NINTHWAVE_MUX environment variable. */
+const VALID_MUX_VALUES: readonly MuxType[] = ["cmux", "tmux"] as const;
+
 /** Injectable dependencies for multiplexer detection -- enables testing without vi.mock. */
 export interface DetectMuxDeps {
   env: Record<string, string | undefined>;
   checkBinary: (name: string) => boolean;
+  warn?: (message: string) => void;
 }
 
 const defaultDetectDeps: DetectMuxDeps = {
   env: process.env,
-  checkBinary: (_name: string): boolean => resolveCmuxBinary() !== null,
+  checkBinary: (name: string): boolean => {
+    if (name === "cmux") return resolveCmuxBinary() !== null;
+    // For tmux and others, check PATH
+    return Bun.which(name) !== null;
+  },
+  warn: defaultWarn,
 };
 
 /**
  * Auto-detect the best available multiplexer.
  *
  * Detection chain:
- * 1. CMUX_WORKSPACE_ID -- inside a cmux session
- * 2. cmux binary available
- * 3. Error -- no multiplexer found
+ * 1. NINTHWAVE_MUX env override (validated)
+ * 2. CMUX_WORKSPACE_ID -- inside a cmux session
+ * 3. $TMUX -- inside a tmux session
+ * 4. tmux binary available (preferred over cmux outside session)
+ * 5. cmux binary available
+ * 6. Error -- no multiplexer found
  */
 export function detectMuxType(deps: DetectMuxDeps = defaultDetectDeps): MuxType {
-  const { env, checkBinary } = deps;
+  const { env, checkBinary, warn } = deps;
 
-  // 1. Inside a cmux session
+  // 1. NINTHWAVE_MUX override
+  if (env.NINTHWAVE_MUX) {
+    const override = env.NINTHWAVE_MUX as string;
+    if (VALID_MUX_VALUES.includes(override as MuxType)) {
+      return override as MuxType;
+    }
+    // Invalid value -- warn and fall through to auto-detect
+    (warn ?? defaultWarn)(
+      `Invalid NINTHWAVE_MUX="${override}". Valid values: ${VALID_MUX_VALUES.join(", ")}. Falling back to auto-detect.`,
+    );
+  }
+
+  // 2. Inside a cmux session
   if (env.CMUX_WORKSPACE_ID) return "cmux";
 
-  // 2. cmux binary available
+  // 3. Inside a tmux session
+  if (env.TMUX) return "tmux";
+
+  // 4. tmux binary available (preferred over cmux outside session)
+  if (checkBinary("tmux")) return "tmux";
+
+  // 5. cmux binary available
   if (checkBinary("cmux")) return "cmux";
 
-  // 3. No multiplexer found
+  // 6. No multiplexer found
   throw new Error(
-    "No multiplexer available. Install cmux: brew install --cask manaflow-ai/cmux/cmux",
+    "No multiplexer available. Install tmux (brew install tmux) or cmux (brew install --cask manaflow-ai/cmux/cmux).",
   );
 }
 
@@ -122,7 +154,15 @@ export function detectMuxType(deps: DetectMuxDeps = defaultDetectDeps): MuxType 
  */
 export function getMux(deps?: DetectMuxDeps): Multiplexer {
   try {
-    detectMuxType(deps);
+    const muxType = detectMuxType(deps);
+    if (muxType === "tmux") {
+      return new TmuxAdapter({
+        runner: defaultShellRun,
+        sleep: process.env.NODE_ENV === "test" ? () => {} : (ms) => Bun.sleepSync(ms),
+        env: process.env,
+        cwd: () => process.cwd(),
+      });
+    }
     return new CmuxAdapter();
   } catch {
     // No mux available -- fall back to CmuxAdapter (isAvailable() will report false)
@@ -130,12 +170,13 @@ export function getMux(deps?: DetectMuxDeps): Multiplexer {
   }
 }
 
-// ── Ensure we're inside a cmux session ───────────────────────────────
+// ── Ensure we're inside a mux session ───────────────────────────────
 
-/** Injectable dependencies for cmux session detection. */
+/** Injectable dependencies for mux session detection. */
 export interface AutoLaunchDeps {
   env: Record<string, string | undefined>;
   checkBinary: (name: string) => boolean;
+  warn?: (message: string) => void;
 }
 
 /** Possible outcomes from auto-launch detection. */
@@ -147,17 +188,44 @@ export type AutoLaunchResult =
  * Pure detection logic: determine whether to proceed or error.
  *
  * Detection chain:
- * 1. CMUX_WORKSPACE_ID set → proceed (already inside cmux)
- * 2. cmux installed → error (detected but not in a session)
- * 3. cmux not installed → error (install prompt)
+ * 1. NINTHWAVE_MUX override → tmux: proceed, cmux: must be in session, invalid: warn+fallthrough
+ * 2. CMUX_WORKSPACE_ID set → proceed (already inside cmux)
+ * 3. $TMUX set → proceed (inside tmux session)
+ * 4. tmux installed → proceed (adapter creates its own session)
+ * 5. cmux installed → error (detected but not in a session)
+ * 6. Nothing → error (install prompt)
  */
 export function checkAutoLaunch(deps: AutoLaunchDeps): AutoLaunchResult {
-  const { env, checkBinary } = deps;
+  const { env, checkBinary, warn } = deps;
 
-  // 1. Already inside cmux -- proceed normally
+  // 1. NINTHWAVE_MUX override
+  if (env.NINTHWAVE_MUX) {
+    const override = env.NINTHWAVE_MUX as string;
+    if (override === "tmux") return { action: "proceed" };
+    if (override === "cmux") {
+      // Must be inside a cmux session
+      if (env.CMUX_WORKSPACE_ID) return { action: "proceed" };
+      return {
+        action: "error",
+        message: "NINTHWAVE_MUX=cmux but not inside a cmux session. Open cmux and run nw there.",
+      };
+    }
+    // Invalid value -- warn and fall through to auto-detect
+    (warn ?? defaultWarn)(
+      `Invalid NINTHWAVE_MUX="${override}". Valid values: cmux, tmux. Falling back to auto-detect.`,
+    );
+  }
+
+  // 2. Already inside cmux -- proceed normally
   if (env.CMUX_WORKSPACE_ID) return { action: "proceed" };
 
-  // 2. cmux installed but not in a session
+  // 3. Inside a tmux session -- proceed
+  if (env.TMUX) return { action: "proceed" };
+
+  // 4. tmux installed -- proceed (adapter creates its own session)
+  if (checkBinary("tmux")) return { action: "proceed" };
+
+  // 5. cmux installed but not in a session
   if (checkBinary("cmux")) {
     return {
       action: "error",
@@ -165,20 +233,25 @@ export function checkAutoLaunch(deps: AutoLaunchDeps): AutoLaunchResult {
     };
   }
 
-  // 3. cmux not installed
+  // 6. Nothing installed
   return {
     action: "error",
-    message: "Install cmux: brew install --cask manaflow-ai/cmux/cmux",
+    message:
+      "No multiplexer available. Install tmux (brew install tmux) or cmux (brew install --cask manaflow-ai/cmux/cmux).",
   };
 }
 
 const defaultAutoLaunchDeps: AutoLaunchDeps = {
   env: process.env,
-  checkBinary: (_name: string): boolean => resolveCmuxBinary() !== null,
+  checkBinary: (name: string): boolean => {
+    if (name === "cmux") return resolveCmuxBinary() !== null;
+    return Bun.which(name) !== null;
+  },
+  warn: defaultWarn,
 };
 
 /**
- * Ensure we're inside a cmux session, or die with a helpful message.
+ * Ensure we're inside a mux session (or can create one), or die with a helpful message.
  *
  * For commands that need a multiplexer (watch, start, <ID>, no-args interactive),
  * call this before proceeding.
