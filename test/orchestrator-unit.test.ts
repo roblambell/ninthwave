@@ -553,7 +553,7 @@ describe("handleImplementing", () => {
   });
 
   it("detects launch timeout when no commits after launchTimeoutMs (process dead)", () => {
-    const orch = new Orchestrator({ launchTimeoutMs: 1000 });
+    const orch = new Orchestrator({ launchTimeoutMs: 1000, gracePeriodMs: 0 });
     orch.addItem(makeWorkItem("H-1-1"));
     orch.getItem("H-1-1")!.reviewCompleted = true;
     orch.setState("H-1-1", "implementing");
@@ -572,7 +572,7 @@ describe("handleImplementing", () => {
   });
 
   it("detects activity timeout when commits are stale", () => {
-    const orch = new Orchestrator({ activityTimeoutMs: 1000, maxRetries: 0 });
+    const orch = new Orchestrator({ activityTimeoutMs: 1000, maxRetries: 0, gracePeriodMs: 0 });
     orch.addItem(makeWorkItem("H-1-1"));
     orch.getItem("H-1-1")!.reviewCompleted = true;
     orch.setState("H-1-1", "implementing");
@@ -644,7 +644,7 @@ describe("heartbeat-based health detection", () => {
   });
 
   it("worker with stale heartbeat (> 5 min) and no recent commits transitions to stuck (process dead)", () => {
-    const orch = new Orchestrator({ launchTimeoutMs: 1000, maxRetries: 0 });
+    const orch = new Orchestrator({ launchTimeoutMs: 1000, maxRetries: 0, gracePeriodMs: 0 });
     orch.addItem(makeWorkItem("H-1-1"));
     orch.getItem("H-1-1")!.reviewCompleted = true;
     orch.setState("H-1-1", "implementing");
@@ -663,7 +663,7 @@ describe("heartbeat-based health detection", () => {
   });
 
   it("worker with no heartbeat file falls back to commit-based timeout detection (process dead)", () => {
-    const orch = new Orchestrator({ launchTimeoutMs: 1000, maxRetries: 0 });
+    const orch = new Orchestrator({ launchTimeoutMs: 1000, maxRetries: 0, gracePeriodMs: 0 });
     orch.addItem(makeWorkItem("H-1-1"));
     orch.getItem("H-1-1")!.reviewCompleted = true;
     orch.setState("H-1-1", "implementing");
@@ -755,7 +755,7 @@ describe("process liveness timeout suppression", () => {
   });
 
   it("worker with stale heartbeat and workerAlive=true IS marked stuck at activityTimeoutMs", () => {
-    const orch = new Orchestrator({ launchTimeoutMs: 1000, activityTimeoutMs: 5000, maxRetries: 0 });
+    const orch = new Orchestrator({ launchTimeoutMs: 1000, activityTimeoutMs: 5000, maxRetries: 0, gracePeriodMs: 0 });
     orch.addItem(makeWorkItem("H-1-1"));
     orch.getItem("H-1-1")!.reviewCompleted = true;
     orch.setState("H-1-1", "implementing");
@@ -775,7 +775,7 @@ describe("process liveness timeout suppression", () => {
   });
 
   it("worker with stale heartbeat and workerAlive=false is marked stuck at launchTimeoutMs", () => {
-    const orch = new Orchestrator({ launchTimeoutMs: 1000, maxRetries: 0 });
+    const orch = new Orchestrator({ launchTimeoutMs: 1000, maxRetries: 0, gracePeriodMs: 0 });
     orch.addItem(makeWorkItem("H-1-1"));
     orch.getItem("H-1-1")!.reviewCompleted = true;
     orch.setState("H-1-1", "implementing");
@@ -1425,7 +1425,7 @@ describe("stuckOrRetry resets", () => {
 
 describe("launching state timeout", () => {
   it("transitions to stuck/retry when worker never registers within timeout", () => {
-    const orch = new Orchestrator({ maxRetries: 0 });
+    const orch = new Orchestrator({ maxRetries: 0, gracePeriodMs: 0 });
     orch.addItem(makeWorkItem("H-1-1"));
     orch.getItem("H-1-1")!.reviewCompleted = true;
     orch.setState("H-1-1", "launching");
@@ -1444,7 +1444,7 @@ describe("launching state timeout", () => {
   });
 
   it("retries when launching timeout fires and retries remain", () => {
-    const orch = new Orchestrator({ maxRetries: 1 });
+    const orch = new Orchestrator({ maxRetries: 1, gracePeriodMs: 0 });
     orch.addItem(makeWorkItem("H-1-1"));
     orch.getItem("H-1-1")!.reviewCompleted = true;
     orch.setState("H-1-1", "launching");
@@ -4150,5 +4150,318 @@ describe("review round counter", () => {
 
     const d3 = statusDisplayForState("reviewing", { reviewRound: 3 });
     expect(d3.text).toBe("Reviewing (round 3)");
+  });
+});
+
+// ── Timeout grace period (H-TG-2) ──────────────────────────────────
+
+describe("timeout grace period", () => {
+  it("timeout detected -> grace period starts -> processTransitions returns [] (deferred)", () => {
+    const orch = new Orchestrator({
+      activityTimeoutMs: 1000,
+      maxRetries: 0,
+      gracePeriodMs: 5 * 60 * 1000, // 5 minutes
+    });
+    orch.addItem(makeWorkItem("H-1-1"));
+    orch.getItem("H-1-1")!.reviewCompleted = true;
+    orch.setState("H-1-1", "implementing");
+
+    const staleTime = "2026-01-15T10:00:00Z";
+    const futureNow = new Date("2026-01-15T12:00:00Z");
+
+    // First timeout detection -- should defer
+    const actions = orch.processTransitions(
+      snapshotWith([{ id: "H-1-1", workerAlive: true, lastCommitTime: staleTime }]),
+      futureNow,
+    );
+
+    expect(orch.getItem("H-1-1")!.state).toBe("implementing");
+    expect(actions).toHaveLength(0);
+    expect(orch.getItem("H-1-1")!.timeoutDeadline).toBeDefined();
+    expect(orch.getItem("H-1-1")!.timeoutExtensionCount).toBe(0);
+  });
+
+  it("grace period expires -> processTransitions returns stuckOrRetry actions", () => {
+    const orch = new Orchestrator({
+      activityTimeoutMs: 1000,
+      maxRetries: 0,
+      gracePeriodMs: 60_000, // 1 minute grace
+    });
+    orch.addItem(makeWorkItem("H-1-1"));
+    orch.getItem("H-1-1")!.reviewCompleted = true;
+    orch.setState("H-1-1", "implementing");
+
+    const staleTime = "2026-01-15T10:00:00Z";
+
+    // First call: sets deadline
+    const t1 = new Date("2026-01-15T12:00:00Z");
+    orch.processTransitions(
+      snapshotWith([{ id: "H-1-1", workerAlive: true, lastCommitTime: staleTime }]),
+      t1,
+    );
+    expect(orch.getItem("H-1-1")!.state).toBe("implementing");
+
+    // Second call: past the 1-minute grace period
+    const t2 = new Date(t1.getTime() + 2 * 60_000);
+    const actions = orch.processTransitions(
+      snapshotWith([{ id: "H-1-1", workerAlive: true, lastCommitTime: staleTime }]),
+      t2,
+    );
+
+    expect(orch.getItem("H-1-1")!.state).toBe("stuck");
+    expect(actions.some((a) => a.type === "workspace-close")).toBe(true);
+  });
+
+  it("extendTimeout() pushes deadline and increments count", () => {
+    const orch = new Orchestrator({
+      activityTimeoutMs: 1000,
+      maxRetries: 0,
+      gracePeriodMs: 60_000,
+      maxTimeoutExtensions: 3,
+    });
+    orch.addItem(makeWorkItem("H-1-1"));
+    orch.getItem("H-1-1")!.reviewCompleted = true;
+    orch.setState("H-1-1", "implementing");
+
+    const staleTime = "2026-01-15T10:00:00Z";
+    const t1 = new Date("2026-01-15T12:00:00Z");
+
+    // Trigger grace period
+    orch.processTransitions(
+      snapshotWith([{ id: "H-1-1", workerAlive: true, lastCommitTime: staleTime }]),
+      t1,
+    );
+
+    const originalDeadline = orch.getItem("H-1-1")!.timeoutDeadline;
+    expect(originalDeadline).toBeDefined();
+
+    // Extend the timeout
+    const result = orch.extendTimeout("H-1-1");
+    expect(result).toBe(true);
+    expect(orch.getItem("H-1-1")!.timeoutExtensionCount).toBe(1);
+
+    const newDeadline = orch.getItem("H-1-1")!.timeoutDeadline!;
+    expect(new Date(newDeadline).getTime()).toBeGreaterThan(new Date(originalDeadline!).getTime());
+  });
+
+  it("extendTimeout() returns false after maxTimeoutExtensions", () => {
+    const orch = new Orchestrator({
+      activityTimeoutMs: 1000,
+      maxRetries: 0,
+      gracePeriodMs: 60_000,
+      maxTimeoutExtensions: 2,
+    });
+    orch.addItem(makeWorkItem("H-1-1"));
+    orch.getItem("H-1-1")!.reviewCompleted = true;
+    orch.setState("H-1-1", "implementing");
+
+    const staleTime = "2026-01-15T10:00:00Z";
+    const t1 = new Date("2026-01-15T12:00:00Z");
+
+    // Trigger grace period
+    orch.processTransitions(
+      snapshotWith([{ id: "H-1-1", workerAlive: true, lastCommitTime: staleTime }]),
+      t1,
+    );
+
+    // Extend twice (max is 2)
+    expect(orch.extendTimeout("H-1-1")).toBe(true);
+    expect(orch.extendTimeout("H-1-1")).toBe(true);
+
+    // Third extension should fail
+    expect(orch.extendTimeout("H-1-1")).toBe(false);
+    expect(orch.getItem("H-1-1")!.timeoutExtensionCount).toBe(2);
+  });
+
+  it("worker recovery (new commit/heartbeat) clears grace state via transition()", () => {
+    const orch = new Orchestrator({
+      activityTimeoutMs: 1000,
+      maxRetries: 0,
+      gracePeriodMs: 5 * 60 * 1000,
+    });
+    orch.addItem(makeWorkItem("H-1-1"));
+    orch.getItem("H-1-1")!.reviewCompleted = true;
+    orch.setState("H-1-1", "implementing");
+
+    const staleTime = "2026-01-15T10:00:00Z";
+    const t1 = new Date("2026-01-15T12:00:00Z");
+
+    // Trigger grace period via activity timeout
+    orch.processTransitions(
+      snapshotWith([{ id: "H-1-1", workerAlive: true, lastCommitTime: staleTime }]),
+      t1,
+    );
+    expect(orch.getItem("H-1-1")!.timeoutDeadline).toBeDefined();
+
+    // Worker creates a PR -- transitions to ci-pending, clearing grace state
+    orch.processTransitions(
+      snapshotWith([{ id: "H-1-1", prNumber: 42, prState: "open", ciStatus: "pending", workerAlive: true }]),
+      t1,
+    );
+
+    expect(orch.getItem("H-1-1")!.state).toBe("ci-pending");
+    expect(orch.getItem("H-1-1")!.timeoutDeadline).toBeUndefined();
+    expect(orch.getItem("H-1-1")!.timeoutExtensionCount).toBeUndefined();
+  });
+
+  it("gracePeriodMs: 0 skips grace period entirely (immediate kill)", () => {
+    const orch = new Orchestrator({
+      activityTimeoutMs: 1000,
+      maxRetries: 0,
+      gracePeriodMs: 0,
+    });
+    orch.addItem(makeWorkItem("H-1-1"));
+    orch.getItem("H-1-1")!.reviewCompleted = true;
+    orch.setState("H-1-1", "implementing");
+
+    const staleTime = "2026-01-15T10:00:00Z";
+    const futureNow = new Date("2026-01-15T12:00:00Z");
+
+    const actions = orch.processTransitions(
+      snapshotWith([{ id: "H-1-1", workerAlive: true, lastCommitTime: staleTime }]),
+      futureNow,
+    );
+
+    // No grace period -- immediate kill
+    expect(orch.getItem("H-1-1")!.state).toBe("stuck");
+    expect(actions.some((a) => a.type === "workspace-close")).toBe(true);
+    expect(orch.getItem("H-1-1")!.timeoutDeadline).toBeUndefined();
+  });
+
+  it("crash-detection sites are NOT gated by grace period", () => {
+    const orch = new Orchestrator({
+      maxRetries: 0,
+      gracePeriodMs: 5 * 60 * 1000,
+      activityTimeoutMs: 10 * 60 * 1000,
+    });
+    orch.addItem(makeWorkItem("H-1-1"));
+    orch.getItem("H-1-1")!.reviewCompleted = true;
+    orch.setState("H-1-1", "implementing");
+
+    // Worker dies without PR -- 5 consecutive not-alive checks triggers crash detection
+    for (let i = 0; i < 5; i++) {
+      orch.processTransitions(
+        snapshotWith([{ id: "H-1-1", workerAlive: false }]),
+      );
+    }
+
+    // Should be stuck immediately despite grace period -- crash detection is not gated
+    expect(orch.getItem("H-1-1")!.state).toBe("stuck");
+  });
+
+  it("crash detection in launching state is NOT gated by grace period", () => {
+    const orch = new Orchestrator({
+      maxRetries: 0,
+      gracePeriodMs: 5 * 60 * 1000,
+    });
+    orch.addItem(makeWorkItem("H-1-1"));
+    orch.getItem("H-1-1")!.reviewCompleted = true;
+    orch.setState("H-1-1", "launching");
+
+    // Worker dies during launch -- 5 consecutive not-alive checks triggers crash detection
+    for (let i = 0; i < 5; i++) {
+      orch.processTransitions(
+        snapshotWith([{ id: "H-1-1", workerAlive: false }]),
+      );
+    }
+
+    // Should be stuck immediately despite grace period -- crash detection is not gated
+    expect(orch.getItem("H-1-1")!.state).toBe("stuck");
+  });
+
+  it("grace period defers launch timeout in implementing state (process dead, no commits)", () => {
+    const orch = new Orchestrator({
+      launchTimeoutMs: 1000,
+      maxRetries: 0,
+      gracePeriodMs: 5 * 60 * 1000,
+    });
+    orch.addItem(makeWorkItem("H-1-1"));
+    orch.getItem("H-1-1")!.reviewCompleted = true;
+    orch.setState("H-1-1", "implementing");
+
+    // Advance past launch timeout with dead process
+    const futureTime = new Date(Date.now() + 2000);
+
+    const actions = orch.processTransitions(
+      snapshotWith([{ id: "H-1-1", workerAlive: false, lastCommitTime: null }]),
+      futureTime,
+    );
+
+    // Grace period should defer the kill
+    expect(orch.getItem("H-1-1")!.state).toBe("implementing");
+    expect(actions).toHaveLength(0);
+    expect(orch.getItem("H-1-1")!.timeoutDeadline).toBeDefined();
+  });
+
+  it("grace period defers launching state timeout", () => {
+    const orch = new Orchestrator({
+      maxRetries: 0,
+      gracePeriodMs: 5 * 60 * 1000,
+    });
+    orch.addItem(makeWorkItem("H-1-1"));
+    orch.getItem("H-1-1")!.reviewCompleted = true;
+    orch.setState("H-1-1", "launching");
+
+    // Advance past the 5-minute launching timeout
+    const futureTime = new Date(Date.now() + 6 * 60 * 1000);
+
+    const actions = orch.processTransitions(
+      snapshotWith([{ id: "H-1-1" }]), // workerAlive is undefined
+      futureTime,
+    );
+
+    // Grace period should defer the kill
+    expect(orch.getItem("H-1-1")!.state).toBe("launching");
+    expect(actions).toHaveLength(0);
+    expect(orch.getItem("H-1-1")!.timeoutDeadline).toBeDefined();
+  });
+
+  it("extendTimeout returns false for item without active grace period", () => {
+    const orch = new Orchestrator({ gracePeriodMs: 60_000 });
+    orch.addItem(makeWorkItem("H-1-1"));
+    orch.getItem("H-1-1")!.reviewCompleted = true;
+    orch.setState("H-1-1", "implementing");
+
+    // No timeout detected yet, so no deadline
+    expect(orch.extendTimeout("H-1-1")).toBe(false);
+  });
+
+  it("extendTimeout returns false for nonexistent item", () => {
+    const orch = new Orchestrator({ gracePeriodMs: 60_000 });
+    expect(orch.extendTimeout("nonexistent")).toBe(false);
+  });
+
+  it("onEvent fires timeout-grace-started and timeout-extended", () => {
+    const events: Array<{ itemId: string; event: string; data?: Record<string, unknown> }> = [];
+    const orch = new Orchestrator({
+      activityTimeoutMs: 1000,
+      maxRetries: 0,
+      gracePeriodMs: 60_000,
+      maxTimeoutExtensions: 3,
+      onEvent: (itemId, event, data) => events.push({ itemId, event, data }),
+    });
+    orch.addItem(makeWorkItem("H-1-1"));
+    orch.getItem("H-1-1")!.reviewCompleted = true;
+    orch.setState("H-1-1", "implementing");
+
+    const staleTime = "2026-01-15T10:00:00Z";
+    const t1 = new Date("2026-01-15T12:00:00Z");
+
+    // Trigger grace period
+    orch.processTransitions(
+      snapshotWith([{ id: "H-1-1", workerAlive: true, lastCommitTime: staleTime }]),
+      t1,
+    );
+
+    expect(events.some((e) => e.event === "timeout-grace-started")).toBe(true);
+    const graceEvent = events.find((e) => e.event === "timeout-grace-started")!;
+    expect(graceEvent.data?.gracePeriodMs).toBe(60_000);
+
+    // Extend timeout
+    orch.extendTimeout("H-1-1");
+
+    expect(events.some((e) => e.event === "timeout-extended")).toBe(true);
+    const extendEvent = events.find((e) => e.event === "timeout-extended")!;
+    expect(extendEvent.data?.extensionCount).toBe(1);
   });
 });

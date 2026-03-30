@@ -112,6 +112,10 @@ export interface OrchestratorItem {
   fixForwardWorkspaceRef?: string;
   /** AI tool used for this item's implementation worker. Review/rebaser/forward-fixer inherit this. */
   aiTool?: string;
+  /** ISO timestamp after which timeout kill proceeds. Set on first timeout detection, cleared on state transitions. */
+  timeoutDeadline?: string;
+  /** Number of user-initiated timeout extensions via extendTimeout(). */
+  timeoutExtensionCount?: number;
 }
 
 export interface OrchestratorConfig {
@@ -145,6 +149,10 @@ export interface OrchestratorConfig {
   maxFixForwardRetries: number;
   /** When true, the AI review gate is bypassed -- ci-passed chains straight to merge evaluation. Default: false. */
   skipReview: boolean;
+  /** Grace period (ms) before timeout kills proceed. On first timeout detection, a deadline is set this far in the future. 0 = immediate kill (no grace period). Default: 5 minutes. */
+  gracePeriodMs: number;
+  /** Max number of times extendTimeout() can push the deadline forward. Default: 3. */
+  maxTimeoutExtensions: number;
   /** Optional callback invoked on every state transition. Receives item ID, previous state, new state, detected timestamp, and detection latency in ms. */
   onTransition?: (itemId: string, from: string, to: string, timestamp: string, latencyMs: number) => void;
   /** Optional callback for structured events that don't result in state transitions (e.g., timeout suppression). */
@@ -417,6 +425,8 @@ export const DEFAULT_CONFIG: OrchestratorConfig = {
   fixForward: true,
   maxFixForwardRetries: 2,
   skipReview: false,
+  gracePeriodMs: 5 * 60 * 1000,  // 5 minutes
+  maxTimeoutExtensions: 3,
 };
 
 // ── Memory-aware WIP limit ──────────────────────────────────────────
@@ -705,6 +715,9 @@ export class Orchestrator {
       : 0;
     // Clear rebase flag on any state change -- the worker pushed or CI restarted
     item.rebaseRequested = false;
+    // Clear timeout grace period on any state change -- worker recovered or was killed
+    item.timeoutDeadline = undefined;
+    item.timeoutExtensionCount = undefined;
     // Reset reviewCompleted on CI failure -- requires fresh review after fixes.
     // ci-pending is not included: the initial ci-pending has reviewCompleted=false by default,
     // and regressions always go through ci-failed first (which resets it).
@@ -771,7 +784,11 @@ export class Orchestrator {
           // Check for launching timeout to prevent indefinite stall.
           const sinceTransition = now.getTime() - new Date(item.lastTransition).getTime();
           if (sinceTransition > LAUNCHING_TIMEOUT_MS) {
-            actions = this.stuckOrRetry(item, "launch-timeout: worker never registered within timeout");
+            if (this.shouldDeferTimeout(item, now)) {
+              actions = [];
+            } else {
+              actions = this.stuckOrRetry(item, "launch-timeout: worker never registered within timeout");
+            }
           } else {
             actions = [];
           }
@@ -947,6 +964,7 @@ export class Orchestrator {
       if (workerAlive) {
         // Process alive: suppress launch timeout, use activity timeout as hard cap
         if (sinceTransition > this.config.activityTimeoutMs) {
+          if (this.shouldDeferTimeout(item, now)) return [];
           return this.stuckOrRetry(item, "worker-stalled: process alive but no commits after activity timeout");
         }
         // Suppressed launch timeout -- log it if we would have timed out
@@ -958,12 +976,14 @@ export class Orchestrator {
           });
         }
       } else if (sinceLastAlive > this.config.launchTimeoutMs) {
+        if (this.shouldDeferTimeout(item, now)) return [];
         return this.stuckOrRetry(item, "worker-stalled: no commits after launch timeout");
       }
     } else {
       // Has commits -- check against activity timeout (same for alive or dead)
       const sinceCommit = nowMs - new Date(commitTime).getTime();
       if (sinceCommit > this.config.activityTimeoutMs) {
+        if (this.shouldDeferTimeout(item, now)) return [];
         return this.stuckOrRetry(item, "worker-stalled: no new commits after activity timeout");
       }
     }
@@ -971,7 +991,55 @@ export class Orchestrator {
     return [];
   }
 
-/**
+  /**
+   * Timeout grace period gate. On first timeout detection, sets a deadline
+   * gracePeriodMs in the future and returns true (defer the kill). On subsequent
+   * calls, returns true if the deadline hasn't passed yet.
+   * Returns false when the deadline has passed or gracePeriodMs is 0 (immediate kill).
+   */
+  private shouldDeferTimeout(item: OrchestratorItem, now: Date): boolean {
+    if (this.config.gracePeriodMs <= 0) return false;
+
+    if (!item.timeoutDeadline) {
+      // First detection: set deadline and defer
+      item.timeoutDeadline = new Date(now.getTime() + this.config.gracePeriodMs).toISOString();
+      item.timeoutExtensionCount = 0;
+      this.config.onEvent?.(item.id, "timeout-grace-started", {
+        deadline: item.timeoutDeadline,
+        gracePeriodMs: this.config.gracePeriodMs,
+      });
+      return true;
+    }
+
+    // Deadline exists: check if it's still in the future
+    return now.getTime() < new Date(item.timeoutDeadline).getTime();
+  }
+
+  /**
+   * Push the timeout deadline forward by gracePeriodMs.
+   * Returns true if the extension was applied, false if max extensions reached
+   * or the item has no active timeout deadline.
+   */
+  extendTimeout(id: string): boolean {
+    const item = this.items.get(id);
+    if (!item || !item.timeoutDeadline) return false;
+    if ((item.timeoutExtensionCount ?? 0) >= this.config.maxTimeoutExtensions) return false;
+
+    const now = Date.now();
+    const currentDeadline = new Date(item.timeoutDeadline).getTime();
+    // Extend from whichever is later: current deadline or now
+    const base = Math.max(now, currentDeadline);
+    item.timeoutDeadline = new Date(base + this.config.gracePeriodMs).toISOString();
+    item.timeoutExtensionCount = (item.timeoutExtensionCount ?? 0) + 1;
+    this.config.onEvent?.(item.id, "timeout-extended", {
+      deadline: item.timeoutDeadline,
+      extensionCount: item.timeoutExtensionCount,
+      maxExtensions: this.config.maxTimeoutExtensions,
+    });
+    return true;
+  }
+
+  /**
    * Check if an item should be retried or permanently stuck.
    * When retries remain, cleans the old worktree and transitions to ready for relaunch.
    * Returns retry action when retrying, empty array when permanently stuck.

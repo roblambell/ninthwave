@@ -4145,7 +4145,7 @@ describe("Orchestrator", () => {
 
   describe("heartbeat stuck detection", () => {
     it("transitions implementing → stuck when no commits after launch timeout (process dead)", () => {
-      orch = new Orchestrator({ launchTimeoutMs: 30 * 60 * 1000, maxRetries: 0, wipLimit: 5 });
+      orch = new Orchestrator({ launchTimeoutMs: 30 * 60 * 1000, maxRetries: 0, wipLimit: 5, gracePeriodMs: 0 });
       orch.addItem(makeWorkItem("H-1-1"));
       orch.getItem("H-1-1")!.reviewCompleted = true;
       orch.setState("H-1-1", "implementing");
@@ -4166,7 +4166,7 @@ describe("Orchestrator", () => {
     });
 
     it("transitions implementing → stuck when stale commit beyond activity timeout", () => {
-      orch = new Orchestrator({ activityTimeoutMs: 60 * 60 * 1000, maxRetries: 0, wipLimit: 5 });
+      orch = new Orchestrator({ activityTimeoutMs: 60 * 60 * 1000, maxRetries: 0, wipLimit: 5, gracePeriodMs: 0 });
       orch.addItem(makeWorkItem("H-1-1"));
       orch.getItem("H-1-1")!.reviewCompleted = true;
       orch.setState("H-1-1", "implementing");
@@ -4209,6 +4209,7 @@ describe("Orchestrator", () => {
         activityTimeoutMs: 10000,    // 10 seconds
         maxRetries: 0,
         wipLimit: 5,
+        gracePeriodMs: 0,
       });
       orch.addItem(makeWorkItem("H-1-1"));
       orch.getItem("H-1-1")!.reviewCompleted = true;
@@ -4270,6 +4271,7 @@ describe("Orchestrator", () => {
         launchTimeoutMs: 30 * 60 * 1000,
         maxRetries: 1,
         wipLimit: 5,
+        gracePeriodMs: 0,
       });
       orch.addItem(makeWorkItem("H-1-1"));
       orch.getItem("H-1-1")!.reviewCompleted = true;
