@@ -1,0 +1,12 @@
+# Deny by default -- only explicitly allowed files are committed
+*
+
+# Committed project files
+!.gitignore
+!config.json
+!work/
+!work/**
+!schedules/
+!schedules/**
+!friction/
+!friction/**
