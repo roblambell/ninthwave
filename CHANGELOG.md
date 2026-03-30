@@ -1,5 +1,66 @@
 # Changelog
 
+## [0.3.1] - 2026-03-30
+
+### Added
+- report agent frontmatter models in telemetry (H-CT-3) (#455)
+- surface GitHub API errors in TUI footer
+- add TUI timeout grace countdown (H-TG-3) (#450)
+- reframe crew mode as connected mode with delivery metrics
+- timeout grace period state machine (H-TG-2) (#449)
+- multi-tool selection with round-robin worker assignment
+- move AI tool and telemetry prompts into TUI selection flow
+- update crew client for new broker protocol (persistent codes, telemetry, 4x4x4x4 format)
+- add TmuxAdapter and tmux-send (H-TM-1) (#445)
+- add user-level config at ~/.ninthwave/config.json (H-CS-3) (#443)
+- inline crew status on branding line, add crew claim diagnostics
+- explicit AI tool selection with --tool flag and interactive prompt
+- periodic main branch refresh in orchestrator event loop
+- visible selection highlight + scroll-follows-selection (H-TG-1) (#440)
+- crew mode -- cloud broker, real-time cross-daemon state, UI polish
+- add review, crew, text input steps and updated confirmation (H-WJ-3) (#430)
+- add __ALL__ sentinel with linked toggle and default all checked (H-WJ-2) (#425)
+- add core/ai-tools.ts AI tool profile module (H-TA-1) (#423)
+
+### Fixed
+- remaining low-priority production fixes (L-ER-1) (#452)
+- set PROJECT_ROOT to worktree path in worker prompts
+- tmux worker alive check and surface attach command in TUI
+- render item detail as full-screen overlay instead of split-panel inline
+- complete .nw-prompt → .ninthwave/.prompt migration in agent docs
+- remove invalid --title flag from opencode TUI launch script
+- crew broker treats external deps as satisfied, adds TUI dep warning
+- crew mode cross-daemon state visibility, title casing, centered crew bar
+- skipReview bypasses AI review gate when reviews are off (H-SR-1) (#441)
+- detect merge conflicts in all PR lifecycle states, not just ci-pending
+- cmux binary detection and session check
+- selection UI count, spacing, and independent sentinel toggle
+- update CREW_CODE_PATTERN to match cloud broker format (H-WJ-1) (#422)
+
+### Changed
+- remove unreliable cost analytics (H-CT-2) (#454)
+- strip heartbeat cost flags (H-CT-1) (#453)
+- decompose orchestrator.ts into types + actions modules (H-ER-10) (#451)
+- support tmux workspace refs downstream (H-TM-3) (#447)
+- add tmux to mux detection chain and auto-launch (H-TM-2) (#446)
+- split CI/CD workflows with test gate before release
+- move filesystem boundary rule from ETHOS.md to CLAUDE.md (H-CS-4) (#444)
+- set per-role model defaults in agent frontmatter (H-CS-7) (#442)
+- consolidate file writes into .ninthwave/ and ~/.ninthwave/
+- switch OpenCode to --prompt flag with OPENCODE_PERMISSION auto-approval
+- rename repairer agent to rebaser (H-CS-5) (#438)
+- rename verifier agent to forward-fixer (H-CS-6) (#439)
+- replace .ninthwave/config with config.json (H-CS-2) (#437)
+- remove dead domain mapping feature (H-CS-1) (#436)
+- simplify cmdNoArgs, add readline prompts, wire review/crew args (H-WJ-4) (#434)
+- orchestrator code quality fixes (M-ER-6) (#433)
+- unified WIP pool with review priority (H-ER-8) (#432)
+- merge commitFrictionFiles into commitPathFiles, update ARCHITECTURE.md (L-ER-2) (#431)
+- decompose orchestrate.ts into focused subsystems (H-ER-9) (#429)
+- wire consumers to profile-derived data (H-TA-2) (#428)
+- replace launch switch stmt with profile dispatch (H-TA-3) (#427)
+- collapse pr-open into ci-pending (H-ER-7) (#426)
+
 ## [0.3.0] - 2026-03-29
 
 ### Added
