@@ -1,5 +1,19 @@
 # Changelog
 
+## [0.3.2] - 2026-03-30
+
+### Added
+- auto-init on first `nw` run after homebrew install -- no need to run `nw init` separately
+
+### Fixed
+- bundle dir resolution now tries `process.execPath` first for reliable path in compiled Bun binaries
+- graceful error message when ninthwave installation is not found (instead of stack trace)
+
+### Changed
+- drop `ai_tool` (singular) backward compat -- configs now use `ai_tools` array exclusively
+- add `~/.ninthwave/` as fallback bundle dir location for user-level installs
+
+
 ## [0.3.1] - 2026-03-30
 
 ### Added
