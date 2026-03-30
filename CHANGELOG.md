@@ -1,5 +1,11 @@
 # Changelog
 
+## [0.3.6] - 2026-03-30
+
+### Fixed
+- first-run onboarding no longer prompts for multiplexer selection or launches a session -- init happens first, then shows "no work items" guidance
+- removed dead `launchSession` code carrying the CMUX-not-in-PATH and tmux-hardcoded-as-cmux bugs
+
 ## [0.3.5] - 2026-03-30
 
 ### Fixed
