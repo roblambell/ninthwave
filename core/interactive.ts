@@ -9,7 +9,7 @@ import { BOLD, DIM, GREEN, YELLOW, CYAN, RESET } from "./output.ts";
 import type { WorkItem } from "./types.ts";
 import { PRIORITY_NUM } from "./types.ts";
 import type { MergeStrategy } from "./orchestrator.ts";
-import type { CrewAction } from "./commands/crew.ts";
+import type { ConnectionAction } from "./commands/crew.ts";
 import { isCrewCode } from "./commands/crew.ts";
 import type { AiToolProfile } from "./ai-tools.ts";
 import {
@@ -29,13 +29,11 @@ export interface InteractiveResult {
   wipLimit: number;
   allSelected: boolean;
   reviewMode: "all" | "mine" | "off";
-  crewAction: CrewAction | null;
+  connectionAction: ConnectionAction | null;
   /** Selected AI tool ID, undefined when the step was skipped. */
   aiTool?: string;
   /** Selected AI tool IDs (multi-select), undefined when the step was skipped. */
   aiTools?: string[];
-  /** Telemetry opt-in choice, undefined when the step was skipped. */
-  telemetryOptIn?: boolean;
 }
 
 export interface InteractiveDeps {
@@ -45,8 +43,8 @@ export interface InteractiveDeps {
   useLegacyPrompts?: boolean;
   /** Injectable WidgetIO for testing the TUI path. */
   widgetIO?: WidgetIO;
-  /** When false, skip the crew step (e.g. run-more re-entry where crew is session-scoped). */
-  showCrewStep?: boolean;
+  /** When false, skip the connection step (e.g. run-more re-entry where session is already active). */
+  showConnectionStep?: boolean;
   /** Default review mode from project config. */
   defaultReviewMode?: "all" | "mine" | "off";
   /** Pre-detected installed AI tool profiles. Skip tool step if undefined or single entry. */
@@ -57,8 +55,6 @@ export interface InteractiveDeps {
   savedToolIds?: string[];
   /** When true, skip the AI tool step (tool already determined by --tool or user config). */
   skipToolStep?: boolean;
-  /** Set to false to show the telemetry step. Defaults to skipping (undefined/true). */
-  skipTelemetryStep?: boolean;
 }
 
 // ── Default prompt using readline ────────────────────────────────────
@@ -368,48 +364,47 @@ export async function promptReviewMode(
   }
 }
 
-// ── Crew mode prompt ────────────────────────────────────────────────
+// ── Connection mode prompt ──────────────────────────────────────────
 
 /**
- * Prompt the user to choose crew collaboration mode.
- * Returns a CrewAction or null for solo mode.
+ * Prompt the user to choose connection mode.
+ * Returns a ConnectionAction or null for local mode.
  */
-export async function promptCrewMode(
+export async function promptConnectionMode(
   prompt: PromptFn,
-): Promise<CrewAction | null> {
+): Promise<ConnectionAction | null> {
   console.log();
-  console.log(`${BOLD}Crew collaboration:${RESET}`);
+  console.log(`${BOLD}Connect to ninthwave.sh:${RESET}`);
   console.log();
-  console.log(`  ${BOLD}1${RESET}. ${CYAN}solo${RESET}    ${DIM}-- work independently${RESET} ${GREEN}(default)${RESET}`);
-  console.log(`  ${BOLD}2${RESET}. ${CYAN}join${RESET}    ${DIM}-- join an existing crew${RESET}`);
-  console.log(`  ${BOLD}3${RESET}. ${CYAN}create${RESET}  ${DIM}-- start a new crew${RESET}`);
+  console.log(`  ${BOLD}1${RESET}. ${CYAN}connect${RESET}  ${DIM}-- track delivery metrics at ninthwave.sh${RESET} ${GREEN}(default)${RESET}`);
+  console.log(`  ${BOLD}2${RESET}. ${CYAN}join${RESET}     ${DIM}-- coordinate with teammates on the same repo${RESET}`);
+  console.log(`  ${BOLD}3${RESET}. ${CYAN}local${RESET}    ${DIM}-- no connection, works offline${RESET}`);
   console.log();
 
   while (true) {
     const answer = await prompt(`${BOLD}Choose [1-3]: ${RESET}`);
 
-    // Default to solo on empty input
-    if (answer === "" || answer === "1" || answer.toLowerCase() === "solo") {
-      return null;
+    // Default to connect on empty input
+    if (answer === "" || answer === "1" || answer.toLowerCase() === "connect") {
+      return { type: "connect" };
     }
 
     if (answer === "2" || answer.toLowerCase() === "join") {
-      // Prompt for crew code
       while (true) {
-        const code = await prompt(`${BOLD}Crew code: ${RESET}`);
+        const code = await prompt(`${BOLD}Session code: ${RESET}`);
         if (code === "" || code.toLowerCase() === "q") return null;
         if (isCrewCode(code)) {
           return { type: "join", code };
         }
-        console.log(`  ${YELLOW}Invalid crew code.${RESET} Expected format: ${BOLD}XXXX-XXXX-XXXX-XXXX${RESET} (e.g. K2F9-AB3X-7YPL-QM4N).`);
+        console.log(`  ${YELLOW}Invalid session code.${RESET} Expected format: ${BOLD}XXXX-XXXX-XXXX-XXXX${RESET} (e.g. K2F9-AB3X-7YPL-QM4N).`);
       }
     }
 
-    if (answer === "3" || answer.toLowerCase() === "create") {
-      return { type: "create" };
+    if (answer === "3" || answer.toLowerCase() === "local") {
+      return null;
     }
 
-    console.log(`  ${YELLOW}Enter 1-3 or a mode name (solo/join/create).${RESET}`);
+    console.log(`  ${YELLOW}Enter 1-3 or a mode name (connect/join/local).${RESET}`);
   }
 }
 
@@ -433,22 +428,19 @@ export async function confirmSummary(
   console.log(`  ${BOLD}Merge strategy:${RESET}  ${result.mergeStrategy}`);
   console.log(`  ${BOLD}WIP limit:${RESET}       ${result.wipLimit}`);
   console.log(`  ${BOLD}AI reviews:${RESET}      ${result.reviewMode}`);
-  if (result.crewAction) {
-    const crewLabel = result.crewAction.type === "create"
-      ? "create new crew"
-      : `join ${result.crewAction.code}`;
-    console.log(`  ${BOLD}Crew:${RESET}            ${crewLabel}`);
+  if (result.connectionAction) {
+    const connectionLabel = result.connectionAction.type === "connect"
+      ? "ninthwave.sh (new session)"
+      : `ninthwave.sh (joining ${result.connectionAction.code})`;
+    console.log(`  ${BOLD}Connection:${RESET}      ${connectionLabel}`);
   } else {
-    console.log(`  ${BOLD}Crew:${RESET}            solo`);
+    console.log(`  ${BOLD}Connection:${RESET}      Local`);
   }
   if (result.aiTools && result.aiTools.length > 0) {
     const toolLabel = result.aiTools.join(", ") + (result.aiTools.length > 1 ? " (round-robin)" : "");
     console.log(`  ${BOLD}AI tool:${RESET}         ${toolLabel}`);
   } else if (result.aiTool) {
     console.log(`  ${BOLD}AI tool:${RESET}         ${result.aiTool}`);
-  }
-  if (result.telemetryOptIn !== undefined) {
-    console.log(`  ${BOLD}Telemetry:${RESET}       ${result.telemetryOptIn ? "Enabled" : "Disabled"}`);
   }
   console.log();
 
@@ -484,11 +476,10 @@ export async function runTuiSelectionFlow(
   try {
     const result = await runSelectionScreen(io, todos, defaultWipLimit, {
       defaultReviewMode: deps.defaultReviewMode,
-      showCrewStep: deps.showCrewStep,
+      showConnectionStep: deps.showConnectionStep,
       installedTools: deps.skipToolStep ? undefined : deps.installedTools,
       savedToolId: deps.savedToolId,
       savedToolIds: deps.savedToolIds,
-      skipTelemetryStep: deps.skipTelemetryStep,
     });
     if (!result || result.cancelled) return null;
 
@@ -498,10 +489,9 @@ export async function runTuiSelectionFlow(
       wipLimit: result.wipLimit,
       allSelected: result.allSelected,
       reviewMode: result.reviewMode,
-      crewAction: result.crewAction,
+      connectionAction: result.connectionAction,
       aiTool: result.aiTool,
       aiTools: result.aiTools,
-      telemetryOptIn: result.telemetryOptIn,
     };
   } finally {
     // Restore terminal state
@@ -561,10 +551,10 @@ async function runReadlineFlow(
   const defaultReviewMode = deps.defaultReviewMode ?? "mine";
   const reviewMode = await promptReviewMode(defaultReviewMode, prompt);
 
-  // Step 5: Crew collaboration (skippable for run-more re-entry)
-  let crewAction: CrewAction | null = null;
-  if (deps.showCrewStep !== false) {
-    crewAction = await promptCrewMode(prompt);
+  // Step 5: Connection to ninthwave.sh (skippable for run-more re-entry)
+  let connectionAction: ConnectionAction | null = null;
+  if (deps.showConnectionStep !== false) {
+    connectionAction = await promptConnectionMode(prompt);
   }
 
   // Step 6: AI tool (conditional, multi-select)
@@ -624,27 +614,16 @@ async function runReadlineFlow(
     aiTools = [aiTool];
   }
 
-  // Step 7: Telemetry (conditional)
-  let telemetryOptIn: boolean | undefined;
-  if (deps.skipTelemetryStep === false) {
-    console.log();
-    const answer = await prompt(
-      `Send anonymous usage stats to help improve ninthwave? (y/N) `,
-    );
-    telemetryOptIn = answer.toLowerCase() === "y" || answer.toLowerCase() === "yes";
-  }
-
-  // Step 8: Summary + confirmation
+  // Step 7: Summary + confirmation
   const result: InteractiveResult = {
     itemIds: itemResult.ids,
     mergeStrategy,
     wipLimit,
     allSelected: itemResult.allSelected,
     reviewMode,
-    crewAction,
+    connectionAction,
     aiTool,
     aiTools,
-    telemetryOptIn,
   };
 
   const confirmed = await confirmSummary(result, todos, prompt);

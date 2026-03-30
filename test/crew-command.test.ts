@@ -9,7 +9,7 @@ import {
   promptCrewAction,
   printCrewUsage,
   cmdCrew,
-  type CrewAction,
+  type ConnectionAction,
   type CrewDeps,
 } from "../core/commands/crew.ts";
 
@@ -110,7 +110,7 @@ describe("parseCrewArgs", () => {
 
   it("parses explicit create subcommand", () => {
     const result = parseCrewArgs(["create"]);
-    expect(result).toEqual({ type: "create" });
+    expect(result).toEqual({ type: "connect" });
   });
 
   it("parses explicit join subcommand", () => {
@@ -123,15 +123,15 @@ describe("parseCrewArgs", () => {
   });
 
   it("throws on join without code", () => {
-    expect(() => parseCrewArgs(["join"])).toThrow("Usage: nw crew join <crew-code>");
+    expect(() => parseCrewArgs(["join"])).toThrow("Usage: nw crew join <session-code>");
   });
 
   it("throws on join with invalid crew code", () => {
-    expect(() => parseCrewArgs(["join", "INVALID"])).toThrow("Invalid crew code: INVALID");
+    expect(() => parseCrewArgs(["join", "INVALID"])).toThrow("Invalid session code: INVALID");
   });
 
   it("throws on join with old 6-char code", () => {
-    expect(() => parseCrewArgs(["join", "abc-xyz"])).toThrow("Invalid crew code: abc-xyz");
+    expect(() => parseCrewArgs(["join", "abc-xyz"])).toThrow("Invalid session code: abc-xyz");
   });
 
   it("direct join shorthand routes code-shaped arg to join", () => {
@@ -147,18 +147,6 @@ describe("promptCrewAction", () => {
     const prompt = mockPrompt(["ABCD-EFGH-IJKL-MNOP"]);
     const result = await promptCrewAction(prompt);
     expect(result).toEqual({ type: "join", code: "ABCD-EFGH-IJKL-MNOP" });
-  });
-
-  it("returns create action for 'create' input", async () => {
-    const prompt = mockPrompt(["create"]);
-    const result = await promptCrewAction(prompt);
-    expect(result).toEqual({ type: "create" });
-  });
-
-  it("returns create action for 'Create' input (case-insensitive)", async () => {
-    const prompt = mockPrompt(["Create"]);
-    const result = await promptCrewAction(prompt);
-    expect(result).toEqual({ type: "create" });
   });
 
   it("returns null on empty input (cancel)", async () => {
@@ -185,7 +173,7 @@ describe("promptCrewAction", () => {
       const result = await promptCrewAction(prompt);
       expect(result).toEqual({ type: "join", code: "ABCD-EFGH-IJKL-MNOP" });
     });
-    const invalidLine = lines.find((l) => l.includes("Invalid crew code"));
+    const invalidLine = lines.find((l) => l.includes("Invalid session code"));
     expect(invalidLine).toBeDefined();
   });
 });
@@ -221,14 +209,14 @@ describe("cmdCrew", () => {
     expect(watchArgs).toEqual([["--crew", "ABCD-EFGH-IJKL-MNOP"]]);
   });
 
-  it("create subcommand delegates to watch with --crew-create flag", async () => {
+  it("create subcommand delegates to watch with --connect flag", async () => {
     const watchArgs: string[][] = [];
     const deps: CrewDeps = {
       runWatch: async (args) => { watchArgs.push(args); },
     };
 
     await cmdCrew(["create"], workDir, worktreeDir, projectRoot, deps);
-    expect(watchArgs).toEqual([["--crew-create"]]);
+    expect(watchArgs).toEqual([["--connect"]]);
   });
 
   it("explicit join subcommand delegates to watch with --crew flag", async () => {
@@ -269,18 +257,6 @@ describe("cmdCrew", () => {
 
     await cmdCrew([], workDir, worktreeDir, projectRoot, deps);
     expect(watchArgs).toEqual([["--crew", "K2F9-AB3X-7YPL-QM4N"]]);
-  });
-
-  it("interactive mode with TTY prompts and creates on 'create' input", async () => {
-    const watchArgs: string[][] = [];
-    const deps: CrewDeps = {
-      isTTY: true,
-      prompt: mockPrompt(["create"]),
-      runWatch: async (args) => { watchArgs.push(args); },
-    };
-
-    await cmdCrew([], workDir, worktreeDir, projectRoot, deps);
-    expect(watchArgs).toEqual([["--crew-create"]]);
   });
 
   it("interactive mode with cancel does nothing", async () => {

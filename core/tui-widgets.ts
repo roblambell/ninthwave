@@ -7,7 +7,7 @@ import { BOLD, DIM, GREEN, YELLOW, CYAN, RESET, RED } from "./output.ts";
 import type { WorkItem } from "./types.ts";
 import { PRIORITY_NUM } from "./types.ts";
 import type { MergeStrategy } from "./orchestrator.ts";
-import type { CrewAction } from "./commands/crew.ts";
+import type { ConnectionAction } from "./commands/crew.ts";
 import { CREW_CODE_PATTERN, normalizeCrewCode } from "./commands/crew.ts";
 import type { AiToolProfile } from "./ai-tools.ts";
 
@@ -78,14 +78,12 @@ export interface SelectionScreenResult {
   mergeStrategy: MergeStrategy;
   wipLimit: number;
   reviewMode: "all" | "mine" | "off";
-  crewAction: CrewAction | null;
+  connectionAction: ConnectionAction | null;
   cancelled: boolean;
   /** Selected AI tool ID, undefined when the step was skipped. */
   aiTool?: string;
   /** Selected AI tool IDs (multi-select), undefined when the step was skipped. */
   aiTools?: string[];
-  /** Telemetry opt-in choice, undefined when the step was skipped. */
-  telemetryOptIn?: boolean;
 }
 
 // ── Checkbox List Widget ────────────────────────────────────────────
@@ -280,7 +278,7 @@ export function runCheckboxList(
 export function runSingleSelect<T>(
   io: WidgetIO,
   options: SingleSelectOption<T>[],
-  opts: { title?: string } = {},
+  opts: { title?: string; lines?: string[] } = {},
 ): Promise<SingleSelectResult<T>> {
   return new Promise((resolve) => {
     if (options.length === 0) {
@@ -308,6 +306,14 @@ export function runSingleSelect<T>(
         const defaultTag = opt.isDefault && !isActive ? ` ${DIM}(default)${RESET}` : "";
         const line = `  ${radio} ${label}${desc}${defaultTag}`;
         out += `${line.slice(0, cols + 80)}${CLEAR_LINE}\n`;
+      }
+
+      // Optional description lines below options
+      if (opts.lines && opts.lines.length > 0) {
+        out += `${CLEAR_LINE}\n`;
+        for (const line of opts.lines) {
+          out += `${line}${CLEAR_LINE}\n`;
+        }
       }
 
       out += `${CLEAR_LINE}\n`;
@@ -625,26 +631,29 @@ const REVIEW_MODE_OPTIONS: SingleSelectOption<"all" | "mine" | "off">[] = [
   },
 ];
 
-/** Crew mode option values for the picker. */
-type CrewOption = "solo" | "join" | "create";
+/** Brand amber -- truecolor (#D4A030) for ninthwave.sh branding in TUI. */
+const BRAND = "\x1b[38;2;212;160;48m";
 
-/** Crew collaboration options for the picker. */
-const CREW_OPTIONS: SingleSelectOption<CrewOption>[] = [
+/** Connection mode option values for the picker. */
+type ConnectionOption = "connect" | "join" | "local";
+
+/** Connection options for the picker. */
+const CONNECTION_OPTIONS: SingleSelectOption<ConnectionOption>[] = [
   {
-    value: "solo",
-    label: "Solo",
-    description: "run on this machine only",
+    value: "connect",
+    label: "Connect",
+    description: "track delivery metrics at ninthwave.sh",
     isDefault: true,
   },
   {
     value: "join",
-    label: "Join crew",
-    description: "enter a code to collaborate",
+    label: "Join session",
+    description: "coordinate with teammates on the same repo",
   },
   {
-    value: "create",
-    label: "Create crew",
-    description: "start a new crew session",
+    value: "local",
+    label: "Local only",
+    description: "no connection, works offline",
   },
 ];
 
@@ -688,7 +697,7 @@ export function toCheckboxItems(items: WorkItem[]): CheckboxItem[] {
  * 2. Single-select for merge strategy
  * 3. Number picker for WIP limit
  * 4. Single-select for AI review mode
- * 5. Single-select for crew collaboration (skippable)
+ * 5. Single-select for ninthwave.sh connection (skippable)
  * 6. Summary confirmation
  *
  * Renders entirely in the alt-screen buffer using raw keypresses.
@@ -703,15 +712,13 @@ export async function runSelectionScreen(
   defaultWipLimit: number,
   opts: {
     defaultReviewMode?: "all" | "mine" | "off";
-    showCrewStep?: boolean;
+    showConnectionStep?: boolean;
     /** Installed AI tools for the tool selection step. Empty/single = skip screen. */
     installedTools?: AiToolProfile[];
     /** Pre-selected tool ID to mark as default in the picker. */
     savedToolId?: string;
     /** Pre-selected tool IDs for multi-select (from saved config). */
     savedToolIds?: string[];
-    /** Set to false to show the telemetry step. Defaults to skipping (undefined/true). */
-    skipTelemetryStep?: boolean;
   } = {},
 ): Promise<SelectionScreenResult | null> {
   if (items.length === 0) {
@@ -810,28 +817,37 @@ export async function runSelectionScreen(
     return null;
   }
 
-  // Step 5: Crew collaboration (skippable for run-more re-entry)
-  let crewAction: CrewAction | null = null;
+  // Step 5: Connection to ninthwave.sh (skippable for run-more re-entry)
+  let connectionAction: ConnectionAction | null = null;
 
-  if (opts.showCrewStep !== false) {
+  if (opts.showConnectionStep !== false) {
     io.write(CLEAR_SCREEN);
-    const crewResult = await runSingleSelect<CrewOption>(
+    const connectionResult = await runSingleSelect<ConnectionOption>(
       io,
-      CREW_OPTIONS,
-      { title: "Ninthwave \u00b7 Collaboration" },
+      CONNECTION_OPTIONS,
+      {
+        title: "Ninthwave \u00b7 Connect to " + BRAND + "ninthwave.sh" + RESET,
+        lines: [
+          `${DIM}What you get:${RESET}`,
+          `${DIM}  \u00b7 Delivery metrics dashboard at ${BRAND}ninthwave.sh${RESET}${DIM}/stats${RESET}`,
+          `${DIM}  \u00b7 Session duration, lead time, CI health, throughput${RESET}`,
+          `${DIM}  \u00b7 Invite teammates to coordinate across machines${RESET}`,
+          `${DIM}  No code or repo content is sent.${RESET}`,
+        ],
+      },
     );
 
-    if (crewResult.cancelled) {
+    if (connectionResult.cancelled) {
       io.write(SHOW_CURSOR);
       return null;
     }
 
-    if (crewResult.value === "create") {
-      crewAction = { type: "create" };
-    } else if (crewResult.value === "join") {
+    if (connectionResult.value === "connect") {
+      connectionAction = { type: "connect" };
+    } else if (connectionResult.value === "join") {
       io.write(CLEAR_SCREEN);
       const textResult = await runTextInput(io, {
-        title: "Ninthwave \u00b7 Join crew",
+        title: "Ninthwave \u00b7 Join session",
         hint: "e.g. K2F9 AB3X 7YPL QM4N",
         validate: (v) =>
           CREW_CODE_PATTERN.test(v)
@@ -856,9 +872,9 @@ export async function runSelectionScreen(
         return null;
       }
 
-      crewAction = { type: "join", code: normalizeCrewCode(textResult.value) };
+      connectionAction = { type: "join", code: normalizeCrewCode(textResult.value) };
     }
-    // "solo" => crewAction remains null
+    // "local" => connectionAction remains null
   }
 
   // Step 6: AI coding tool (conditional -- only when 2+ tools detected)
@@ -895,27 +911,7 @@ export async function runSelectionScreen(
     aiTools = [aiTool];
   }
 
-  // Step 7: Telemetry opt-in (conditional -- only when not already configured)
-  let telemetryOptIn: boolean | undefined;
-
-  if (opts.skipTelemetryStep === false) {
-    io.write(CLEAR_SCREEN);
-    const telemetryConfirmed = await runConfirm(io, {
-      title: "Ninthwave \u00b7 Anonymous usage stats",
-      lines: [
-        "Send anonymous usage stats to help improve ninthwave?",
-        "",
-        `${DIM}What's collected: session duration, item count, AI tool used,${RESET}`,
-        `${DIM}merge strategy, error rates. No code or repo data.${RESET}`,
-        "",
-        `${DIM}Your crew stats will be viewable at ninthwave.sh/stats/{code}${RESET}`,
-      ],
-    });
-
-    telemetryOptIn = telemetryConfirmed;
-  }
-
-  // Step 8: Confirmation summary
+  // Step 7: Confirmation summary
   // Items summary
   let itemLines: string[];
   if (itemResult.allSelected) {
@@ -938,21 +934,16 @@ export async function runSelectionScreen(
     : reviewResult.value === "mine" ? "My PRs"
     : "Off";
 
-  // Crew label
-  const crewLabel =
-    crewAction === null ? "Solo"
-    : crewAction.type === "create" ? "Creating new crew"
-    : `Joining crew ${crewAction.code}`;
+  // Connection label
+  const connectionLabel =
+    connectionAction === null ? "Local"
+    : connectionAction.type === "connect" ? `${BRAND}ninthwave.sh${RESET} (new session)`
+    : `${BRAND}ninthwave.sh${RESET} (joining ${connectionAction.code})`;
 
   // AI tool label (only shown when the tool step was visible)
   const toolLabel = (tools.length >= 2 && aiTools && aiTools.length > 0)
     ? aiTools.map((id) => tools.find((t) => t.id === id)?.displayName ?? id).join(", ") + (aiTools.length > 1 ? " (round-robin)" : "")
     : undefined;
-
-  // Telemetry label (only shown when the telemetry step was visible)
-  const telemetryLabel = telemetryOptIn === undefined ? undefined
-    : telemetryOptIn ? "Enabled"
-    : "Disabled";
 
   const summaryLines = [
     ...itemLines,
@@ -960,9 +951,8 @@ export async function runSelectionScreen(
     `${BOLD}Merge strategy:${RESET}  ${strategyResult.value}`,
     `${BOLD}WIP limit:${RESET}       ${wipResult.value}`,
     `${BOLD}AI reviews:${RESET}      ${reviewLabel}`,
-    `${BOLD}Crew:${RESET}            ${crewLabel}`,
+    `${BOLD}Connection:${RESET}      ${connectionLabel}`,
     ...(toolLabel ? [`${BOLD}AI tool:${RESET}         ${toolLabel}`] : []),
-    ...(telemetryLabel ? [`${BOLD}Telemetry:${RESET}       ${telemetryLabel}`] : []),
   ];
 
   io.write(CLEAR_SCREEN);
@@ -983,11 +973,10 @@ export async function runSelectionScreen(
     mergeStrategy: strategyResult.value,
     wipLimit: wipResult.value,
     reviewMode: reviewResult.value,
-    crewAction,
+    connectionAction,
     cancelled: false,
     aiTool,
     aiTools,
-    telemetryOptIn,
   };
 }
 

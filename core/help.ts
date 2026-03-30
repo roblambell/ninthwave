@@ -139,8 +139,8 @@ export const COMMAND_REGISTRY: ReadonlyArray<CommandEntry> = [
   },
   {
     name: "crew",
-    usage: "crew [<crew-code>|create|join <crew-code>]",
-    description: "Join or create a crew for collaborative orchestration",
+    usage: "crew [<session-code>|create|join <session-code>]",
+    description: "Coordinate with teammates on the same repo",
     group: "workflow",
     needsRoot: true,
     needsWork: true,
@@ -148,9 +148,9 @@ export const COMMAND_REGISTRY: ReadonlyArray<CommandEntry> = [
     flags: {},
     examples: [
       "nw crew",
-      "nw crew abc-xyz",
+      "nw crew K2F9-AB3X-7YPL-QM4N",
       "nw crew create",
-      "nw crew join abc-xyz",
+      "nw crew join K2F9-AB3X-7YPL-QM4N",
     ],
   },
   {

@@ -26,7 +26,7 @@ export interface ParsedWatchArgs {
   jsonFlag: boolean;
   skipPreflight: boolean;
   crewCode?: string;
-  crewCreate: boolean;
+  connectMode: boolean;
   crewPort: number;
   crewUrl?: string;
   crewName?: string;
@@ -55,7 +55,7 @@ export function parseWatchArgs(args: string[]): ParsedWatchArgs {
   let jsonFlag = false;
   let skipPreflight = false;
   let crewCode: string | undefined;
-  let crewCreate = false;
+  let connectMode = false;
   let crewPort = 0;
   let crewUrl: string | undefined;
   let crewName: string | undefined;
@@ -175,8 +175,8 @@ export function parseWatchArgs(args: string[]): ParsedWatchArgs {
         crewCode = args[i + 1];
         i += 2;
         break;
-      case "--crew-create":
-        crewCreate = true;
+      case "--connect":
+        connectMode = true;
         i += 1;
         break;
       case "--crew-port":
@@ -215,7 +215,7 @@ export function parseWatchArgs(args: string[]): ParsedWatchArgs {
     daemonMode, isDaemonChild, clickupListId, remoteFlag,
     reviewAutoFix, reviewExternal, reviewWipLimit,
     fixForward, skipReview, watchMode, noWatch, watchIntervalSecs,
-    jsonFlag, skipPreflight, crewCode, crewCreate, crewPort, crewUrl, crewName,
+    jsonFlag, skipPreflight, crewCode, connectMode, crewPort, crewUrl, crewName,
     bypassEnabled, toolOverride,
   };
 }

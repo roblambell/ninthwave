@@ -576,7 +576,7 @@ describe("cmdNoArgs", () => {
       wipLimit: 3,
       allSelected: false,
       reviewMode: "mine",
-      crewAction: null,
+      connectionAction: null,
     };
 
     await cmdNoArgs(projectDir, {
@@ -620,7 +620,7 @@ describe("cmdNoArgs", () => {
         wipLimit: 4,
         allSelected: true,
         reviewMode: "mine",
-        crewAction: null,
+        connectionAction: null,
       }),
       runWatch: async (args) => { watchArgs = args; },
     });
@@ -645,7 +645,7 @@ describe("cmdNoArgs", () => {
         wipLimit: 4,
         allSelected: false,
         reviewMode: "all" as const,
-        crewAction: null,
+        connectionAction: null,
       }),
       runWatch: async (args) => { watchArgs = args; },
     });
@@ -670,7 +670,7 @@ describe("cmdNoArgs", () => {
         wipLimit: 4,
         allSelected: false,
         reviewMode: "off" as const,
-        crewAction: null,
+        connectionAction: null,
       }),
       runWatch: async (args) => { watchArgs = args; },
     });
@@ -696,7 +696,7 @@ describe("cmdNoArgs", () => {
         wipLimit: 4,
         allSelected: false,
         reviewMode: "mine" as const,
-        crewAction: null,
+        connectionAction: null,
       }),
       runWatch: async (args) => { watchArgs = args; },
     });
@@ -722,7 +722,7 @@ describe("cmdNoArgs", () => {
         wipLimit: 4,
         allSelected: false,
         reviewMode: "mine" as const,
-        crewAction: { type: "join" as const, code: "K2F9-AB3X-7YPL-QM4N" },
+        connectionAction: { type: "join" as const, code: "K2F9-AB3X-7YPL-QM4N" },
       }),
       runWatch: async (args) => { watchArgs = args; },
     });
@@ -731,7 +731,7 @@ describe("cmdNoArgs", () => {
     expect(watchArgs).toContain("K2F9-AB3X-7YPL-QM4N");
   });
 
-  it("passes --crew-create for crew create action", async () => {
+  it("passes --connect for crew connect action", async () => {
     const projectDir = setupTempRepo();
     mkdirSync(join(projectDir, ".ninthwave", "work"), { recursive: true });
 
@@ -748,12 +748,12 @@ describe("cmdNoArgs", () => {
         wipLimit: 4,
         allSelected: false,
         reviewMode: "mine" as const,
-        crewAction: { type: "create" as const },
+        connectionAction: { type: "connect" as const },
       }),
       runWatch: async (args) => { watchArgs = args; },
     });
 
-    expect(watchArgs).toContain("--crew-create");
+    expect(watchArgs).toContain("--connect");
   });
 
   it("exits gracefully when user cancels interactive flow", async () => {
@@ -793,7 +793,7 @@ describe("cmdNoArgs", () => {
           wipLimit: 4,
           allSelected: false,
           reviewMode: "mine" as const,
-          crewAction: null,
+          connectionAction: null,
         };
       },
       runWatch: async () => {},
@@ -823,7 +823,7 @@ describe("cmdNoArgs", () => {
           wipLimit: 4,
           allSelected: false,
           reviewMode: "all" as const,
-          crewAction: null,
+          connectionAction: null,
         };
       },
       runWatch: async () => {},

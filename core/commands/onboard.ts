@@ -438,15 +438,12 @@ export async function cmdNoArgs(
   const projectConfig = doLoadConfig(projectRoot);
   const defaultReviewMode = projectConfig.review_external ? "all" as const : "mine" as const;
   const installedTools = detectInstalledAITools();
-  const skipTelemetryStep = projectConfig.telemetry !== undefined || process.env.NW_TELEMETRY === "1";
-
   const doInteractive = deps.runInteractiveFlow ?? runInteractiveFlow;
   const result = await doInteractive(todos, 4, {
     defaultReviewMode,
     installedTools,
     savedToolId: projectConfig.ai_tool,
     savedToolIds: projectConfig.ai_tools,
-    skipTelemetryStep,
   });
   if (!result) return; // User cancelled
 
@@ -470,12 +467,12 @@ export async function cmdNoArgs(
   }
   // "mine" → default behavior, no extra flag
 
-  // Crew action → CLI flags
-  if (result.crewAction) {
-    if (result.crewAction.type === "join") {
-      watchArgs.push("--crew", result.crewAction.code);
-    } else if (result.crewAction.type === "create") {
-      watchArgs.push("--crew-create");
+  // Connection action → CLI flags
+  if (result.connectionAction) {
+    if (result.connectionAction.type === "join") {
+      watchArgs.push("--crew", result.connectionAction.code);
+    } else if (result.connectionAction.type === "connect") {
+      watchArgs.push("--connect");
     }
   }
 
@@ -484,12 +481,6 @@ export async function cmdNoArgs(
     watchArgs.push("--tool", result.aiTools.join(","));
   } else if (result.aiTool) {
     watchArgs.push("--tool", result.aiTool);
-  }
-
-  // Telemetry → save to config (cmdWatch reads from config)
-  if (result.telemetryOptIn !== undefined) {
-    const { saveConfig } = await import("../config.ts");
-    saveConfig(projectRoot, { telemetry: result.telemetryOptIn });
   }
 
   if (deps.runWatch) {

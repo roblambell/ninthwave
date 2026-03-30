@@ -8,7 +8,7 @@ import {
   promptMergeStrategy,
   promptWipLimit,
   promptReviewMode,
-  promptCrewMode,
+  promptConnectionMode,
   confirmSummary,
   runInteractiveFlow,
   displayItemsSummary,
@@ -268,7 +268,7 @@ describe("confirmSummary", () => {
     wipLimit: 3,
     allSelected: false,
     reviewMode: "mine",
-    crewAction: null,
+    connectionAction: null,
   };
 
   it("returns true on Y (default)", async () => {
@@ -286,26 +286,26 @@ describe("confirmSummary", () => {
     expect(confirmed).toBe(false);
   });
 
-  it("displays reviewMode and crew info", async () => {
-    const crewResult: InteractiveResult = {
+  it("displays reviewMode and connection info", async () => {
+    const connResult: InteractiveResult = {
       ...result,
       reviewMode: "all",
-      crewAction: { type: "join", code: "K2F9-AB3X-7YPL-QM4N" },
+      connectionAction: { type: "join", code: "K2F9-AB3X-7YPL-QM4N" },
     };
     const logs: string[] = [];
     const origLog = console.log;
     console.log = (...args: unknown[]) => logs.push(args.join(" "));
     try {
-      await confirmSummary(crewResult, items, makePrompt([""]));
+      await confirmSummary(connResult, items, makePrompt([""]));
     } finally {
       console.log = origLog;
     }
     const output = logs.join("\n");
     expect(output).toContain("all");
-    expect(output).toContain("join K2F9-AB3X-7YPL-QM4N");
+    expect(output).toContain("joining K2F9-AB3X-7YPL-QM4N");
   });
 
-  it("displays solo when crewAction is null", async () => {
+  it("displays Local when connectionAction is null", async () => {
     const logs: string[] = [];
     const origLog = console.log;
     console.log = (...args: unknown[]) => logs.push(args.join(" "));
@@ -315,7 +315,7 @@ describe("confirmSummary", () => {
       console.log = origLog;
     }
     const output = logs.join("\n");
-    expect(output).toContain("solo");
+    expect(output).toContain("Local");
   });
 });
 
@@ -329,8 +329,8 @@ describe("runInteractiveFlow", () => {
 
   it("returns complete result for valid legacy flow", async () => {
     // Answers: select items "1 2", merge strategy "1" (auto), wip limit "5",
-    //          review mode "" (default=mine), crew "1" (solo), confirm ""
-    const prompt = makePrompt(["1 2", "1", "5", "", "1", ""]);
+    //          review mode "" (default=mine), connection "3" (local), confirm ""
+    const prompt = makePrompt(["1 2", "1", "5", "", "3", ""]);
     const result = await runInteractiveFlow(items, 3, { prompt, useLegacyPrompts: true });
 
     expect(result).not.toBeNull();
@@ -338,7 +338,7 @@ describe("runInteractiveFlow", () => {
     expect(result!.mergeStrategy).toBe("auto");
     expect(result!.wipLimit).toBe(5);
     expect(result!.reviewMode).toBe("mine");
-    expect(result!.crewAction).toBeNull();
+    expect(result!.connectionAction).toBeNull();
     expect(result!.allSelected).toBe(true);
   });
 
@@ -350,8 +350,8 @@ describe("runInteractiveFlow", () => {
 
   it("returns null when user cancels at confirmation", async () => {
     // Answers: select items "1", merge strategy "1" (auto), wip limit "",
-    //          review mode "", crew "1" (solo), confirm "n"
-    const prompt = makePrompt(["1", "1", "", "", "1", "n"]);
+    //          review mode "", connection "3" (local), confirm "n"
+    const prompt = makePrompt(["1", "1", "", "", "3", "n"]);
     const result = await runInteractiveFlow(items, 3, { prompt, useLegacyPrompts: true });
     expect(result).toBeNull();
   });
@@ -364,7 +364,7 @@ describe("runInteractiveFlow", () => {
 
   it("completes flow with manual strategy and custom wip", async () => {
     // Answers: select "all", merge "2" (manual), wip "7",
-    //          review mode "1" (all), crew "1" (solo), confirm ""
+    //          review mode "1" (all), connection "1" (connect), confirm ""
     const prompt = makePrompt(["all", "2", "7", "1", "1", ""]);
     const result = await runInteractiveFlow(items, 3, { prompt, useLegacyPrompts: true });
 
@@ -375,24 +375,24 @@ describe("runInteractiveFlow", () => {
     expect(result!.reviewMode).toBe("all");
   });
 
-  it("skips crew step when showCrewStep is false", async () => {
+  it("skips connection step when showConnectionStep is false", async () => {
     // Answers: select "1", merge "1" (auto), wip "",
-    //          review mode "" (default=mine), confirm "" (no crew prompt)
+    //          review mode "" (default=mine), confirm "" (no connection prompt)
     const prompt = makePrompt(["1", "1", "", "", ""]);
     const result = await runInteractiveFlow(items, 3, {
       prompt,
       useLegacyPrompts: true,
-      showCrewStep: false,
+      showConnectionStep: false,
     });
 
     expect(result).not.toBeNull();
-    expect(result!.crewAction).toBeNull();
+    expect(result!.connectionAction).toBeNull();
   });
 
   it("passes defaultReviewMode through to readline flow", async () => {
     // Answers: select "1", merge "1", wip "",
-    //          review mode "" (default=all from deps), crew "1" (solo), confirm ""
-    const prompt = makePrompt(["1", "1", "", "", "1", ""]);
+    //          review mode "" (default=all from deps), connection "3" (local), confirm ""
+    const prompt = makePrompt(["1", "1", "", "", "3", ""]);
     const result = await runInteractiveFlow(items, 3, {
       prompt,
       useLegacyPrompts: true,
@@ -532,46 +532,46 @@ describe("promptReviewMode", () => {
   });
 });
 
-// ── promptCrewMode ──────────────────────────────────────────────────
+// ── promptConnectionMode ───────────────────────────────────────────
 
-describe("promptCrewMode", () => {
-  it("returns null for solo (default)", async () => {
-    const result = await promptCrewMode(makePrompt([""]));
+describe("promptConnectionMode", () => {
+  it("returns connect for default (empty input)", async () => {
+    const result = await promptConnectionMode(makePrompt([""]));
+    expect(result).toEqual({ type: "connect" });
+  });
+
+  it("returns connect on input 1", async () => {
+    const result = await promptConnectionMode(makePrompt(["1"]));
+    expect(result).toEqual({ type: "connect" });
+  });
+
+  it('returns null (local) on input "3"', async () => {
+    const result = await promptConnectionMode(makePrompt(["3"]));
     expect(result).toBeNull();
   });
 
-  it("returns null for solo on input 1", async () => {
-    const result = await promptCrewMode(makePrompt(["1"]));
+  it('returns null (local) on text "local"', async () => {
+    const result = await promptConnectionMode(makePrompt(["local"]));
     expect(result).toBeNull();
-  });
-
-  it('returns create on input "3"', async () => {
-    const result = await promptCrewMode(makePrompt(["3"]));
-    expect(result).toEqual({ type: "create" });
-  });
-
-  it('returns create on text "create"', async () => {
-    const result = await promptCrewMode(makePrompt(["create"]));
-    expect(result).toEqual({ type: "create" });
   });
 
   it('returns join with code on input "2" then valid code', async () => {
-    const result = await promptCrewMode(makePrompt(["2", "K2F9-AB3X-7YPL-QM4N"]));
+    const result = await promptConnectionMode(makePrompt(["2", "K2F9-AB3X-7YPL-QM4N"]));
     expect(result).toEqual({ type: "join", code: "K2F9-AB3X-7YPL-QM4N" });
   });
 
   it("returns null when user cancels join code prompt", async () => {
-    const result = await promptCrewMode(makePrompt(["join", "q"]));
+    const result = await promptConnectionMode(makePrompt(["join", "q"]));
     expect(result).toBeNull();
   });
 
-  it("retries on invalid crew code then accepts valid", async () => {
-    const result = await promptCrewMode(makePrompt(["2", "invalid", "K2F9-AB3X-7YPL-QM4N"]));
+  it("retries on invalid session code then accepts valid", async () => {
+    const result = await promptConnectionMode(makePrompt(["2", "invalid", "K2F9-AB3X-7YPL-QM4N"]));
     expect(result).toEqual({ type: "join", code: "K2F9-AB3X-7YPL-QM4N" });
   });
 
   it("retries on invalid choice then accepts valid", async () => {
-    const result = await promptCrewMode(makePrompt(["99", "solo"]));
+    const result = await promptConnectionMode(makePrompt(["99", "local"]));
     expect(result).toBeNull();
   });
 });

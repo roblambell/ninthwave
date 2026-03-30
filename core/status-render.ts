@@ -469,7 +469,7 @@ export function formatItemRow(
   const id = pad(item.id, 12);
   const color = stateColor(item.state);
   const stateCell = formatStateLabelWithPr(item.state, item.prNumber, stateColWidth, repoUrl);
-  const remoteDot = item.remote ? ` ${CREW_REMOTE_DOT}` : "";
+  const remoteDot = item.remote ? ` ${REMOTE_DOT}` : "";
   const duration = pad(formatDuration(item), 8);
   const depCol = depIndicator ?? "";
   const title = truncateTitle(item.title || item.id, titleWidth);
@@ -772,27 +772,31 @@ export function computeSessionMetrics(
   };
 }
 
-/** Cyan background + black text for crew bar and remote indicators. */
-const CREW_BG = "\x1b[46m\x1b[30m"; // cyan bg, black text
-/** Cyan dot used as remote indicator on items worked on by other crew members. */
-export const CREW_REMOTE_DOT = `${CYAN}\u25CF${RESET}`; // ● in cyan
+/** Brand amber -- truecolor (#D4A030). */
+const BRAND = "\x1b[38;2;212;160;48m";
+/** Brand amber background + black text for connection status bar. */
+const CONNECTED_BG = "\x1b[48;2;212;160;48m\x1b[30m";
+/** Brand-colored dot for items worked on by other session members. */
+export const REMOTE_DOT = `${BRAND}\u25CF${RESET}`; // ● in brand amber
 
 /**
- * Format crew status bar for display above the title line.
- * Uses cyan background spanning the full terminal width.
- * When disconnected, shows OFFLINE indicator.
+ * Format connection status bar for display above the title line.
+ * Uses brand amber background spanning the full terminal width.
+ * Shows "Connected" for solo sessions, daemon count for multi-daemon crews.
  */
-export function formatCrewStatusPanel(status: CrewStatusInfo, termWidth: number = 80): string {
+export function formatConnectionPanel(status: CrewStatusInfo, termWidth: number = 80): string {
   let content: string;
   if (!status.connected) {
-    content = `Crew ${status.crewCode} | OFFLINE -- reconnecting...`;
+    content = `ninthwave.sh  |  OFFLINE -- reconnecting...`;
+  } else if (status.daemonCount <= 1) {
+    content = `Connected to ninthwave.sh  |  ${status.availableCount} avail  |  ${status.claimedCount} claimed  |  ${status.completedCount} done`;
   } else {
-    content = `Crew ${status.crewCode}  |  ${status.daemonCount} daemons  |  ${status.availableCount} avail  |  ${status.claimedCount} claimed  |  ${status.completedCount} done`;
+    content = `${status.daemonCount} online  |  ${status.availableCount} avail  |  ${status.claimedCount} claimed  |  ${status.completedCount} done`;
   }
   const totalPad = Math.max(0, termWidth - content.length);
   const leftPad = Math.floor(totalPad / 2);
   const rightPad = totalPad - leftPad;
-  return `${CREW_BG}${" ".repeat(leftPad)}${content}${" ".repeat(rightPad)}${RESET}`;
+  return `${CONNECTED_BG}${" ".repeat(leftPad)}${content}${" ".repeat(rightPad)}${RESET}`;
 }
 
 /**
@@ -822,7 +826,7 @@ export function formatStatusTable(
   // Title line with optional inline crew info
   let titleLine = `${BOLD}Ninthwave${RESET}`;
   if (opts.crewStatus) {
-    titleLine += `  ${CYAN}${formatCrewInline(opts.crewStatus)}${RESET}`;
+    titleLine += `  ${BRAND}${formatConnectionInline(opts.crewStatus)}${RESET}`;
   }
   lines.push(titleLine);
   lines.push("");
@@ -1163,19 +1167,11 @@ export function formatUnifiedProgress(
   return `  ${leftSide}  ${totalText}`;
 }
 
-/** Abbreviate a long crew code to first group + ellipsis (e.g. "K2F9-AB3X-7YPL-QM4N" → "K2F9…"). */
-function abbreviateCrewCode(code: string): string {
-  const dash = code.indexOf("-");
-  if (dash > 0) return code.slice(0, dash) + "\u2026";
-  if (code.length > 8) return code.slice(0, 4) + "\u2026";
-  return code;
-}
-
-/** Format inline crew status string (plain text, no ANSI). Uses abbreviated code to save space. */
-export function formatCrewInline(status: CrewStatusInfo): string {
-  const short = abbreviateCrewCode(status.crewCode);
-  if (!status.connected) return `Crew ${short}  OFFLINE`;
-  return `Crew ${short}  ${status.daemonCount} online`;
+/** Format inline connection status string (plain text, no ANSI). */
+export function formatConnectionInline(status: CrewStatusInfo): string {
+  if (!status.connected) return "Offline";
+  if (status.daemonCount <= 1) return "Connected";
+  return `${status.daemonCount} online`;
 }
 
 /**
@@ -1192,12 +1188,12 @@ export function formatTitleMetrics(
   const title = `${BOLD}Ninthwave${RESET}`;
   const titlePlain = "Ninthwave";
 
-  // Build inline crew info (cyan to match remote item dot)
+  // Build inline connection info (brand amber)
   let crewStr = "";
   let crewPlain = "";
   if (crewStatus) {
-    crewPlain = `  ${formatCrewInline(crewStatus)}`;
-    crewStr = `  ${CYAN}${formatCrewInline(crewStatus)}${RESET}`;
+    crewPlain = `  ${formatConnectionInline(crewStatus)}`;
+    crewStr = `  ${BRAND}${formatConnectionInline(crewStatus)}${RESET}`;
   }
 
   const leftPlain = titlePlain + crewPlain;
@@ -1969,19 +1965,20 @@ export function formatItemDetail(
 export function renderHelpOverlay(
   termWidth: number,
   termRows: number,
-  crewCode?: string,
+  sessionCode?: string,
   tmuxSessionName?: string,
 ): string[] {
   // ── Build content lines (plain text, no padding yet) ──────────────
 
   const sections: string[][] = [];
 
-  // Crew code section (if in crew mode)
-  if (crewCode) {
+  // Session section (if connected to ninthwave.sh)
+  if (sessionCode) {
     sections.push([
-      `${BOLD}Crew Code${RESET}`,
-      `  ${CYAN}${crewCode}${RESET}`,
-      `  ${DIM}View stats: ninthwave.sh/stats/${crewCode}${RESET}`,
+      `${BOLD}Session${RESET}`,
+      `  ${BRAND}${sessionCode}${RESET}`,
+      `  ${DIM}Dashboard: ${BRAND}ninthwave.sh${RESET}${DIM}/stats/${sessionCode}${RESET}`,
+      `  ${DIM}Invite:    nw watch --crew ${sessionCode}${RESET}`,
     ]);
   }
 

@@ -816,7 +816,7 @@ describe("runSelectionScreen", () => {
     expect(result).toBeNull();
   });
 
-  it("completes full flow: select items → strategy → WIP → review → crew → confirm", async () => {
+  it("completes full flow: select items → strategy → WIP → review → connection → confirm", async () => {
     const { io, sendKeyBatches } = createMockIO();
     const items = [
       makeWorkItem("A-1", "First task", "high"),
@@ -831,7 +831,7 @@ describe("runSelectionScreen", () => {
       ["\r"],        // Step 2: Accept default strategy (auto)
       ["\r"],        // Step 3: Accept default WIP (4)
       ["\r"],        // Step 4: Accept default review mode (off)
-      ["\r"],        // Step 5: Accept default crew (Solo)
+      ["\r"],        // Step 5: Accept default connection (Connect)
       ["\r"],        // Step 6: Confirm summary
     );
 
@@ -896,7 +896,7 @@ describe("runSelectionScreen", () => {
       ["\r"],       // Accept strategy
       ["\r"],       // Accept WIP
       ["\r"],       // Accept review mode
-      ["\r"],       // Accept crew
+      ["\r"],       // Accept connection
       ["n"],        // Cancel confirmation
     );
 
@@ -919,7 +919,7 @@ describe("runSelectionScreen", () => {
       ["\r"],        // Accept strategy
       ["\r"],        // Accept WIP
       ["\r"],        // Accept review mode
-      ["\r"],        // Accept crew
+      ["\r"],        // Accept connection
       ["\r"],        // Confirm
     );
 
@@ -943,7 +943,7 @@ describe("runSelectionScreen", () => {
       ["\x1B[B", "\r"],                           // Select manual strategy
       ["\x1B[A", "\x1B[A", "\x1B[A", "\r"],      // Increase WIP to 7
       ["\r"],                                      // Accept review mode
-      ["\r"],                                      // Accept crew
+      ["\r"],                                      // Accept connection
       ["\r"],                                      // Confirm
     );
 
@@ -1030,7 +1030,7 @@ describe("runSelectionScreen", () => {
       ["\r"],                       // Accept strategy
       ["\r"],                       // Accept WIP
       ["\r"],                       // Accept review mode
-      ["\r"],                       // Accept crew
+      ["\r"],                       // Accept connection
       ["\r"],                       // Confirm
     );
 
@@ -1084,7 +1084,7 @@ describe("runTextInput", () => {
       /^[A-Za-z0-9]{3}-[A-Za-z0-9]{3}$/.test(v) ? null : "Invalid format";
 
     const resultPromise = runTextInput(io, { validate });
-    // Type valid crew code directly
+    // Type valid session code directly
     sendKeys(["a", "B", "3", "-", "x", "Y", "9", "\r"]);
 
     const result = await resultPromise;
@@ -1153,14 +1153,14 @@ describe("runTextInput", () => {
     const { io, sendKeys, getOutput } = createMockIO();
 
     const resultPromise = runTextInput(io, {
-      title: "Ninthwave \u00b7 Join crew",
+      title: "Ninthwave \u00b7 Join session",
       hint: "Format: XXXX-XXXX-XXXX-XXXX (e.g. K2F9-AB3X-7YPL-QM4N)",
     });
     sendKeys(["\x1B"]);
 
     await resultPromise;
     const output = getOutput();
-    expect(output).toContain("Join crew");
+    expect(output).toContain("Join session");
     expect(output).toContain("Format: XXXX-XXXX-XXXX-XXXX");
   });
 
@@ -1201,7 +1201,7 @@ describe("runSelectionScreen -- AI review step", () => {
       ["\r"],  // strategy
       ["\r"],  // WIP
       ["\r"],  // review (accept default = off)
-      ["\r"],  // crew
+      ["\r"],  // connection
       ["\r"],  // confirm
     );
 
@@ -1220,7 +1220,7 @@ describe("runSelectionScreen -- AI review step", () => {
       ["\r"],  // strategy
       ["\r"],  // WIP
       ["\r"],  // review (accept default = all)
-      ["\r"],  // crew
+      ["\r"],  // connection
       ["\r"],  // confirm
     );
 
@@ -1239,7 +1239,7 @@ describe("runSelectionScreen -- AI review step", () => {
       ["\r"],  // strategy
       ["\r"],  // WIP
       ["\r"],  // review (accept default = mine)
-      ["\r"],  // crew
+      ["\r"],  // connection
       ["\r"],  // confirm
     );
 
@@ -1259,7 +1259,7 @@ describe("runSelectionScreen -- AI review step", () => {
       ["\r"],              // strategy
       ["\r"],              // WIP
       ["\x1B[A", "\x1B[A", "\r"],  // review: up up → "All PRs" (wraps from off→mine→all)
-      ["\r"],              // crew
+      ["\r"],              // connection
       ["\r"],              // confirm
     );
 
@@ -1279,7 +1279,7 @@ describe("runSelectionScreen -- AI review step", () => {
       ["\r"],              // strategy
       ["\r"],              // WIP
       ["\x1B[A", "\r"],   // review: up → "My PRs"
-      ["\r"],              // crew
+      ["\r"],              // connection
       ["\r"],              // confirm
     );
 
@@ -1298,7 +1298,7 @@ describe("runSelectionScreen -- AI review step", () => {
       ["\r"],  // strategy
       ["\r"],  // WIP
       ["\r"],  // review: accept default (off)
-      ["\r"],  // crew
+      ["\r"],  // connection
       ["\r"],  // confirm
     );
 
@@ -1324,10 +1324,10 @@ describe("runSelectionScreen -- AI review step", () => {
   });
 });
 
-// ── Selection screen: crew step ─────────────────────────────────────
+// ── Selection screen: connection step ──────────────────────────────
 
-describe("runSelectionScreen -- crew step", () => {
-  it("solo selection returns null crewAction", async () => {
+describe("runSelectionScreen -- connection step", () => {
+  it("local selection returns null connectionAction", async () => {
     const { io, sendKeyBatches } = createMockIO();
     const items = [makeWorkItem("A-1", "Task")];
 
@@ -1337,16 +1337,16 @@ describe("runSelectionScreen -- crew step", () => {
       ["\r"],  // strategy
       ["\r"],  // WIP
       ["\r"],  // review
-      ["\r"],  // crew: accept default (Solo)
+      ["\x1B[B", "\x1B[B", "\r"],  // connection: down down → "Local only"
       ["\r"],  // confirm
     );
 
     const result = await resultPromise;
     expect(result).not.toBeNull();
-    expect(result!.crewAction).toBeNull();
+    expect(result!.connectionAction).toBeNull();
   });
 
-  it("create crew returns crewAction { type: 'create' }", async () => {
+  it("connect returns connectionAction { type: 'connect' }", async () => {
     const { io, sendKeyBatches } = createMockIO();
     const items = [makeWorkItem("A-1", "Task")];
 
@@ -1356,16 +1356,16 @@ describe("runSelectionScreen -- crew step", () => {
       ["\r"],              // strategy
       ["\r"],              // WIP
       ["\r"],              // review
-      ["\x1B[B", "\x1B[B", "\r"],  // crew: down down → "Create crew"
+      ["\r"],              // connection: accept default (Connect)
       ["\r"],              // confirm
     );
 
     const result = await resultPromise;
     expect(result).not.toBeNull();
-    expect(result!.crewAction).toEqual({ type: "create" });
+    expect(result!.connectionAction).toEqual({ type: "connect" });
   });
 
-  it("join crew triggers text input and returns join action", async () => {
+  it("join session triggers text input and returns join action", async () => {
     const { io, sendKeyBatches } = createMockIO();
     const items = [makeWorkItem("A-1", "Task")];
 
@@ -1375,18 +1375,18 @@ describe("runSelectionScreen -- crew step", () => {
       ["\r"],              // strategy
       ["\r"],              // WIP
       ["\r"],              // review
-      ["\x1B[B", "\r"],   // crew: down → "Join crew"
-      // Text input: type valid 16-char crew code (hyphens auto-inserted by transform)
+      ["\x1B[B", "\r"],   // connection: down → "Join session"
+      // Text input: type valid 16-char session code (hyphens auto-inserted by transform)
       ["K", "2", "F", "9", "A", "B", "3", "X", "7", "Y", "P", "L", "Q", "M", "4", "N", "\r"],
       ["\r"],              // confirm
     );
 
     const result = await resultPromise;
     expect(result).not.toBeNull();
-    expect(result!.crewAction).toEqual({ type: "join", code: "K2F9-AB3X-7YPL-QM4N" });
+    expect(result!.connectionAction).toEqual({ type: "join", code: "K2F9-AB3X-7YPL-QM4N" });
   });
 
-  it("join crew text input rejects invalid code then accepts valid code", async () => {
+  it("join session text input rejects invalid code then accepts valid code", async () => {
     const { io, sendKeyBatches, getOutput } = createMockIO();
     const items = [makeWorkItem("A-1", "Task")];
 
@@ -1396,7 +1396,7 @@ describe("runSelectionScreen -- crew step", () => {
       ["\r"],              // strategy
       ["\r"],              // WIP
       ["\r"],              // review
-      ["\x1B[B", "\r"],   // crew: join
+      ["\x1B[B", "\r"],   // connection: join
       // Type invalid code (3 chars), Enter (error), backspace all, type valid 16-char code, Enter
       ["b", "a", "d", "\r",
        "\x7f", "\x7f", "\x7f",                    // backspace "BAD"
@@ -1407,10 +1407,10 @@ describe("runSelectionScreen -- crew step", () => {
     const result = await resultPromise;
     expect(result).not.toBeNull();
     expect(getOutput()).toContain("Invalid code");
-    expect(result!.crewAction).toEqual({ type: "join", code: "K2F9-AB3X-7YPL-QM4N" });
+    expect(result!.connectionAction).toEqual({ type: "join", code: "K2F9-AB3X-7YPL-QM4N" });
   });
 
-  it("cancelling at crew step returns null", async () => {
+  it("cancelling at connection step returns null", async () => {
     const { io, sendKeyBatches } = createMockIO();
     const items = [makeWorkItem("A-1", "Task")];
 
@@ -1420,14 +1420,14 @@ describe("runSelectionScreen -- crew step", () => {
       ["\r"],     // strategy
       ["\r"],     // WIP
       ["\r"],     // review
-      ["\x1B"],  // Escape at crew
+      ["\x1B"],  // Escape at connection
     );
 
     const result = await resultPromise;
     expect(result).toBeNull();
   });
 
-  it("cancelling join crew text input returns null", async () => {
+  it("cancelling join session text input returns null", async () => {
     const { io, sendKeyBatches } = createMockIO();
     const items = [makeWorkItem("A-1", "Task")];
 
@@ -1437,7 +1437,7 @@ describe("runSelectionScreen -- crew step", () => {
       ["\r"],             // strategy
       ["\r"],             // WIP
       ["\r"],             // review
-      ["\x1B[B", "\r"],  // crew: join
+      ["\x1B[B", "\r"],  // connection: join
       ["\x1B"],           // Esc in text input
     );
 
@@ -1445,12 +1445,12 @@ describe("runSelectionScreen -- crew step", () => {
     expect(result).toBeNull();
   });
 
-  it("showCrewStep: false skips crew step and sets crewAction to null", async () => {
+  it("showConnectionStep: false skips connection step and sets connectionAction to null", async () => {
     const { io, sendKeyBatches } = createMockIO();
     const items = [makeWorkItem("A-1", "Task")];
 
-    const resultPromise = runSelectionScreen(io, items, 4, { showCrewStep: false });
-    // Only 5 batches: items, strategy, WIP, review, confirm (crew is skipped)
+    const resultPromise = runSelectionScreen(io, items, 4, { showConnectionStep: false });
+    // Only 5 batches: items, strategy, WIP, review, confirm (connection is skipped)
     sendKeyBatches(
       ["\r"],  // items
       ["\r"],  // strategy
@@ -1461,7 +1461,7 @@ describe("runSelectionScreen -- crew step", () => {
 
     const result = await resultPromise;
     expect(result).not.toBeNull();
-    expect(result!.crewAction).toBeNull();
+    expect(result!.connectionAction).toBeNull();
   });
 });
 
@@ -1500,7 +1500,7 @@ describe("runSelectionScreen -- updated confirmation", () => {
       ["\r"],   // strategy
       ["\r"],   // WIP
       ["\r"],   // review
-      ["\r"],   // crew
+      ["\r"],   // connection
       ["\r"],   // confirm
     );
 
@@ -1522,19 +1522,7 @@ describe("runSelectionScreen -- updated confirmation", () => {
     expect(getOutput()).toContain("All PRs");
   });
 
-  it("confirmation shows crew: Solo when no crew action", async () => {
-    const { io, sendKeyBatches, getOutput } = createMockIO();
-    const items = [makeWorkItem("A-1", "Task")];
-
-    const resultPromise = runSelectionScreen(io, items, 4);
-    sendKeyBatches(["\r"], ["\r"], ["\r"], ["\r"], ["\r"], ["\r"]);
-
-    const result = await resultPromise;
-    expect(result).not.toBeNull();
-    expect(getOutput()).toContain("Solo");
-  });
-
-  it("confirmation shows crew: Creating new crew", async () => {
+  it("confirmation shows connection: Local when no connection action", async () => {
     const { io, sendKeyBatches, getOutput } = createMockIO();
     const items = [makeWorkItem("A-1", "Task")];
 
@@ -1544,16 +1532,16 @@ describe("runSelectionScreen -- updated confirmation", () => {
       ["\r"],
       ["\r"],
       ["\r"],
-      ["\x1B[B", "\x1B[B", "\r"],  // crew: Create crew
+      ["\x1B[B", "\x1B[B", "\r"],  // connection: down down → "Local only"
       ["\r"],
     );
 
     const result = await resultPromise;
     expect(result).not.toBeNull();
-    expect(getOutput()).toContain("Creating new crew");
+    expect(getOutput()).toContain("Local");
   });
 
-  it("confirmation shows crew: Joining crew <code>", async () => {
+  it("confirmation shows connection: ninthwave.sh (new session)", async () => {
     const { io, sendKeyBatches, getOutput } = createMockIO();
     const items = [makeWorkItem("A-1", "Task")];
 
@@ -1563,14 +1551,34 @@ describe("runSelectionScreen -- updated confirmation", () => {
       ["\r"],
       ["\r"],
       ["\r"],
-      ["\x1B[B", "\r"],            // crew: Join crew
+      ["\r"],              // connection: accept default (Connect)
+      ["\r"],
+    );
+
+    const result = await resultPromise;
+    expect(result).not.toBeNull();
+    expect(getOutput()).toContain("ninthwave.sh");
+    expect(getOutput()).toContain("new session");
+  });
+
+  it("confirmation shows connection: joining <code>", async () => {
+    const { io, sendKeyBatches, getOutput } = createMockIO();
+    const items = [makeWorkItem("A-1", "Task")];
+
+    const resultPromise = runSelectionScreen(io, items, 4);
+    sendKeyBatches(
+      ["\r"],
+      ["\r"],
+      ["\r"],
+      ["\r"],
+      ["\x1B[B", "\r"],            // connection: Join session
       ["K", "2", "F", "9", "A", "B", "3", "X", "7", "Y", "P", "L", "Q", "M", "4", "N", "\r"],  // code
       ["\r"],
     );
 
     const result = await resultPromise;
     expect(result).not.toBeNull();
-    expect(getOutput()).toContain("Joining crew K2F9-AB3X-7YPL-QM4N");
+    expect(getOutput()).toContain("joining K2F9-AB3X-7YPL-QM4N");
   });
 
   it("confirmation title is 'Ninthwave · Start orchestration?'", async () => {
@@ -1621,7 +1629,7 @@ describe("runSelectionScreen -- AI tool step", () => {
       ["\r"],        // Step 2: strategy
       ["\r"],        // Step 3: WIP
       ["\r"],        // Step 4: review
-      ["\r"],        // Step 5: crew
+      ["\r"],        // Step 5: connection
       ["\r"],        // Step 6: tool (accept default = Claude Code)
       ["\r"],        // Step 7: confirm
     );
@@ -1680,7 +1688,7 @@ describe("runSelectionScreen -- AI tool step", () => {
       ["\r"],        // strategy
       ["\r"],        // WIP
       ["\r"],        // review
-      ["\r"],        // crew
+      ["\r"],        // connection
       ["\r"],        // tool (accept default = opencode since savedToolId)
       ["\r"],        // confirm
     );
@@ -1703,7 +1711,7 @@ describe("runSelectionScreen -- AI tool step", () => {
       ["\r"],        // strategy
       ["\r"],        // WIP
       ["\r"],        // review
-      ["\r"],        // crew
+      ["\r"],        // connection
       ["\x1B"],      // Escape at tool step
     );
 
@@ -1747,157 +1755,6 @@ describe("runSelectionScreen -- AI tool step", () => {
   });
 });
 
-// ── Telemetry step ──────────────────────────────────────────────────
-
-describe("runSelectionScreen -- telemetry step", () => {
-  it("shows telemetry step when skipTelemetryStep is false", async () => {
-    const { io, sendKeyBatches, getOutput } = createMockIO();
-    const items = [makeWorkItem("A-1", "Task")];
-
-    const resultPromise = runSelectionScreen(io, items, 4, {
-      skipTelemetryStep: false,
-    });
-
-    sendKeyBatches(
-      ["\r"],        // items
-      ["\r"],        // strategy
-      ["\r"],        // WIP
-      ["\r"],        // review
-      ["\r"],        // crew
-      ["\r"],        // telemetry: accept (Enter = yes)
-      ["\r"],        // confirm
-    );
-
-    const result = await resultPromise;
-    expect(result).not.toBeNull();
-    expect(result!.telemetryOptIn).toBe(true);
-    expect(getOutput()).toContain("Anonymous usage stats");
-  });
-
-  it("telemetry decline (n) sets telemetryOptIn to false", async () => {
-    const { io, sendKeyBatches } = createMockIO();
-    const items = [makeWorkItem("A-1", "Task")];
-
-    const resultPromise = runSelectionScreen(io, items, 4, {
-      skipTelemetryStep: false,
-    });
-
-    sendKeyBatches(
-      ["\r"],        // items
-      ["\r"],        // strategy
-      ["\r"],        // WIP
-      ["\r"],        // review
-      ["\r"],        // crew
-      ["n"],         // telemetry: decline
-      ["\r"],        // confirm
-    );
-
-    const result = await resultPromise;
-    expect(result).not.toBeNull();
-    expect(result!.telemetryOptIn).toBe(false);
-  });
-
-  it("telemetryOptIn is undefined when step is skipped (default)", async () => {
-    const { io, sendKeyBatches } = createMockIO();
-    const items = [makeWorkItem("A-1", "Task")];
-
-    const resultPromise = runSelectionScreen(io, items, 4);
-
-    sendKeyBatches(["\r"], ["\r"], ["\r"], ["\r"], ["\r"], ["\r"]);
-
-    const result = await resultPromise;
-    expect(result).not.toBeNull();
-    expect(result!.telemetryOptIn).toBeUndefined();
-  });
-
-  it("telemetryOptIn is undefined when skipTelemetryStep is true", async () => {
-    const { io, sendKeyBatches } = createMockIO();
-    const items = [makeWorkItem("A-1", "Task")];
-
-    const resultPromise = runSelectionScreen(io, items, 4, {
-      skipTelemetryStep: true,
-    });
-
-    sendKeyBatches(["\r"], ["\r"], ["\r"], ["\r"], ["\r"], ["\r"]);
-
-    const result = await resultPromise;
-    expect(result).not.toBeNull();
-    expect(result!.telemetryOptIn).toBeUndefined();
-  });
-
-  it("confirmation summary shows telemetry status when prompted", async () => {
-    const { io, sendKeyBatches, getOutput } = createMockIO();
-    const items = [makeWorkItem("A-1", "Task")];
-
-    const resultPromise = runSelectionScreen(io, items, 4, {
-      skipTelemetryStep: false,
-    });
-
-    sendKeyBatches(
-      ["\r"], ["\r"], ["\r"], ["\r"], ["\r"],
-      ["\r"],        // telemetry: accept
-      ["\r"],        // confirm
-    );
-
-    const result = await resultPromise;
-    expect(result).not.toBeNull();
-    expect(getOutput()).toContain("Telemetry:");
-    expect(getOutput()).toContain("Enabled");
-  });
-
-  it("confirmation shows Disabled when telemetry declined", async () => {
-    const { io, sendKeyBatches, getOutput } = createMockIO();
-    const items = [makeWorkItem("A-1", "Task")];
-
-    const resultPromise = runSelectionScreen(io, items, 4, {
-      skipTelemetryStep: false,
-    });
-
-    sendKeyBatches(
-      ["\r"], ["\r"], ["\r"], ["\r"], ["\r"],
-      ["n"],         // telemetry: decline
-      ["\r"],        // confirm
-    );
-
-    const result = await resultPromise;
-    expect(result).not.toBeNull();
-    expect(getOutput()).toContain("Telemetry:");
-    expect(getOutput()).toContain("Disabled");
-  });
-});
-
-// ── Both new steps together ─────────────────────────────────────────
-
-describe("runSelectionScreen -- tool + telemetry combined", () => {
-  it("full flow with both tool and telemetry steps", async () => {
-    const { io, sendKeyBatches, getOutput } = createMockIO();
-    const items = [makeWorkItem("A-1", "Task")];
-
-    const resultPromise = runSelectionScreen(io, items, 4, {
-      installedTools: [TOOL_CLAUDE, TOOL_OPENCODE],
-      skipTelemetryStep: false,
-    });
-
-    sendKeyBatches(
-      ["\r"],        // Step 1: items
-      ["\r"],        // Step 2: strategy
-      ["\r"],        // Step 3: WIP
-      ["\r"],        // Step 4: review
-      ["\r"],        // Step 5: crew
-      ["\r"],        // Step 6: tool
-      ["n"],         // Step 7: telemetry decline
-      ["\r"],        // Step 8: confirm
-    );
-
-    const result = await resultPromise;
-    expect(result).not.toBeNull();
-    expect(result!.aiTool).toBe("claude");
-    expect(result!.telemetryOptIn).toBe(false);
-    expect(getOutput()).toContain("AI tool:");
-    expect(getOutput()).toContain("Telemetry:");
-  });
-});
-
 // ── Integration: TUI flow via interactive.ts ────────────────────────
 
 describe("runTuiSelectionFlow (via interactive.ts)", () => {
@@ -1922,7 +1779,7 @@ describe("runTuiSelectionFlow (via interactive.ts)", () => {
       ["\r"], // Accept default strategy
       ["\r"], // Accept default WIP
       ["\r"], // Accept default review mode (off)
-      ["\r"], // Accept default crew (Solo)
+      ["\r"], // Accept default connection (Connect)
       ["\r"], // Confirm
     );
 
@@ -1935,7 +1792,7 @@ describe("runTuiSelectionFlow (via interactive.ts)", () => {
     expect(result!.mergeStrategy).toBe("auto");
     expect(result!.wipLimit).toBe(4);
     expect(result!.reviewMode).toBe("off");
-    expect(result!.crewAction).toBeNull();
+    expect(result!.connectionAction).toEqual({ type: "connect" });
   });
 
   it("runInteractiveFlow falls back to readline when useLegacyPrompts is true", async () => {

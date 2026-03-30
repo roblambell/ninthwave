@@ -109,8 +109,8 @@ export interface TuiState {
   getSelectedItemId?: (index: number) => string | undefined;
   /** Get total number of items for clamping selectedIndex. */
   getItemCount?: () => number;
-  /** Crew code (if in crew mode). Shown in help overlay. */
-  crewCode?: string;
+  /** Session code (if connected to ninthwave.sh). Shown in help overlay. */
+  sessionCode?: string;
   /** Tmux session name (when running outside tmux). Shown in help overlay. */
   tmuxSessionName?: string;
 }

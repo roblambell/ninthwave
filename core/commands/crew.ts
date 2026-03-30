@@ -16,9 +16,9 @@ import { die } from "../output.ts";
 /** Crew code pattern: 4 groups of 4 alphanumeric chars, optional hyphens (case-insensitive). */
 export const CREW_CODE_PATTERN = /^[A-Z0-9]{4}-?[A-Z0-9]{4}-?[A-Z0-9]{4}-?[A-Z0-9]{4}$/i;
 
-export type CrewAction =
-  | { type: "join"; code: string }
-  | { type: "create" };
+export type ConnectionAction =
+  | { type: "connect" }
+  | { type: "join"; code: string };
 
 export type PromptFn = (question: string) => Promise<string>;
 
@@ -48,23 +48,23 @@ export function normalizeCrewCode(value: string): string {
  * Returns null for interactive mode (no args).
  * Throws on invalid input (caller converts to die()).
  */
-export function parseCrewArgs(args: string[]): CrewAction | null {
+export function parseCrewArgs(args: string[]): ConnectionAction | null {
   if (args.length === 0) return null; // interactive mode
 
   const first = args[0]!;
 
   // Explicit subcommands
   if (first === "create") {
-    return { type: "create" };
+    return { type: "connect" };
   }
 
   if (first === "join") {
     const code = args[1];
     if (!code) {
-      throw new Error("Usage: nw crew join <crew-code>");
+      throw new Error("Usage: nw crew join <session-code>");
     }
     if (!isCrewCode(code)) {
-      throw new Error(`Invalid crew code: ${code}. Expected format: XXXX-XXXX-XXXX-XXXX (e.g. K2F9-AB3X-7YPL-QM4N)`);
+      throw new Error(`Invalid session code: ${code}. Expected format: XXXX-XXXX-XXXX-XXXX (e.g. K2F9-AB3X-7YPL-QM4N)`);
     }
     return { type: "join", code };
   }
@@ -97,29 +97,25 @@ const defaultPrompt: PromptFn = (question: string): Promise<string> => {
  */
 export async function promptCrewAction(
   prompt: PromptFn = defaultPrompt,
-): Promise<CrewAction | null> {
+): Promise<ConnectionAction | null> {
   console.log();
-  console.log(`${BOLD}Crew mode${RESET}`);
+  console.log(`${BOLD}Join session${RESET}`);
   console.log();
-  console.log(`  Enter a crew code to join, or type ${CYAN}create${RESET} to start a new crew.`);
+  console.log(`  Enter a session code to coordinate with teammates.`);
   console.log();
 
   while (true) {
-    const answer = await prompt(`${BOLD}Crew code ${DIM}(or "create")${RESET}${BOLD}: ${RESET}`);
+    const answer = await prompt(`${BOLD}Session code: ${RESET}`);
 
     if (answer === "" || answer.toLowerCase() === "q" || answer.toLowerCase() === "quit") {
       return null;
-    }
-
-    if (answer.toLowerCase() === "create") {
-      return { type: "create" };
     }
 
     if (isCrewCode(answer)) {
       return { type: "join", code: answer };
     }
 
-    console.log(`  ${YELLOW}Invalid crew code.${RESET} Expected format: ${BOLD}XXXX-XXXX-XXXX-XXXX${RESET} (e.g. K2F9-AB3X-7YPL-QM4N), or type ${CYAN}create${RESET}.`);
+    console.log(`  ${YELLOW}Invalid session code.${RESET} Expected format: ${BOLD}XXXX-XXXX-XXXX-XXXX${RESET} (e.g. K2F9-AB3X-7YPL-QM4N).`);
   }
 }
 
@@ -162,7 +158,7 @@ export async function cmdCrew(
   const prompt = deps.prompt ?? defaultPrompt;
 
   // Parse explicit arguments
-  let action: CrewAction | null;
+  let action: ConnectionAction | null;
   try {
     action = parseCrewArgs(args);
   } catch (err) {
@@ -191,7 +187,7 @@ export async function cmdCrew(
 // ── Action execution ───────────────────────────────────────────────
 
 async function executeCrewAction(
-  action: CrewAction,
+  action: ConnectionAction,
   workDir: string,
   worktreeDir: string,
   projectRoot: string,
@@ -202,8 +198,8 @@ async function executeCrewAction(
     await cmdWatch(watchArgs, wd, wtd, pr);
   });
 
-  if (action.type === "create") {
-    await runWatch(["--crew-create"], workDir, worktreeDir, projectRoot);
+  if (action.type === "connect") {
+    await runWatch(["--connect"], workDir, worktreeDir, projectRoot);
   } else {
     await runWatch(["--crew", action.code], workDir, worktreeDir, projectRoot);
   }

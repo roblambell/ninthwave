@@ -236,7 +236,7 @@ export function renderTuiFrame(
   viewOptions?: ViewOptions,
   scrollOffset: number = 0,
   remoteItemIds?: Set<string>,
-  crewCode?: string,
+  sessionCode?: string,
 ): void {
   const statusItems = orchestratorItemsToStatusItems(items, remoteItemIds);
   const termWidth = getTerminalWidth();
@@ -246,7 +246,7 @@ export function renderTuiFrame(
 
   if (viewOptions?.showHelp) {
     // Render help overlay instead of the normal frame
-    const helpLines = renderHelpOverlay(termWidth, termRows, crewCode, undefined);
+    const helpLines = renderHelpOverlay(termWidth, termRows, sessionCode, undefined);
     const content = helpLines.join("\n");
     write(content.replace(/\n/g, "\x1B[K\n") + "\x1B[K");
   } else if (termRows >= MIN_FULLSCREEN_ROWS) {
@@ -283,7 +283,7 @@ export function renderTuiPanelFrame(
 
   if (tuiState.viewOptions.showHelp) {
     // Render help overlay instead of the panel frame
-    const helpLines = renderHelpOverlay(termWidth, termRows, tuiState.crewCode, tuiState.tmuxSessionName);
+    const helpLines = renderHelpOverlay(termWidth, termRows, tuiState.sessionCode, tuiState.tmuxSessionName);
     const content = helpLines.join("\n");
     write(content.replace(/\n/g, "\x1B[K\n") + "\x1B[K");
   } else if (tuiState.detailItemId) {
@@ -425,7 +425,7 @@ export async function runTUI(opts: RunTUIOptions): Promise<void> {
     write("\x1B[H");
 
     if (tuiState.viewOptions.showHelp) {
-      const helpLines = renderHelpOverlay(termWidth, termRows, tuiState.crewCode, tuiState.tmuxSessionName);
+      const helpLines = renderHelpOverlay(termWidth, termRows, tuiState.sessionCode, tuiState.tmuxSessionName);
       const content = helpLines.join("\n");
       write(content.replace(/\n/g, "\x1B[K\n") + "\x1B[K");
     } else if (tuiState.detailItemId) {
@@ -1770,7 +1770,7 @@ export async function cmdOrchestrate(
   let watchMode = parsed.watchMode;
   let crewCode = parsed.crewCode;
   let crewUrl = parsed.crewUrl;
-  let crewCreate = parsed.crewCreate;
+  let connectMode = parsed.connectMode;
 
   // ── Pre-flight environment validation ────────────────────────────────
   if (!skipPreflight) {
@@ -1897,7 +1897,6 @@ export async function cmdOrchestrate(
     const preConfig = loadConfig(projectRoot);
     const userCfg = loadUserConfig();
     const skipToolStep = !!toolOverride || !!userCfg.ai_tool;
-    const skipTelemetryStep = preConfig.telemetry !== undefined || process.env.NW_TELEMETRY === "1";
     const defaultReviewMode = preConfig.review_external ? "all" as const : "mine" as const;
 
     const result = await runInteractiveFlow(workItems, wipLimit, {
@@ -1906,7 +1905,6 @@ export async function cmdOrchestrate(
       savedToolId: preConfig.ai_tool,
       savedToolIds: preConfig.ai_tools,
       skipToolStep,
-      skipTelemetryStep,
     });
     if (!result) {
       process.exit(0);
@@ -1918,11 +1916,11 @@ export async function cmdOrchestrate(
     if (result.reviewMode === "off") {
       interactiveSkipReview = true;
     }
-    if (result.crewAction) {
-      if (result.crewAction.type === "create") {
-        crewCreate = true;
-      } else if (result.crewAction.type === "join") {
-        crewCode = result.crewAction.code;
+    if (result.connectionAction) {
+      if (result.connectionAction.type === "connect") {
+        connectMode = true;
+      } else if (result.connectionAction.type === "join") {
+        crewCode = result.connectionAction.code;
       }
     }
     // Capture AI tool choice from TUI -- flows to selectAiTools via toolOverride
@@ -1930,10 +1928,6 @@ export async function cmdOrchestrate(
       toolOverride = result.aiTools.join(",");
     } else if (result.aiTool) {
       toolOverride = result.aiTool;
-    }
-    // Capture telemetry choice from TUI -- persist to config
-    if (result.telemetryOptIn !== undefined) {
-      saveConfig(projectRoot, { telemetry: result.telemetryOptIn });
     }
   }
 
@@ -2182,9 +2176,9 @@ export async function cmdOrchestrate(
 
   // Load saved crew code for persistent sessions
   const savedCrewCode = readCrewCode(projectRoot);
-  if (!crewCode && !crewCreate && savedCrewCode) {
+  if (!crewCode && !connectMode && savedCrewCode) {
     // Re-activate saved crew via POST /api/crews with code field
-    info("Re-activating saved crew...");
+    info("Re-activating saved session...");
     const brokerBaseUrl = crewUrl ?? "https://ninthwave.sh";
     const httpUrl = brokerBaseUrl.replace(/^wss?:\/\//, "https://");
     try {
@@ -2197,17 +2191,17 @@ export async function cmdOrchestrate(
         const body = (await res.json()) as { code: string };
         crewCode = body.code;
         if (!crewUrl) crewUrl = "wss://ninthwave.sh";
-        info(`Crew re-activated: ${crewCode}`);
+        info(`Session re-activated: ${crewCode}`);
       } else {
-        info("Saved crew code expired, starting solo.");
+        info("Saved session code expired, starting local.");
       }
     } catch {
-      info("Could not reach crew server, starting solo.");
+      info("Could not reach ninthwave.sh, starting local.");
     }
   }
 
-  if (crewCreate) {
-    info("Creating crew...");
+  if (connectMode && !crewCode) {
+    info("Connecting to ninthwave.sh...");
     const brokerBaseUrl = crewUrl ?? "https://ninthwave.sh";
     const httpUrl = brokerBaseUrl.replace(/^wss?:\/\//, "https://");
     const res = await fetch(`${httpUrl}/api/crews`, {
@@ -2217,13 +2211,13 @@ export async function cmdOrchestrate(
     });
     if (!res.ok) {
       const body = await res.text();
-      die(`Failed to create crew: ${res.status} ${body}`);
+      die(`Failed to create session: ${res.status} ${body}`);
     }
     const body = (await res.json()) as { code: string };
     crewCode = body.code;
     if (!crewUrl) crewUrl = "wss://ninthwave.sh";
-    info(`Crew created: ${crewCode}`);
-    info(`  Join: nw watch --crew ${crewCode}`);
+    info(`Session created: ${crewCode}`);
+    info(`  Invite: nw watch --crew ${crewCode}`);
   }
 
   let resolvedCrewName: string | undefined;
@@ -2232,14 +2226,14 @@ export async function cmdOrchestrate(
       crewUrl = "wss://ninthwave.sh";
     }
     resolvedCrewName = crewName ?? (await import("os")).hostname();
-    info(`Connecting to crew ${crewCode}...`);
+    info(`Connecting to ninthwave.sh (${crewCode})...`);
     const broker = new WebSocketCrewBroker(projectRoot, crewUrl, crewCode, crewRepoUrl, {
       log: (level, msg) => log({ ts: new Date().toISOString(), level, event: "crew_client", message: msg }),
     }, resolvedCrewName);
 
     try {
       await broker.connect();
-      info(`Connected to crew ${crewCode} as "${resolvedCrewName}"`);
+      info(`Connected to ninthwave.sh as "${resolvedCrewName}"`);
     } catch (err) {
       die(`Failed to connect to crew server: ${(err as Error).message}`);
     }
@@ -2280,19 +2274,16 @@ export async function cmdOrchestrate(
     : (reviewExternal || projectConfig.review_external);
   const scheduleEnabled = projectConfig.schedule_enabled;
 
-  // Resolve telemetry: env var > config > first-run prompt > disabled
+  // Resolve telemetry: connected mode implies consent; env var and config override
   let telemetryEnabled = false;
   if (process.env.NW_TELEMETRY === "1") {
     telemetryEnabled = true;
   } else if (projectConfig.telemetry !== undefined) {
     telemetryEnabled = projectConfig.telemetry;
-  } else if (process.stdin.isTTY && !isDaemonChild) {
-    const answer = await confirmPrompt(
-      "Send anonymous usage stats to ninthwave.sh? Your crew stats will be viewable at ninthwave.sh/stats/{code}.",
-      false,
-    );
-    telemetryEnabled = answer;
-    saveConfig(projectRoot, { telemetry: telemetryEnabled });
+  } else if (crewBroker) {
+    // Connected to ninthwave.sh -- telemetry is implied by connection choice
+    telemetryEnabled = true;
+    saveConfig(projectRoot, { telemetry: true });
   }
   if (telemetryEnabled && crewBroker) {
     crewBroker.setTelemetry(true);
@@ -2367,7 +2358,7 @@ export async function cmdOrchestrate(
         }
       }
     },
-    crewCode: crewCode ?? undefined,
+    sessionCode: crewCode ?? undefined,
     tmuxSessionName: tmuxOutsideSession ? tmuxSessionName : undefined,
   };
 
@@ -2566,30 +2557,39 @@ export async function cmdOrchestrate(
   };
   process.on("exit", exitAltScreen);
 
-  // Show crew code splash screen on startup (dismissed by any keypress)
+  // Show session splash screen on startup (auto-dismisses after 3s or any keypress)
   if (tuiMode && crewCode) {
     const termWidth = getTerminalWidth();
     const termRows = getTerminalHeight();
+    const BRAND_ANSI = "\x1B[38;2;212;160;48m"; // #D4A030
     const lines: string[] = [];
     const centerLine = (text: string, plainLen: number) => {
       const pad = Math.max(0, Math.floor((termWidth - plainLen) / 2));
       return " ".repeat(pad) + text;
     };
-    const midRow = Math.floor(termRows / 2) - 2;
+    const midRow = Math.floor(termRows / 2) - 3;
     for (let i = 0; i < midRow; i++) lines.push("");
-    lines.push(centerLine(`\x1B[1m\x1B[36m${crewCode}\x1B[0m`, crewCode.length));
+    lines.push(centerLine(`\x1B[1m${BRAND_ANSI}${crewCode}\x1B[0m`, crewCode.length));
     lines.push("");
-    lines.push(centerLine("\x1B[2mPress ? for help  |  Press any key to continue\x1B[0m", 47));
+    const dashboardUrl = `ninthwave.sh/stats/${crewCode}`;
+    lines.push(centerLine(`\x1B[2m${dashboardUrl}\x1B[0m`, dashboardUrl.length));
+    const inviteCmd = `Invite: nw watch --crew ${crewCode}`;
+    lines.push(centerLine(`\x1B[2m${inviteCmd}\x1B[0m`, inviteCmd.length));
+    lines.push("");
+    lines.push(centerLine("\x1B[2mPress ? for help\x1B[0m", 16));
     process.stdout.write("\x1B[H" + lines.join("\x1B[K\n") + "\x1B[J");
 
-    // Wait for any keypress to dismiss
-    await new Promise<void>((resolve) => {
-      const onData = () => {
-        process.stdin.removeListener("data", onData);
-        resolve();
-      };
-      process.stdin.on("data", onData);
-    });
+    // Auto-dismiss after 3s or any keypress (whichever first)
+    await Promise.race([
+      new Promise<void>((resolve) => setTimeout(resolve, 3000)),
+      new Promise<void>((resolve) => {
+        const onData = () => {
+          process.stdin.removeListener("data", onData);
+          resolve();
+        };
+        process.stdin.on("data", onData);
+      }),
+    ]);
   }
 
   // Show tmux attach splash screen on startup (dismissed by any keypress)
@@ -2641,12 +2641,11 @@ export async function cmdOrchestrate(
 
         // Re-parse work items and re-enter interactive selection
         // Widgets render in the same alt-screen buffer -- no screen switch needed
-        // showCrewStep: false because crew is session-scoped (already established)
+        // showConnectionStep: false because session is already established
         const freshItems = parseWorkItems(workDir, worktreeDir, projectRoot);
         const interactiveResult = await runInteractiveFlow(freshItems, wipLimit, {
-          showCrewStep: false,
+          showConnectionStep: false,
           skipToolStep: true,
-          skipTelemetryStep: true,
         });
         if (!interactiveResult) {
           // User cancelled selection -- restore keyboard and exit loop
