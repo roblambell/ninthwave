@@ -133,17 +133,39 @@ Abstracts terminal multiplexer operations behind a clean interface.
 
 ```typescript
 interface Multiplexer {
-  readonly type: MuxType;                                           // "cmux"
+  readonly type: MuxType;                                           // "cmux" | "tmux"
   isAvailable(): boolean;
+  diagnoseUnavailable(): string;
   launchWorkspace(cwd: string, command: string, todoId?: string): string | null;
+  splitPane(command: string): string | null;
   sendMessage(ref: string, message: string): boolean;
   readScreen(ref: string, lines?: number): string;
   listWorkspaces(): string;
   closeWorkspace(ref: string): boolean;
+  setStatus(ref: string, key: string, text: string, icon: string, color: string): boolean;
+  setProgress(ref: string, value: number, label?: string): boolean;
 }
 ```
 
-Concrete implementation: `CmuxAdapter`. Auto-detection via `getMux()` checks `CMUX_WORKSPACE_ID` env var first, then falls back to binary availability.
+Shipped implementations:
+
+- `CmuxAdapter` -- wraps the cmux CLI. Workspace refs look like `workspace:1`. cmux supports sidebar-oriented status/progress updates, but it must be used from inside an active cmux session.
+- `TmuxAdapter` -- wraps tmux using a **windows-within-session** model: one tmux session per project, one `nw_<todoId>` window per worker. Refs use tmux's `session:window` target syntax, typically `{session}:nw_<todoId>` (that is, the `{session}:nw:{todoId}` worker identity encoded as a tmux window target). Message delivery is paste-then-submit: `tmux load-buffer -`, `tmux paste-buffer`, then `tmux send-keys Enter`.
+
+### Multiplexer Detection Chain
+
+`detectMuxType()` and `checkAutoLaunch()` share the same six-step preference order:
+
+1. `NINTHWAVE_MUX` override (`tmux` or `cmux`) -- invalid values warn and fall through.
+2. `CMUX_WORKSPACE_ID` -- if present, stay on cmux because the user is already inside a cmux workspace.
+3. `$TMUX` -- if present, stay on tmux because the user is already inside a tmux session.
+4. Installed `tmux` binary -- preferred over cmux when the user is **not** already inside a multiplexer session, because tmux can create/manage its own project session.
+5. Installed `cmux` binary -- usable for detection, but launch-time checks still require the user to actually be inside cmux.
+6. Error -- no supported multiplexer available.
+
+### iTerm2 + tmux
+
+tmux works especially well with iTerm2's control mode (`tmux -CC`). In that mode, tmux windows are rendered as native iTerm2 tabs, so ninthwave workers launched by `TmuxAdapter` show up as normal-looking iTerm2 tabs while still being managed through tmux session/window refs.
 
 ---
 
@@ -151,14 +173,14 @@ Concrete implementation: `CmuxAdapter`. Auto-detection via `getMux()` checks `CM
 
 ### Adding a New Multiplexer Adapter
 
-> **Note:** cmux is the only shipped adapter. tmux and zellij adapters were removed in v0.2.0 due to reliability issues (message delivery, session identification). The Multiplexer interface remains extensible for community contributions.
+> **Note:** cmux and tmux are both shipped adapters. The Multiplexer interface remains extensible for community adapters beyond those two backends.
 
 1. Add your type to `MuxType` in `core/mux.ts`:
    ```typescript
    export type MuxType = "cmux" | "mymux";
    ```
-2. Implement the `Multiplexer` interface as a new class in `core/mux.ts` (follow `CmuxAdapter` as a template).
-3. Add detection logic in `detectMuxType()` -- check an env var or binary.
+2. Implement the `Multiplexer` interface as a new adapter class (follow `CmuxAdapter` and `TmuxAdapter` as templates).
+3. Add detection logic in `detectMuxType()` and any launch-gating needed in `checkAutoLaunch()`.
 4. Add a case in `getMux()` to return the new adapter.
 5. Add tests in `test/mux.test.ts`.
 
@@ -194,7 +216,7 @@ Each TODO item gets an isolated AI coding session managed as follows:
 1. `git worktree add .worktrees/todo-<ID> -b todo/<ID>` -- isolated checkout.
 2. `allocatePartition(id)` -- assigns a unique port range and DB prefix for test isolation.
 3. `seedAgentFiles(worktreePath, hubRoot)` -- copies `implementer.md` to `.claude/agents/`, `.opencode/agents/`, `.github/agents/` inside the worktree.
-4. `mux.launchWorkspace(worktreePath, command, todoId)` -- spawns the session; returns a workspace ref (e.g., `"workspace:1"` for cmux, `"nw-H-1-1-3"` for tmux).
+4. `mux.launchWorkspace(worktreePath, command, todoId)` -- spawns the session; returns a workspace ref (e.g., `"workspace:1"` for cmux, `"{session}:nw_<ID>"` for tmux).
 5. `sendWithReadyWait(mux, ref, prompt, ...)` -- waits for the AI prompt, sends the implementer instructions, verifies the worker starts processing.
 
 The workspace ref is stored in `OrchestratorItem.workspaceRef` for later messaging and cleanup.
