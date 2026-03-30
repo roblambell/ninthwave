@@ -1,5 +1,11 @@
 # Changelog
 
+## [0.3.7] - 2026-03-30
+
+### Fixed
+- PRs on repos with no CI no longer get stuck in `ci-pending` -- zero checks are treated as pass after a 2-minute grace period (allows GitHub Actions time to register)
+- removed `/ninthwave-upgrade` skill; upgrades are handled by `brew upgrade ninthwave`
+
 ## [0.3.6] - 2026-03-30
 
 ### Fixed
