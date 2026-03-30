@@ -183,7 +183,9 @@ export const COMMAND_REGISTRY: ReadonlyArray<CommandEntry> = [
     group: "workflow",
     needsRoot: true,
     needsWork: false,
-    handler: (ctx) => cmdStop(ctx.projectRoot),
+    handler: (ctx) => {
+      cmdStop(ctx.projectRoot);
+    },
     flags: {},
     examples: ["nw stop"],
   },
@@ -409,7 +411,9 @@ export const COMMAND_REGISTRY: ReadonlyArray<CommandEntry> = [
     group: "advanced",
     needsRoot: true,
     needsWork: false,
-    handler: (ctx) => cmdRetry(ctx.args, ctx.worktreeDir, ctx.projectRoot),
+    handler: (ctx) => {
+      cmdRetry(ctx.args, ctx.worktreeDir, ctx.projectRoot);
+    },
     flags: {},
     examples: ["nw retry H-FOO-1"],
   },
@@ -442,17 +446,16 @@ export const COMMAND_REGISTRY: ReadonlyArray<CommandEntry> = [
     group: "advanced",
     needsRoot: true,
     needsWork: false,
-    handler: (ctx) => cmdHeartbeat(ctx.args, ctx.projectRoot),
+    handler: (ctx) => {
+      cmdHeartbeat(ctx.args, ctx.projectRoot);
+    },
     flags: {
       "--progress": "Progress value from 0.0 to 1.0",
       "--label": "Status label text",
-      "--tokens-in": "Input tokens consumed (for analytics)",
-      "--tokens-out": "Output tokens consumed (for analytics)",
-      "--model": "Model identifier (for analytics)",
     },
     examples: [
       'nw heartbeat --progress 0.5 --label "Writing tests"',
-      'nw heartbeat --progress 1.0 --label "Done" --tokens-in 45000',
+      'nw heartbeat --progress 1.0 --label "Done"',
     ],
   },
   {
@@ -484,7 +487,9 @@ export const COMMAND_REGISTRY: ReadonlyArray<CommandEntry> = [
     group: "advanced",
     needsRoot: true,
     needsWork: false,
-    handler: (ctx) => cmdWatchReady(ctx.worktreeDir, ctx.projectRoot),
+    handler: (ctx) => {
+      cmdWatchReady(ctx.worktreeDir, ctx.projectRoot);
+    },
     flags: {},
     examples: ["nw watch-ready"],
   },

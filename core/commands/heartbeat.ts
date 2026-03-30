@@ -2,9 +2,10 @@
 // Usage: nw heartbeat --progress 0.3 --label "Writing tests"
 
 import { die } from "../output.ts";
-import { writeHeartbeat, type DaemonIO, type HeartbeatCostFields } from "../daemon.ts";
+import { writeHeartbeat, type DaemonIO } from "../daemon.ts";
 import {
   existsSync,
+  renameSync,
   readFileSync,
   writeFileSync,
   unlinkSync,
@@ -19,7 +20,7 @@ export interface HeartbeatDeps {
 }
 
 const defaultDeps: HeartbeatDeps = {
-  io: { writeFileSync, readFileSync, unlinkSync, existsSync, mkdirSync },
+  io: { writeFileSync, readFileSync, unlinkSync, existsSync, mkdirSync, renameSync },
   getBranch: () => {
     try {
       const result = Bun.spawnSync(["git", "rev-parse", "--abbrev-ref", "HEAD"]);
@@ -35,7 +36,7 @@ const defaultDeps: HeartbeatDeps = {
 /** Extract item ID from a branch name like "ninthwave/H-FOO-1". Returns null if not an item branch. */
 export function extractItemId(branch: string): string | null {
   const match = branch.match(/^ninthwave\/(.+)$/);
-  return match ? match[1] : null;
+  return match ? match[1]! : null;
 }
 
 // ── Argument parsing ─────────────────────────────────────────────────
@@ -43,35 +44,24 @@ export function extractItemId(branch: string): string | null {
 export interface HeartbeatArgs {
   progress: number;
   label: string;
-  model?: string;
-  tokensIn?: number;
-  tokensOut?: number;
 }
 
-/** Parse --progress, --label, --model, --tokens-in, --tokens-out from CLI args. Throws on invalid input. */
+/** Parse --progress and --label from CLI args. Throws on invalid input. */
 export function parseHeartbeatArgs(args: string[]): HeartbeatArgs {
   let progress: number | undefined;
   let label: string | undefined;
-  let model: string | undefined;
-  let tokensIn: number | undefined;
-  let tokensOut: number | undefined;
+  const unsupportedFlags = new Set(["--model", "--tokens-in", "--tokens-out"]);
 
   for (let i = 0; i < args.length; i++) {
     if (args[i] === "--progress" && i + 1 < args.length) {
       progress = parseFloat(args[i + 1]!);
       i++;
     } else if (args[i] === "--label" && i + 1 < args.length) {
-      label = args[i + 1];
+      label = args[i + 1]!;
       i++;
-    } else if (args[i] === "--model" && i + 1 < args.length) {
-      model = args[i + 1];
-      i++;
-    } else if (args[i] === "--tokens-in" && i + 1 < args.length) {
-      tokensIn = parseInt(args[i + 1]!, 10);
-      i++;
-    } else if (args[i] === "--tokens-out" && i + 1 < args.length) {
-      tokensOut = parseInt(args[i + 1]!, 10);
-      i++;
+    } else if (unsupportedFlags.has(args[i]!)) {
+      die(`Unsupported flag: ${args[i]}. nw heartbeat only accepts --progress and --label`);
+      return { progress: 0, label: "" }; // unreachable
     }
   }
 
@@ -87,22 +77,8 @@ export function parseHeartbeatArgs(args: string[]): HeartbeatArgs {
     die(`Invalid progress value: ${progress}. Must be between 0.0 and 1.0`);
     return { progress: 0, label: "" }; // unreachable
   }
-  if (tokensIn !== undefined && (isNaN(tokensIn) || tokensIn < 0)) {
-    die(`Invalid --tokens-in value: must be a non-negative integer`);
-    return { progress: 0, label: "" }; // unreachable
-  }
-  if (tokensOut !== undefined && (isNaN(tokensOut) || tokensOut < 0)) {
-    die(`Invalid --tokens-out value: must be a non-negative integer`);
-    return { progress: 0, label: "" }; // unreachable
-  }
 
-  return {
-    progress,
-    label,
-    ...(model ? { model } : {}),
-    ...(tokensIn !== undefined ? { tokensIn } : {}),
-    ...(tokensOut !== undefined ? { tokensOut } : {}),
-  };
+  return { progress, label };
 }
 
 // ── Command implementation ───────────────────────────────────────────
@@ -117,7 +93,7 @@ export function cmdHeartbeat(
   projectRoot: string,
   deps: HeartbeatDeps = defaultDeps,
 ): string {
-  const { progress, label, model, tokensIn, tokensOut } = parseHeartbeatArgs(args);
+  const { progress, label } = parseHeartbeatArgs(args);
 
   const branch = deps.getBranch();
   if (!branch) {
@@ -131,12 +107,7 @@ export function cmdHeartbeat(
     return ""; // unreachable
   }
 
-  const costFields: HeartbeatCostFields | undefined =
-    (model || tokensIn != null || tokensOut != null)
-      ? { model, inputTokens: tokensIn, outputTokens: tokensOut }
-      : undefined;
-
-  writeHeartbeat(projectRoot, id, progress, label, deps.io, costFields);
+  writeHeartbeat(projectRoot, id, progress, label, deps.io);
 
   const msg = `Heartbeat: ${id} ${(progress * 100).toFixed(0)}% -- ${label}`;
   console.log(msg);
