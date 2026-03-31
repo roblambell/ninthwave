@@ -3968,9 +3968,9 @@ describe("parseWatchArgs", () => {
     expect(result.wipLimitOverride).toBe(5);
   });
 
-  it("defaults merge strategy to auto when not specified", () => {
+  it("defaults merge strategy to manual when not specified", () => {
     const result = parseWatchArgs(["--items", "A-1"]);
-    expect(result.mergeStrategy).toBe("auto");
+    expect(result.mergeStrategy).toBe("manual");
   });
 
   it("parses manual merge strategy", () => {
@@ -4033,7 +4033,7 @@ describe("parseWatchArgs", () => {
   it("defaults bypassEnabled to false when --dangerously-bypass not passed", () => {
     const result = parseWatchArgs(["--items", "A-1"]);
     expect(result.bypassEnabled).toBe(false);
-    expect(result.mergeStrategy).toBe("auto");
+    expect(result.mergeStrategy).toBe("manual");
   });
 
   it("--no-review sets skipReview=true", () => {

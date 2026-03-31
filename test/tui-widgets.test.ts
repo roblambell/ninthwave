@@ -816,7 +816,7 @@ describe("runSelectionScreen", () => {
     expect(result).toBeNull();
   });
 
-  it("completes full flow: select items → strategy → WIP → review → connection → confirm", async () => {
+  it("completes full flow: select items → confirm with local-first defaults", async () => {
     const { io, sendKeyBatches } = createMockIO();
     const items = [
       makeWorkItem("A-1", "First task", "high"),
@@ -825,14 +825,10 @@ describe("runSelectionScreen", () => {
 
     const resultPromise = runSelectionScreen(io, items, 4);
 
-    // All items start checked (including __ALL__ sentinel). Just confirm each step.
+    // All items start checked (including __ALL__ sentinel). Just confirm items then summary.
     sendKeyBatches(
       ["\r"],        // Step 1: Confirm all items (all pre-checked)
-      ["\r"],        // Step 2: Accept default strategy (auto)
-      ["\r"],        // Step 3: Accept default WIP (4)
-      ["\r"],        // Step 4: Accept default review mode (off)
-      ["\r"],        // Step 5: Accept default connection (Connect)
-      ["\r"],        // Step 6: Confirm summary
+      ["\r"],        // Step 2: Confirm summary
     );
 
     const result = await resultPromise;
@@ -841,8 +837,10 @@ describe("runSelectionScreen", () => {
     expect(result!.itemIds).toContain("B-2");
     expect(result!.itemIds).not.toContain("__ALL__");
     expect(result!.allSelected).toBe(true);
-    expect(result!.mergeStrategy).toBe("auto");
+    expect(result!.mergeStrategy).toBe("manual");
     expect(result!.wipLimit).toBe(4);
+    expect(result!.reviewMode).toBe("off");
+    expect(result!.connectionAction).toBeNull();
     expect(result!.cancelled).toBe(false);
   });
 
@@ -857,35 +855,6 @@ describe("runSelectionScreen", () => {
     expect(result).toBeNull();
   });
 
-  it("returns null when cancelled at strategy selection", async () => {
-    const { io, sendKeyBatches } = createMockIO();
-    const items = [makeWorkItem("A-1", "First task")];
-
-    const resultPromise = runSelectionScreen(io, items, 4);
-    sendKeyBatches(
-      ["\r"],       // Confirm all items (pre-checked)
-      ["\x1B"],     // Escape at strategy
-    );
-
-    const result = await resultPromise;
-    expect(result).toBeNull();
-  });
-
-  it("returns null when cancelled at WIP limit", async () => {
-    const { io, sendKeyBatches } = createMockIO();
-    const items = [makeWorkItem("A-1", "First task")];
-
-    const resultPromise = runSelectionScreen(io, items, 4);
-    sendKeyBatches(
-      ["\r"],       // Confirm all items (pre-checked)
-      ["\r"],       // Accept strategy
-      ["\x1B"],     // Escape at WIP
-    );
-
-    const result = await resultPromise;
-    expect(result).toBeNull();
-  });
-
   it("returns null when cancelled at confirmation", async () => {
     const { io, sendKeyBatches } = createMockIO();
     const items = [makeWorkItem("A-1", "First task")];
@@ -893,10 +862,6 @@ describe("runSelectionScreen", () => {
     const resultPromise = runSelectionScreen(io, items, 4);
     sendKeyBatches(
       ["\r"],       // Confirm all items (pre-checked)
-      ["\r"],       // Accept strategy
-      ["\r"],       // Accept WIP
-      ["\r"],       // Accept review mode
-      ["\r"],       // Accept connection
       ["n"],        // Cancel confirmation
     );
 
@@ -916,11 +881,7 @@ describe("runSelectionScreen", () => {
     // All items start checked; just confirm
     sendKeyBatches(
       ["\r"],        // Confirm all items (pre-checked)
-      ["\r"],        // Accept strategy
-      ["\r"],        // Accept WIP
-      ["\r"],        // Accept review mode
-      ["\r"],        // Accept connection
-      ["\r"],        // Confirm
+      ["\r"],        // Confirm summary
     );
 
     const result = await resultPromise;
@@ -933,24 +894,22 @@ describe("runSelectionScreen", () => {
     expect(result!.allSelected).toBe(true);
   });
 
-  it("manual strategy + custom WIP limit", async () => {
+  it("returns local-first defaults for merge, review, connection, and WIP", async () => {
     const { io, sendKeyBatches } = createMockIO();
     const items = [makeWorkItem("A-1", "First")];
 
-    const resultPromise = runSelectionScreen(io, items, 4);
+    const resultPromise = runSelectionScreen(io, items, 5);
     sendKeyBatches(
-      ["\r"],                                      // Confirm all items (pre-checked)
-      ["\x1B[B", "\r"],                           // Select manual strategy
-      ["\x1B[A", "\x1B[A", "\x1B[A", "\r"],      // Increase WIP to 7
-      ["\r"],                                      // Accept review mode
-      ["\r"],                                      // Accept connection
-      ["\r"],                                      // Confirm
+      ["\r"],  // Confirm all items
+      ["\r"],  // Confirm summary
     );
 
     const result = await resultPromise;
     expect(result).not.toBeNull();
     expect(result!.mergeStrategy).toBe("manual");
-    expect(result!.wipLimit).toBe(7);
+    expect(result!.wipLimit).toBe(5);
+    expect(result!.reviewMode).toBe("off");
+    expect(result!.connectionAction).toBeNull();
   });
 
   it("renders correctly at 80x25 terminal", async () => {
@@ -962,7 +921,7 @@ describe("runSelectionScreen", () => {
 
     const resultPromise = runSelectionScreen(io, items, 4);
     // All items pre-checked; just confirm each step
-    sendKeyBatches(["\r"], ["\r"], ["\r"], ["\r"], ["\r"], ["\r"]);
+    sendKeyBatches(["\r"], ["\r"]);
 
     const result = await resultPromise;
     expect(result).not.toBeNull();
@@ -980,7 +939,7 @@ describe("runSelectionScreen", () => {
 
     const resultPromise = runSelectionScreen(io, items, 4);
     // All items pre-checked; just confirm each step
-    sendKeyBatches(["\r"], ["\r"], ["\r"], ["\r"], ["\r"], ["\r"]);
+    sendKeyBatches(["\r"], ["\r"]);
 
     const result = await resultPromise;
     expect(result).not.toBeNull();
@@ -995,7 +954,7 @@ describe("runSelectionScreen", () => {
 
     const resultPromise = runSelectionScreen(io, items, 4);
     // Confirm all pre-checked items
-    sendKeyBatches(["\r"], ["\r"], ["\r"], ["\r"], ["\r"], ["\r"]);
+    sendKeyBatches(["\r"], ["\r"]);
 
     const result = await resultPromise;
     expect(result).not.toBeNull();
@@ -1009,7 +968,7 @@ describe("runSelectionScreen", () => {
 
     const resultPromise = runSelectionScreen(io, items, 4);
     // __ALL__ starts checked; confirm all
-    sendKeyBatches(["\r"], ["\r"], ["\r"], ["\r"], ["\r"], ["\r"]);
+    sendKeyBatches(["\r"], ["\r"]);
 
     const result = await resultPromise;
     expect(result).not.toBeNull();
@@ -1027,11 +986,7 @@ describe("runSelectionScreen", () => {
     // Space on __ALL__ (index 0) to uncheck all, then re-check A-1
     sendKeyBatches(
       [" ", "\x1B[B", " ", "\r"],  // Uncheck __ALL__ (unchecks all), re-check A-1, confirm
-      ["\r"],                       // Accept strategy
-      ["\r"],                       // Accept WIP
-      ["\r"],                       // Accept review mode
-      ["\r"],                       // Accept connection
-      ["\r"],                       // Confirm
+      ["\r"],                       // Confirm summary
     );
 
     const result = await resultPromise;
@@ -1188,20 +1143,16 @@ describe("runTextInput", () => {
   });
 });
 
-// ── Selection screen: AI review step ───────────────────────────────
+// ── Selection screen: local-first defaults ─────────────────────────
 
-describe("runSelectionScreen -- AI review step", () => {
-  it("defaults to 'off' when no defaultReviewMode specified", async () => {
+describe("runSelectionScreen -- local-first defaults", () => {
+  it("always returns reviewMode 'off' without prompting", async () => {
     const { io, sendKeyBatches } = createMockIO();
     const items = [makeWorkItem("A-1", "Task")];
 
     const resultPromise = runSelectionScreen(io, items, 4);
     sendKeyBatches(
       ["\r"],  // items
-      ["\r"],  // strategy
-      ["\r"],  // WIP
-      ["\r"],  // review (accept default = off)
-      ["\r"],  // connection
       ["\r"],  // confirm
     );
 
@@ -1210,95 +1161,13 @@ describe("runSelectionScreen -- AI review step", () => {
     expect(result!.reviewMode).toBe("off");
   });
 
-  it("defaults to 'all' when defaultReviewMode is 'all'", async () => {
+  it("ignores defaultReviewMode option (no review prompt)", async () => {
     const { io, sendKeyBatches } = createMockIO();
     const items = [makeWorkItem("A-1", "Task")];
 
     const resultPromise = runSelectionScreen(io, items, 4, { defaultReviewMode: "all" });
     sendKeyBatches(
       ["\r"],  // items
-      ["\r"],  // strategy
-      ["\r"],  // WIP
-      ["\r"],  // review (accept default = all)
-      ["\r"],  // connection
-      ["\r"],  // confirm
-    );
-
-    const result = await resultPromise;
-    expect(result).not.toBeNull();
-    expect(result!.reviewMode).toBe("all");
-  });
-
-  it("defaults to 'mine' when defaultReviewMode is 'mine'", async () => {
-    const { io, sendKeyBatches } = createMockIO();
-    const items = [makeWorkItem("A-1", "Task")];
-
-    const resultPromise = runSelectionScreen(io, items, 4, { defaultReviewMode: "mine" });
-    sendKeyBatches(
-      ["\r"],  // items
-      ["\r"],  // strategy
-      ["\r"],  // WIP
-      ["\r"],  // review (accept default = mine)
-      ["\r"],  // connection
-      ["\r"],  // confirm
-    );
-
-    const result = await resultPromise;
-    expect(result).not.toBeNull();
-    expect(result!.reviewMode).toBe("mine");
-  });
-
-  it("navigating to 'All PRs' sets reviewMode to 'all'", async () => {
-    const { io, sendKeyBatches } = createMockIO();
-    const items = [makeWorkItem("A-1", "Task")];
-
-    // default is off (index 2), navigate up twice to get to all (index 0)
-    const resultPromise = runSelectionScreen(io, items, 4);
-    sendKeyBatches(
-      ["\r"],              // items
-      ["\r"],              // strategy
-      ["\r"],              // WIP
-      ["\x1B[A", "\x1B[A", "\r"],  // review: up up → "All PRs" (wraps from off→mine→all)
-      ["\r"],              // connection
-      ["\r"],              // confirm
-    );
-
-    const result = await resultPromise;
-    expect(result).not.toBeNull();
-    expect(result!.reviewMode).toBe("all");
-  });
-
-  it("navigating to 'My PRs' sets reviewMode to 'mine'", async () => {
-    const { io, sendKeyBatches } = createMockIO();
-    const items = [makeWorkItem("A-1", "Task")];
-
-    // default is off (index 2), navigate up once to get to mine (index 1)
-    const resultPromise = runSelectionScreen(io, items, 4);
-    sendKeyBatches(
-      ["\r"],              // items
-      ["\r"],              // strategy
-      ["\r"],              // WIP
-      ["\x1B[A", "\r"],   // review: up → "My PRs"
-      ["\r"],              // connection
-      ["\r"],              // confirm
-    );
-
-    const result = await resultPromise;
-    expect(result).not.toBeNull();
-    expect(result!.reviewMode).toBe("mine");
-  });
-
-  it("navigating to 'Off' sets reviewMode to 'off'", async () => {
-    const { io, sendKeyBatches } = createMockIO();
-    const items = [makeWorkItem("A-1", "Task")];
-
-    const resultPromise = runSelectionScreen(io, items, 4);
-    sendKeyBatches(
-      ["\r"],  // items
-      ["\r"],  // strategy
-      ["\r"],  // WIP
-      ["\r"],  // review: accept default (off)
-      ["\r"],  // connection
       ["\r"],  // confirm
     );
 
@@ -1307,157 +1176,49 @@ describe("runSelectionScreen -- AI review step", () => {
     expect(result!.reviewMode).toBe("off");
   });
 
-  it("cancelling at review step returns null", async () => {
+  it("always returns manual merge strategy", async () => {
     const { io, sendKeyBatches } = createMockIO();
     const items = [makeWorkItem("A-1", "Task")];
 
     const resultPromise = runSelectionScreen(io, items, 4);
-    sendKeyBatches(
-      ["\r"],     // items
-      ["\r"],     // strategy
-      ["\r"],     // WIP
-      ["\x1B"],  // Escape at review
-    );
+    sendKeyBatches(["\r"], ["\r"]);
 
     const result = await resultPromise;
-    expect(result).toBeNull();
+    expect(result).not.toBeNull();
+    expect(result!.mergeStrategy).toBe("manual");
   });
-});
 
-// ── Selection screen: connection step ──────────────────────────────
-
-describe("runSelectionScreen -- connection step", () => {
-  it("local selection returns null connectionAction", async () => {
+  it("always returns null connectionAction (Local)", async () => {
     const { io, sendKeyBatches } = createMockIO();
     const items = [makeWorkItem("A-1", "Task")];
 
     const resultPromise = runSelectionScreen(io, items, 4);
-    sendKeyBatches(
-      ["\r"],  // items
-      ["\r"],  // strategy
-      ["\r"],  // WIP
-      ["\r"],  // review
-      ["\x1B[B", "\x1B[B", "\r"],  // connection: down down → "Local only"
-      ["\r"],  // confirm
-    );
+    sendKeyBatches(["\r"], ["\r"]);
 
     const result = await resultPromise;
     expect(result).not.toBeNull();
     expect(result!.connectionAction).toBeNull();
   });
 
-  it("connect returns connectionAction { type: 'connect' }", async () => {
+  it("passes through defaultWipLimit as wipLimit", async () => {
     const { io, sendKeyBatches } = createMockIO();
     const items = [makeWorkItem("A-1", "Task")];
 
-    const resultPromise = runSelectionScreen(io, items, 4);
-    sendKeyBatches(
-      ["\r"],              // items
-      ["\r"],              // strategy
-      ["\r"],              // WIP
-      ["\r"],              // review
-      ["\r"],              // connection: accept default (Connect)
-      ["\r"],              // confirm
-    );
+    const resultPromise = runSelectionScreen(io, items, 7);
+    sendKeyBatches(["\r"], ["\r"]);
 
     const result = await resultPromise;
     expect(result).not.toBeNull();
-    expect(result!.connectionAction).toEqual({ type: "connect" });
+    expect(result!.wipLimit).toBe(7);
   });
 
-  it("join session triggers text input and returns join action", async () => {
+  it("showConnectionStep option is ignored (always local)", async () => {
     const { io, sendKeyBatches } = createMockIO();
     const items = [makeWorkItem("A-1", "Task")];
 
-    const resultPromise = runSelectionScreen(io, items, 4);
-    sendKeyBatches(
-      ["\r"],              // items
-      ["\r"],              // strategy
-      ["\r"],              // WIP
-      ["\r"],              // review
-      ["\x1B[B", "\r"],   // connection: down → "Join session"
-      // Text input: type valid 16-char session code (hyphens auto-inserted by transform)
-      ["K", "2", "F", "9", "A", "B", "3", "X", "7", "Y", "P", "L", "Q", "M", "4", "N", "\r"],
-      ["\r"],              // confirm
-    );
-
-    const result = await resultPromise;
-    expect(result).not.toBeNull();
-    expect(result!.connectionAction).toEqual({ type: "join", code: "K2F9-AB3X-7YPL-QM4N" });
-  });
-
-  it("join session text input rejects invalid code then accepts valid code", async () => {
-    const { io, sendKeyBatches, getOutput } = createMockIO();
-    const items = [makeWorkItem("A-1", "Task")];
-
-    const resultPromise = runSelectionScreen(io, items, 4);
-    sendKeyBatches(
-      ["\r"],              // items
-      ["\r"],              // strategy
-      ["\r"],              // WIP
-      ["\r"],              // review
-      ["\x1B[B", "\r"],   // connection: join
-      // Type invalid code (3 chars), Enter (error), backspace all, type valid 16-char code, Enter
-      ["b", "a", "d", "\r",
-       "\x7f", "\x7f", "\x7f",                    // backspace "BAD"
-       "K", "2", "F", "9", "A", "B", "3", "X", "7", "Y", "P", "L", "Q", "M", "4", "N", "\r"],
-      ["\r"],              // confirm
-    );
-
-    const result = await resultPromise;
-    expect(result).not.toBeNull();
-    expect(getOutput()).toContain("Invalid code");
-    expect(result!.connectionAction).toEqual({ type: "join", code: "K2F9-AB3X-7YPL-QM4N" });
-  });
-
-  it("cancelling at connection step returns null", async () => {
-    const { io, sendKeyBatches } = createMockIO();
-    const items = [makeWorkItem("A-1", "Task")];
-
-    const resultPromise = runSelectionScreen(io, items, 4);
-    sendKeyBatches(
-      ["\r"],     // items
-      ["\r"],     // strategy
-      ["\r"],     // WIP
-      ["\r"],     // review
-      ["\x1B"],  // Escape at connection
-    );
-
-    const result = await resultPromise;
-    expect(result).toBeNull();
-  });
-
-  it("cancelling join session text input returns null", async () => {
-    const { io, sendKeyBatches } = createMockIO();
-    const items = [makeWorkItem("A-1", "Task")];
-
-    const resultPromise = runSelectionScreen(io, items, 4);
-    sendKeyBatches(
-      ["\r"],             // items
-      ["\r"],             // strategy
-      ["\r"],             // WIP
-      ["\r"],             // review
-      ["\x1B[B", "\r"],  // connection: join
-      ["\x1B"],           // Esc in text input
-    );
-
-    const result = await resultPromise;
-    expect(result).toBeNull();
-  });
-
-  it("showConnectionStep: false skips connection step and sets connectionAction to null", async () => {
-    const { io, sendKeyBatches } = createMockIO();
-    const items = [makeWorkItem("A-1", "Task")];
-
-    const resultPromise = runSelectionScreen(io, items, 4, { showConnectionStep: false });
-    // Only 5 batches: items, strategy, WIP, review, confirm (connection is skipped)
-    sendKeyBatches(
-      ["\r"],  // items
-      ["\r"],  // strategy
-      ["\r"],  // WIP
-      ["\r"],  // review
-      ["\r"],  // confirm
-    );
+    // showConnectionStep: true should not add a connection step
+    const resultPromise = runSelectionScreen(io, items, 4, { showConnectionStep: true });
+    sendKeyBatches(["\r"], ["\r"]);
 
     const result = await resultPromise;
     expect(result).not.toBeNull();
@@ -1465,9 +1226,9 @@ describe("runSelectionScreen -- connection step", () => {
   });
 });
 
-// ── Selection screen: updated confirmation ──────────────────────────
+// ── Selection screen: confirmation shows local-first defaults ───────
 
-describe("runSelectionScreen -- updated confirmation", () => {
+describe("runSelectionScreen -- confirmation display", () => {
   it("confirmation shows 'All (dynamic)' when allSelected", async () => {
     const { io, sendKeyBatches, getOutput } = createMockIO();
     const items = [
@@ -1477,7 +1238,7 @@ describe("runSelectionScreen -- updated confirmation", () => {
 
     const resultPromise = runSelectionScreen(io, items, 4);
     // All items start pre-checked (__ALL__ included) → allSelected = true
-    sendKeyBatches(["\r"], ["\r"], ["\r"], ["\r"], ["\r"], ["\r"]);
+    sendKeyBatches(["\r"], ["\r"]);
 
     const result = await resultPromise;
     expect(result).not.toBeNull();
@@ -1497,10 +1258,6 @@ describe("runSelectionScreen -- updated confirmation", () => {
     // Explicitly uncheck __ALL__ (unchecks all), then re-check A-1
     sendKeyBatches(
       [" ", "\x1B[B", " ", "\r"],  // uncheck __ALL__, re-check A-1
-      ["\r"],   // strategy
-      ["\r"],   // WIP
-      ["\r"],   // review
-      ["\r"],   // connection
       ["\r"],   // confirm
     );
 
@@ -1510,75 +1267,40 @@ describe("runSelectionScreen -- updated confirmation", () => {
     expect(getOutput()).toContain("A-1");
   });
 
-  it("confirmation shows AI review mode", async () => {
-    const { io, sendKeyBatches, getOutput } = createMockIO();
-    const items = [makeWorkItem("A-1", "Task")];
-
-    const resultPromise = runSelectionScreen(io, items, 4, { defaultReviewMode: "all" });
-    sendKeyBatches(["\r"], ["\r"], ["\r"], ["\r"], ["\r"], ["\r"]);
-
-    const result = await resultPromise;
-    expect(result).not.toBeNull();
-    expect(getOutput()).toContain("All PRs");
-  });
-
-  it("confirmation shows connection: Local when no connection action", async () => {
+  it("confirmation shows manual merge strategy", async () => {
     const { io, sendKeyBatches, getOutput } = createMockIO();
     const items = [makeWorkItem("A-1", "Task")];
 
     const resultPromise = runSelectionScreen(io, items, 4);
-    sendKeyBatches(
-      ["\r"],
-      ["\r"],
-      ["\r"],
-      ["\r"],
-      ["\x1B[B", "\x1B[B", "\r"],  // connection: down down → "Local only"
-      ["\r"],
-    );
+    sendKeyBatches(["\r"], ["\r"]);
+
+    const result = await resultPromise;
+    expect(result).not.toBeNull();
+    expect(getOutput()).toContain("manual");
+  });
+
+  it("confirmation shows AI reviews Off", async () => {
+    const { io, sendKeyBatches, getOutput } = createMockIO();
+    const items = [makeWorkItem("A-1", "Task")];
+
+    const resultPromise = runSelectionScreen(io, items, 4);
+    sendKeyBatches(["\r"], ["\r"]);
+
+    const result = await resultPromise;
+    expect(result).not.toBeNull();
+    expect(getOutput()).toContain("Off");
+  });
+
+  it("confirmation shows connection: Local", async () => {
+    const { io, sendKeyBatches, getOutput } = createMockIO();
+    const items = [makeWorkItem("A-1", "Task")];
+
+    const resultPromise = runSelectionScreen(io, items, 4);
+    sendKeyBatches(["\r"], ["\r"]);
 
     const result = await resultPromise;
     expect(result).not.toBeNull();
     expect(getOutput()).toContain("Local");
-  });
-
-  it("confirmation shows connection: ninthwave.sh (new session)", async () => {
-    const { io, sendKeyBatches, getOutput } = createMockIO();
-    const items = [makeWorkItem("A-1", "Task")];
-
-    const resultPromise = runSelectionScreen(io, items, 4);
-    sendKeyBatches(
-      ["\r"],
-      ["\r"],
-      ["\r"],
-      ["\r"],
-      ["\r"],              // connection: accept default (Connect)
-      ["\r"],
-    );
-
-    const result = await resultPromise;
-    expect(result).not.toBeNull();
-    expect(getOutput()).toContain("ninthwave.sh");
-    expect(getOutput()).toContain("new session");
-  });
-
-  it("confirmation shows connection: joining <code>", async () => {
-    const { io, sendKeyBatches, getOutput } = createMockIO();
-    const items = [makeWorkItem("A-1", "Task")];
-
-    const resultPromise = runSelectionScreen(io, items, 4);
-    sendKeyBatches(
-      ["\r"],
-      ["\r"],
-      ["\r"],
-      ["\r"],
-      ["\x1B[B", "\r"],            // connection: Join session
-      ["K", "2", "F", "9", "A", "B", "3", "X", "7", "Y", "P", "L", "Q", "M", "4", "N", "\r"],  // code
-      ["\r"],
-    );
-
-    const result = await resultPromise;
-    expect(result).not.toBeNull();
-    expect(getOutput()).toContain("joining K2F9-AB3X-7YPL-QM4N");
   });
 
   it("confirmation title is 'Ninthwave · Start orchestration?'", async () => {
@@ -1586,7 +1308,7 @@ describe("runSelectionScreen -- updated confirmation", () => {
     const items = [makeWorkItem("A-1", "Task")];
 
     const resultPromise = runSelectionScreen(io, items, 4);
-    sendKeyBatches(["\r"], ["\r"], ["\r"], ["\r"], ["\r"], ["\r"]);
+    sendKeyBatches(["\r"], ["\r"]);
 
     const result = await resultPromise;
     expect(result).not.toBeNull();
@@ -1626,12 +1348,8 @@ describe("runSelectionScreen -- AI tool step", () => {
 
     sendKeyBatches(
       ["\r"],        // Step 1: items
-      ["\r"],        // Step 2: strategy
-      ["\r"],        // Step 3: WIP
-      ["\r"],        // Step 4: review
-      ["\r"],        // Step 5: connection
-      ["\r"],        // Step 6: tool (accept default = Claude Code)
-      ["\r"],        // Step 7: confirm
+      ["\r"],        // Step 2: tool (accept default = both checked)
+      ["\r"],        // Step 3: confirm
     );
 
     const result = await resultPromise;
@@ -1650,9 +1368,9 @@ describe("runSelectionScreen -- AI tool step", () => {
       installedTools: [TOOL_CLAUDE],
     });
 
-    // Same 6 batches as default -- no extra step for single tool
+    // Only 2 batches: items, confirm (no tool screen for single tool)
     sendKeyBatches(
-      ["\r"], ["\r"], ["\r"], ["\r"], ["\r"], ["\r"],
+      ["\r"], ["\r"],
     );
 
     const result = await resultPromise;
@@ -1667,7 +1385,7 @@ describe("runSelectionScreen -- AI tool step", () => {
 
     const resultPromise = runSelectionScreen(io, items, 4);
 
-    sendKeyBatches(["\r"], ["\r"], ["\r"], ["\r"], ["\r"], ["\r"]);
+    sendKeyBatches(["\r"], ["\r"]);
 
     const result = await resultPromise;
     expect(result).not.toBeNull();
@@ -1685,10 +1403,6 @@ describe("runSelectionScreen -- AI tool step", () => {
 
     sendKeyBatches(
       ["\r"],        // items
-      ["\r"],        // strategy
-      ["\r"],        // WIP
-      ["\r"],        // review
-      ["\r"],        // connection
       ["\r"],        // tool (accept default = opencode since savedToolIds)
       ["\r"],        // confirm
     );
@@ -1708,10 +1422,6 @@ describe("runSelectionScreen -- AI tool step", () => {
 
     sendKeyBatches(
       ["\r"],        // items
-      ["\r"],        // strategy
-      ["\r"],        // WIP
-      ["\r"],        // review
-      ["\r"],        // connection
       ["\x1B"],      // Escape at tool step
     );
 
@@ -1728,7 +1438,7 @@ describe("runSelectionScreen -- AI tool step", () => {
     });
 
     sendKeyBatches(
-      ["\r"], ["\r"], ["\r"], ["\r"], ["\r"], ["\r"], ["\r"],
+      ["\r"], ["\r"], ["\r"],
     );
 
     await resultPromise;
@@ -1745,7 +1455,7 @@ describe("runSelectionScreen -- AI tool step", () => {
     });
 
     sendKeyBatches(
-      ["\r"], ["\r"], ["\r"], ["\r"], ["\r"], ["\r"], ["\r"],
+      ["\r"], ["\r"], ["\r"],
     );
 
     const result = await resultPromise;
@@ -1773,14 +1483,10 @@ describe("runTuiSelectionFlow (via interactive.ts)", () => {
 
     const resultPromise = runInteractiveFlow(items, 4, { widgetIO: io });
 
-    // All items start checked. Just confirm each step.
+    // Local-first: only items and confirm (no strategy/WIP/review/connection)
     sendKeyBatches(
       ["\r"], // Confirm all items (pre-checked)
-      ["\r"], // Accept default strategy
-      ["\r"], // Accept default WIP
-      ["\r"], // Accept default review mode (off)
-      ["\r"], // Accept default connection (Connect)
-      ["\r"], // Confirm
+      ["\r"], // Confirm summary
     );
 
     const result = await resultPromise;
@@ -1789,10 +1495,10 @@ describe("runTuiSelectionFlow (via interactive.ts)", () => {
     expect(result!.itemIds).toContain("B-2");
     expect(result!.itemIds).not.toContain("__ALL__");
     expect(result!.allSelected).toBe(true);
-    expect(result!.mergeStrategy).toBe("auto");
+    expect(result!.mergeStrategy).toBe("manual");
     expect(result!.wipLimit).toBe(4);
     expect(result!.reviewMode).toBe("off");
-    expect(result!.connectionAction).toEqual({ type: "connect" });
+    expect(result!.connectionAction).toBeNull();
   });
 
   it("runInteractiveFlow falls back to readline when useLegacyPrompts is true", async () => {
@@ -1804,7 +1510,8 @@ describe("runTuiSelectionFlow (via interactive.ts)", () => {
     ];
 
     let promptIdx = 0;
-    const answers = ["1 2", "1", "5", ""];
+    // Local-first: only items + confirmation (no merge/wip/review/connection prompts)
+    const answers = ["1 2", ""];
     const mockPrompt = async (_q: string) => answers[promptIdx++] ?? "";
 
     const result = await runInteractiveFlow(items, 3, {
@@ -1815,7 +1522,9 @@ describe("runTuiSelectionFlow (via interactive.ts)", () => {
 
     expect(result).not.toBeNull();
     expect(result!.itemIds).toEqual(["A-1", "B-2"]);
-    expect(result!.mergeStrategy).toBe("auto");
-    expect(result!.wipLimit).toBe(5);
+    expect(result!.mergeStrategy).toBe("manual");
+    expect(result!.wipLimit).toBe(3);
+    expect(result!.reviewMode).toBe("off");
+    expect(result!.connectionAction).toBeNull();
   });
 });

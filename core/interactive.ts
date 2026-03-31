@@ -524,8 +524,9 @@ export async function runInteractiveFlow(
 }
 
 /**
- * Legacy readline-based interactive flow.
- * Kept as fallback for non-TTY or explicit opt-in.
+ * Legacy readline-based interactive flow (local-first).
+ * Only prompts for item selection and AI tool. Merge strategy, WIP,
+ * review mode, and connection default to local-first values.
  */
 async function runReadlineFlow(
   todos: WorkItem[],
@@ -538,23 +539,13 @@ async function runReadlineFlow(
   const itemResult = await promptItems(todos, prompt);
   if (itemResult.ids.length === 0) return null;
 
-  // Step 2: Merge strategy
-  const mergeStrategy = await promptMergeStrategy(prompt);
+  // Local-first defaults -- no prompts for these
+  const mergeStrategy: MergeStrategy = "manual";
+  const wipLimit = defaultWipLimit;
+  const reviewMode: ReviewMode = "off";
+  const connectionAction: ConnectionAction | null = null;
 
-  // Step 3: WIP limit
-  const wipLimit = await promptWipLimit(defaultWipLimit, prompt);
-
-  // Step 4: Review mode
-  const defaultReviewMode = deps.defaultReviewMode ?? "mine";
-  const reviewMode = await promptReviewMode(defaultReviewMode, prompt);
-
-  // Step 5: Connection to ninthwave.sh (skippable for run-more re-entry)
-  let connectionAction: ConnectionAction | null = null;
-  if (deps.showConnectionStep !== false) {
-    connectionAction = await promptConnectionMode(prompt);
-  }
-
-  // Step 6: AI tool (conditional, multi-select)
+  // Step 2: AI tool (conditional, multi-select)
   let aiTool: string | undefined;
   let aiTools: string[] | undefined;
   const tools = deps.skipToolStep ? [] : (deps.installedTools ?? []);
@@ -611,7 +602,7 @@ async function runReadlineFlow(
     aiTools = [aiTool];
   }
 
-  // Step 7: Summary + confirmation
+  // Step 3: Summary + confirmation
   const result: InteractiveResult = {
     itemIds: itemResult.ids,
     mergeStrategy,

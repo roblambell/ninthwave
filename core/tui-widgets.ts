@@ -8,7 +8,6 @@ import type { WorkItem } from "./types.ts";
 import { PRIORITY_NUM } from "./types.ts";
 import type { MergeStrategy } from "./orchestrator.ts";
 import type { ConnectionAction } from "./commands/crew.ts";
-import { CREW_CODE_PATTERN, normalizeCrewCode } from "./commands/crew.ts";
 import type { AiToolProfile } from "./ai-tools.ts";
 
 // ── ANSI escape helpers ─────────────────────────────────────────────
@@ -597,66 +596,6 @@ export function runConfirm(
 
 // ── Selection Screen (composite) ────────────────────────────────────
 
-/** Merge strategy options for the picker. */
-const MERGE_STRATEGY_OPTIONS: SingleSelectOption<MergeStrategy>[] = [
-  {
-    value: "auto",
-    label: "auto",
-    description: "Auto-merge when CI passes",
-    isDefault: true,
-  },
-  {
-    value: "manual",
-    label: "manual",
-    description: "Create PR, human clicks merge",
-  },
-];
-
-/** AI review mode options for the picker. */
-const REVIEW_MODE_OPTIONS: SingleSelectOption<"all" | "mine" | "off">[] = [
-  {
-    value: "all",
-    label: "All PRs",
-    description: "review work item PRs and external contributor PRs",
-  },
-  {
-    value: "mine",
-    label: "My PRs",
-    description: "review only ninthwave work item PRs",
-  },
-  {
-    value: "off",
-    label: "Off",
-    description: "no AI reviews",
-  },
-];
-
-/** Brand amber -- truecolor (#D4A030) for ninthwave.sh branding in TUI. */
-const BRAND = "\x1b[38;2;212;160;48m";
-
-/** Connection mode option values for the picker. */
-type ConnectionOption = "connect" | "join" | "local";
-
-/** Connection options for the picker. */
-const CONNECTION_OPTIONS: SingleSelectOption<ConnectionOption>[] = [
-  {
-    value: "connect",
-    label: "Connect",
-    description: "track delivery metrics at ninthwave.sh",
-    isDefault: true,
-  },
-  {
-    value: "join",
-    label: "Join session",
-    description: "coordinate with teammates on the same repo",
-  },
-  {
-    value: "local",
-    label: "Local only",
-    description: "no connection, works offline",
-  },
-];
-
 /**
  * Sort work items by priority then ID (same order as the old readline prompts).
  */
@@ -692,13 +631,14 @@ export function toCheckboxItems(items: WorkItem[]): CheckboxItem[] {
 }
 
 /**
- * Run the full TUI selection screen flow:
+ * Run the full TUI selection screen flow (local-first):
  * 1. Checkbox list for item selection
- * 2. Single-select for merge strategy
- * 3. Number picker for WIP limit
- * 4. Single-select for AI review mode
- * 5. Single-select for ninthwave.sh connection (skippable)
- * 6. Summary confirmation
+ * 2. Checkbox list for AI tool selection (conditional: 2+ tools)
+ * 3. Summary confirmation
+ *
+ * Merge strategy, WIP limit, AI reviews, and collaboration default to
+ * local-first values (manual, passed-in WIP, off, local) without prompting.
+ * CLI overrides are handled upstream in orchestrate.ts.
  *
  * Renders entirely in the alt-screen buffer using raw keypresses.
  * Returns null if cancelled at any step.
@@ -769,113 +709,13 @@ export async function runSelectionScreen(
   // Filter __ALL__ sentinel from the selected ids
   const selectedItemIds = itemResult.selectedIds.filter((id) => id !== ALL_SENTINEL_ID);
 
-  // Step 2: Merge strategy
-  io.write(CLEAR_SCREEN);
-  const strategyResult = await runSingleSelect<MergeStrategy>(
-    io,
-    MERGE_STRATEGY_OPTIONS,
-    { title: "Merge strategy" },
-  );
+  // Local-first defaults -- no prompts for these
+  const mergeStrategy: MergeStrategy = "manual";
+  const wipLimit = defaultWipLimit;
+  const reviewMode: "all" | "mine" | "off" = "off";
+  const connectionAction: ConnectionAction | null = null;
 
-  if (strategyResult.cancelled) {
-    io.write(SHOW_CURSOR);
-    return null;
-  }
-
-  // Step 3: WIP limit
-  io.write(CLEAR_SCREEN);
-  const wipResult = await runNumberPicker(io, {
-    title: "WIP limit",
-    min: 1,
-    max: 10,
-    initial: defaultWipLimit,
-  });
-
-  if (wipResult.cancelled) {
-    io.write(SHOW_CURSOR);
-    return null;
-  }
-
-  // Step 4: AI reviews
-  const defaultReviewMode = opts.defaultReviewMode ?? "off";
-  const reviewModeOptions = REVIEW_MODE_OPTIONS.map((o) => ({
-    ...o,
-    isDefault: o.value === defaultReviewMode,
-  }));
-
-  io.write(CLEAR_SCREEN);
-  const reviewResult = await runSingleSelect<"all" | "mine" | "off">(
-    io,
-    reviewModeOptions,
-    { title: "Ninthwave \u00b7 AI reviews" },
-  );
-
-  if (reviewResult.cancelled) {
-    io.write(SHOW_CURSOR);
-    return null;
-  }
-
-  // Step 5: Connection to ninthwave.sh (skippable for run-more re-entry)
-  let connectionAction: ConnectionAction | null = null;
-
-  if (opts.showConnectionStep !== false) {
-    io.write(CLEAR_SCREEN);
-    const connectionResult = await runSingleSelect<ConnectionOption>(
-      io,
-      CONNECTION_OPTIONS,
-      {
-        title: "Ninthwave \u00b7 Connect to " + BRAND + "ninthwave.sh" + RESET,
-        lines: [
-          `${DIM}What you get:${RESET}`,
-          `${DIM}  \u00b7 Delivery metrics dashboard at ${BRAND}ninthwave.sh${RESET}${DIM}/stats${RESET}`,
-          `${DIM}  \u00b7 Session duration, lead time, CI health, throughput${RESET}`,
-          `${DIM}  \u00b7 Invite teammates to coordinate across machines${RESET}`,
-          `${DIM}  No code or repo content is sent.${RESET}`,
-        ],
-      },
-    );
-
-    if (connectionResult.cancelled) {
-      io.write(SHOW_CURSOR);
-      return null;
-    }
-
-    if (connectionResult.value === "connect") {
-      connectionAction = { type: "connect" };
-    } else if (connectionResult.value === "join") {
-      io.write(CLEAR_SCREEN);
-      const textResult = await runTextInput(io, {
-        title: "Ninthwave \u00b7 Join session",
-        hint: "e.g. K2F9 AB3X 7YPL QM4N",
-        validate: (v) =>
-          CREW_CODE_PATTERN.test(v)
-            ? null
-            : "Invalid code. Expected 16 characters (e.g. K2F9-AB3X-7YPL-QM4N)",
-        transform: (v) => {
-          // Auto-uppercase and auto-insert hyphens
-          let s = v.toUpperCase().replace(/[^A-Z0-9]/g, "");
-          // Insert hyphens after every 4 chars
-          let result = "";
-          for (let i = 0; i < s.length && i < 16; i++) {
-            if (i > 0 && i % 4 === 0) result += "-";
-            result += s[i];
-          }
-          return result;
-        },
-      });
-      io.write(HIDE_CURSOR);
-
-      if (textResult.cancelled) {
-        io.write(SHOW_CURSOR);
-        return null;
-      }
-
-      connectionAction = { type: "join", code: normalizeCrewCode(textResult.value) };
-    }
-    // "local" => connectionAction remains null
-  }
-
-  // Step 6: AI coding tool (conditional -- only when 2+ tools detected)
+  // Step 2: AI coding tool (conditional -- only when 2+ tools detected)
   let aiTool: string | undefined;
   let aiTools: string[] | undefined;
   const tools = opts.installedTools ?? [];
@@ -909,7 +749,7 @@ export async function runSelectionScreen(
     aiTools = [aiTool];
   }
 
-  // Step 7: Confirmation summary
+  // Step 3: Confirmation summary
   // Items summary
   let itemLines: string[];
   if (itemResult.allSelected) {
@@ -926,18 +766,6 @@ export async function runSelectionScreen(
     ];
   }
 
-  // Review mode label
-  const reviewLabel =
-    reviewResult.value === "all" ? "All PRs"
-    : reviewResult.value === "mine" ? "My PRs"
-    : "Off";
-
-  // Connection label
-  const connectionLabel =
-    connectionAction === null ? "Local"
-    : connectionAction.type === "connect" ? `${BRAND}ninthwave.sh${RESET} (new session)`
-    : `${BRAND}ninthwave.sh${RESET} (joining ${connectionAction.code})`;
-
   // AI tool label (only shown when the tool step was visible)
   const toolLabel = (tools.length >= 2 && aiTools && aiTools.length > 0)
     ? aiTools.map((id) => tools.find((t) => t.id === id)?.displayName ?? id).join(", ") + (aiTools.length > 1 ? " (round-robin)" : "")
@@ -946,10 +774,10 @@ export async function runSelectionScreen(
   const summaryLines = [
     ...itemLines,
     "",
-    `${BOLD}Merge strategy:${RESET}  ${strategyResult.value}`,
-    `${BOLD}WIP limit:${RESET}       ${wipResult.value}`,
-    `${BOLD}AI reviews:${RESET}      ${reviewLabel}`,
-    `${BOLD}Connection:${RESET}      ${connectionLabel}`,
+    `${BOLD}Merge strategy:${RESET}  ${mergeStrategy}`,
+    `${BOLD}WIP limit:${RESET}       ${wipLimit}`,
+    `${BOLD}AI reviews:${RESET}      Off`,
+    `${BOLD}Connection:${RESET}      Local`,
     ...(toolLabel ? [`${BOLD}AI tool:${RESET}         ${toolLabel}`] : []),
   ];
 
@@ -968,9 +796,9 @@ export async function runSelectionScreen(
   return {
     itemIds: selectedItemIds,
     allSelected: itemResult.allSelected,
-    mergeStrategy: strategyResult.value,
-    wipLimit: wipResult.value,
-    reviewMode: reviewResult.value,
+    mergeStrategy,
+    wipLimit,
+    reviewMode,
     connectionAction,
     cancelled: false,
     aiTool,

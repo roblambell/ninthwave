@@ -327,17 +327,16 @@ describe("runInteractiveFlow", () => {
     makeWorkItem("B-2", "Second task", "medium"),
   ];
 
-  it("returns complete result for valid legacy flow", async () => {
-    // Answers: select items "1 2", merge strategy "1" (auto), wip limit "5",
-    //          review mode "" (default=mine), connection "3" (local), confirm ""
-    const prompt = makePrompt(["1 2", "1", "5", "", "3", ""]);
+  it("returns complete result with local-first defaults for valid legacy flow", async () => {
+    // Local-first: only prompts for items + confirmation (no merge/wip/review/connection)
+    const prompt = makePrompt(["1 2", ""]);
     const result = await runInteractiveFlow(items, 3, { prompt, useLegacyPrompts: true });
 
     expect(result).not.toBeNull();
     expect(result!.itemIds).toEqual(["A-1", "B-2"]);
-    expect(result!.mergeStrategy).toBe("auto");
-    expect(result!.wipLimit).toBe(5);
-    expect(result!.reviewMode).toBe("mine");
+    expect(result!.mergeStrategy).toBe("manual");
+    expect(result!.wipLimit).toBe(3);
+    expect(result!.reviewMode).toBe("off");
     expect(result!.connectionAction).toBeNull();
     expect(result!.allSelected).toBe(true);
   });
@@ -349,9 +348,8 @@ describe("runInteractiveFlow", () => {
   });
 
   it("returns null when user cancels at confirmation", async () => {
-    // Answers: select items "1", merge strategy "1" (auto), wip limit "",
-    //          review mode "", connection "3" (local), confirm "n"
-    const prompt = makePrompt(["1", "1", "", "", "3", "n"]);
+    // Local-first: items + cancel at confirmation
+    const prompt = makePrompt(["1", "n"]);
     const result = await runInteractiveFlow(items, 3, { prompt, useLegacyPrompts: true });
     expect(result).toBeNull();
   });
@@ -362,37 +360,25 @@ describe("runInteractiveFlow", () => {
     expect(result).toBeNull();
   });
 
-  it("completes flow with manual strategy and custom wip", async () => {
-    // Answers: select "all", merge "2" (manual), wip "7",
-    //          review mode "1" (all), connection "1" (connect), confirm ""
-    const prompt = makePrompt(["all", "2", "7", "1", "1", ""]);
+  it("uses precomputed WIP limit as default without prompting", async () => {
+    // Items "all" + confirm
+    const prompt = makePrompt(["all", ""]);
+    const result = await runInteractiveFlow(items, 7, { prompt, useLegacyPrompts: true });
+
+    expect(result).not.toBeNull();
+    expect(result!.wipLimit).toBe(7);
+  });
+
+  it("always returns manual merge strategy", async () => {
+    const prompt = makePrompt(["1", ""]);
     const result = await runInteractiveFlow(items, 3, { prompt, useLegacyPrompts: true });
 
     expect(result).not.toBeNull();
     expect(result!.mergeStrategy).toBe("manual");
-    expect(result!.wipLimit).toBe(7);
-    expect(result!.allSelected).toBe(true);
-    expect(result!.reviewMode).toBe("all");
   });
 
-  it("skips connection step when showConnectionStep is false", async () => {
-    // Answers: select "1", merge "1" (auto), wip "",
-    //          review mode "" (default=mine), confirm "" (no connection prompt)
-    const prompt = makePrompt(["1", "1", "", "", ""]);
-    const result = await runInteractiveFlow(items, 3, {
-      prompt,
-      useLegacyPrompts: true,
-      showConnectionStep: false,
-    });
-
-    expect(result).not.toBeNull();
-    expect(result!.connectionAction).toBeNull();
-  });
-
-  it("passes defaultReviewMode through to readline flow", async () => {
-    // Answers: select "1", merge "1", wip "",
-    //          review mode "" (default=all from deps), connection "3" (local), confirm ""
-    const prompt = makePrompt(["1", "1", "", "", "3", ""]);
+  it("always returns reviews off", async () => {
+    const prompt = makePrompt(["1", ""]);
     const result = await runInteractiveFlow(items, 3, {
       prompt,
       useLegacyPrompts: true,
@@ -400,7 +386,15 @@ describe("runInteractiveFlow", () => {
     });
 
     expect(result).not.toBeNull();
-    expect(result!.reviewMode).toBe("all");
+    expect(result!.reviewMode).toBe("off");
+  });
+
+  it("always returns null connectionAction (Local)", async () => {
+    const prompt = makePrompt(["1", ""]);
+    const result = await runInteractiveFlow(items, 3, { prompt, useLegacyPrompts: true });
+
+    expect(result).not.toBeNull();
+    expect(result!.connectionAction).toBeNull();
   });
 });
 
