@@ -11,6 +11,7 @@ import {
 } from "../git.ts";
 import { prList as defaultPrList } from "../gh.ts";
 import { type Multiplexer, getMux } from "../mux.ts";
+import { cleanInbox } from "./inbox.ts";
 
 /** Injectable dependencies for clean commands, for testing. */
 export interface CleanDeps {
@@ -332,6 +333,11 @@ export function cleanSingleWorktree(
     deps.deleteRemoteBranch(targetRepo, branch);
   } catch (e) {
     warn(`Failed to delete remote branch ${branch}: ${e instanceof Error ? e.message : e}`);
+  }
+  try {
+    cleanInbox(worktreePath, id);
+  } catch {
+    // best-effort inbox cleanup
   }
   releasePartition(partitionDir, id);
   removeCrossRepoIndex(crossRepoIndex, id);

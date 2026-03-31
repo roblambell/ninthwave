@@ -217,12 +217,13 @@ describe("seedAgentFiles", () => {
     rmSync(worktree, { recursive: true, force: true });
   });
 
-  it("preserves inbox-listener instructions in seeded implementer prompt", () => {
+  it("preserves checkpointed inbox instructions in seeded implementer prompt", () => {
     const hubRoot = makeTmpDir();
     const worktree = makeTmpDir();
     const localContent = [
       "# Implementer agent",
-      "## 0. Open Inbox Listener",
+      "## 0. Inbox Contract",
+      "nw inbox --check YOUR_TODO_ID",
       "nw inbox --wait YOUR_TODO_ID",
     ].join("\n");
 
@@ -240,6 +241,7 @@ describe("seedAgentFiles", () => {
     seedAgentFiles(worktree, hubRoot, deps);
 
     const claudeAgent = join(worktree, ".claude/agents/implementer.md");
+    expect(readFileSync(claudeAgent, "utf-8")).toContain("nw inbox --check YOUR_TODO_ID");
     expect(readFileSync(claudeAgent, "utf-8")).toContain("nw inbox --wait YOUR_TODO_ID");
 
     rmSync(hubRoot, { recursive: true, force: true });

@@ -1,8 +1,8 @@
 // inbox command: file-based message delivery between orchestrator and agents.
 //
 // Replaces cmux send-key for agent messaging. The orchestrator writes messages
-// to an inbox file; agents run `nw inbox --wait` as a background process to
-// receive them.
+// to an inbox file; agents use `nw inbox --check` during active work and
+// `nw inbox --wait` once they are idle.
 //
 // Usage:
 //   nw inbox --wait <item-id>              Block until a message arrives
@@ -227,7 +227,7 @@ export function cmdInbox(
   }
 
   if (isWait) {
-    // Blocking wait -- used by agents as a background process
+    // Blocking wait -- intended for workers that are idle or done
     const message = waitForInbox(projectRoot, itemId, deps);
     process.stdout.write(message);
     return;

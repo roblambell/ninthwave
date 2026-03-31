@@ -13,6 +13,7 @@ import {
   cmdCloseWorkspace,
   cmdCloseWorkspaces,
 } from "../core/commands/clean.ts";
+import { checkInbox, writeInbox } from "../core/commands/inbox.ts";
 
 /** Create a mock Multiplexer for dependency injection (avoids vi.mock leaking). */
 function createMockMux(): Multiplexer & Record<string, Mock> {
@@ -140,6 +141,23 @@ describe("cleanSingleWorktree", () => {
     expect(result).toBe(true);
     expect(mux.closeWorkspace).toHaveBeenCalled();
     expect(deps.removeWorktree).toHaveBeenCalled();
+  });
+
+  it("clears inbox messages when cleaning a worktree", () => {
+    const deps = createMockCleanDeps();
+    const repo = setupTempRepo();
+    const worktreeDir = join(repo, ".ninthwave", ".worktrees");
+    const worktreePath = join(worktreeDir, "ninthwave-H-CI-2");
+    mkdirSync(worktreePath, { recursive: true });
+
+    writeInbox(worktreePath, "H-CI-2", "stale cleanup message");
+    expect(checkInbox(worktreePath, "H-CI-2")).toBe("stale cleanup message");
+    writeInbox(worktreePath, "H-CI-2", "stale cleanup message");
+
+    const result = cleanSingleWorktree("H-CI-2", worktreeDir, repo, deps);
+
+    expect(result).toBe(true);
+    expect(checkInbox(worktreePath, "H-CI-2")).toBeNull();
   });
 
   it("works without mux parameter (backward compatibility)", () => {

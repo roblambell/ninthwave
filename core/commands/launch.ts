@@ -20,6 +20,7 @@ import { allocatePartition, getPartitionFor, releasePartition } from "../partiti
 import { resolveRepo, writeCrossRepoIndex, removeCrossRepoIndex, ensureWorktreeExcluded } from "../cross-repo.ts";
 import { readWorkItem } from "../work-item-files.ts";
 import { prList as defaultPrList } from "../gh.ts";
+import { cleanInbox } from "./inbox.ts";
 import {
   isAiToolId,
   getToolProfile,
@@ -374,6 +375,10 @@ ${itemText}`;
     const promptFile = join(worktreePath, ".ninthwave", ".prompt");
     mkdirSync(join(worktreePath, ".ninthwave"), { recursive: true });
     writeFileSync(promptFile, systemPrompt);
+
+    // Clear any stale inbox messages before the worker starts so a reused
+    // worktree cannot consume instructions from a prior session.
+    cleanInbox(worktreePath, item.id);
 
     const workspaceRef = launchAiSession(
       aiTool,
