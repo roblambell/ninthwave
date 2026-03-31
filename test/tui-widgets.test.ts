@@ -810,10 +810,19 @@ describe("toCheckboxItems", () => {
 // ── Selection screen (composite) ────────────────────────────────────
 
 describe("runSelectionScreen", () => {
-  it("returns null for empty item list", async () => {
-    const { io } = createMockIO();
-    const result = await runSelectionScreen(io, [], 4);
-    expect(result).toBeNull();
+  it("shows a future-tasks selection screen for an empty queue", async () => {
+    const { io, sendKeyBatches, getOutput } = createMockIO();
+
+    const resultPromise = runSelectionScreen(io, [], 4);
+    sendKeyBatches(["\r"], ["\r"]);
+
+    const result = await resultPromise;
+    expect(result).not.toBeNull();
+    expect(result!.itemIds).toEqual([]);
+    expect(result!.allSelected).toBe(false);
+    expect(result!.futureOnly).toBe(true);
+    expect(getOutput()).toContain("Future tasks");
+    expect(getOutput()).toContain("No work items queued");
   });
 
   it("completes full flow: select items → confirm with local-first defaults", async () => {
@@ -837,6 +846,7 @@ describe("runSelectionScreen", () => {
     expect(result!.itemIds).toContain("B-2");
     expect(result!.itemIds).not.toContain("__ALL__");
     expect(result!.allSelected).toBe(true);
+    expect(result!.futureOnly).toBe(false);
     expect(result!.mergeStrategy).toBe("manual");
     expect(result!.wipLimit).toBe(4);
     expect(result!.reviewMode).toBe("off");
@@ -1338,6 +1348,27 @@ const TOOL_CLAUDE = makeToolProfile("claude", "Claude Code", ".claude/agents");
 const TOOL_OPENCODE = makeToolProfile("opencode", "OpenCode", ".opencode/agents");
 
 describe("runSelectionScreen -- AI tool step", () => {
+  it("preserves the tool step when the queue is empty", async () => {
+    const { io, sendKeyBatches, getOutput } = createMockIO();
+
+    const resultPromise = runSelectionScreen(io, [], 4, {
+      installedTools: [TOOL_CLAUDE, TOOL_OPENCODE],
+    });
+
+    sendKeyBatches(
+      ["\r"],
+      ["\r"],
+      ["\r"],
+    );
+
+    const result = await resultPromise;
+    expect(result).not.toBeNull();
+    expect(result!.futureOnly).toBe(true);
+    expect(result!.aiTool).toBe("claude");
+    expect(getOutput()).toContain("Future tasks");
+    expect(getOutput()).toContain("AI coding tool");
+  });
+
   it("shows tool step when 2+ tools provided, result includes aiTool", async () => {
     const { io, sendKeyBatches, getOutput } = createMockIO();
     const items = [makeWorkItem("A-1", "Task")];

@@ -384,13 +384,17 @@ export async function cmdNoArgs(
 
   // Build watch args from interactive result
   const watchArgs = [
-    "--items", ...result.itemIds,
     "--merge-strategy", result.mergeStrategy,
     "--wip-limit", String(result.wipLimit),
   ];
 
+  if (result.itemIds.length > 0) {
+    watchArgs.unshift(...result.itemIds);
+    watchArgs.unshift("--items");
+  }
+
   // Dynamic re-scanning when all items selected
-  if (result.allSelected) {
+  if (result.allSelected || result.futureOnly) {
     watchArgs.push("--watch");
   }
 

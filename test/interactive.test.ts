@@ -15,6 +15,7 @@ import {
   type PromptFn,
   type InteractiveResult,
 } from "../core/interactive.ts";
+import type { WidgetIO } from "../core/tui-widgets.ts";
 import type { WorkItem } from "../core/types.ts";
 
 // ── Helpers ──────────────────────────────────────────────────────────
@@ -48,6 +49,45 @@ function makePrompt(answers: string[]): PromptFn {
   return async (_question: string): Promise<string> => {
     if (i >= answers.length) return "";
     return answers[i++]!;
+  };
+}
+
+function createMockIO(): {
+  io: WidgetIO;
+  sendKeys: (keys: string[]) => void;
+  sendKeyBatches: (...batches: string[][]) => void;
+} {
+  let handler: ((key: string) => void) | null = null;
+
+  const io: WidgetIO = {
+    write: () => {},
+    onKey: (next) => { handler = next; },
+    offKey: () => { handler = null; },
+    getRows: () => 40,
+    getCols: () => 80,
+  };
+
+  const sendKeys = (keys: string[]) => {
+    for (const key of keys) handler?.(key);
+  };
+
+  return {
+    io,
+    sendKeys,
+    sendKeyBatches: (...batches: string[][]) => {
+      if (batches.length === 0) return;
+      sendKeys(batches[0]!);
+      let chain = Promise.resolve();
+      for (let i = 1; i < batches.length; i++) {
+        const batch = batches[i]!;
+        chain = chain.then(() => new Promise<void>((resolve) => {
+          queueMicrotask(() => {
+            sendKeys(batch);
+            resolve();
+          });
+        }));
+      }
+    },
   };
 }
 
@@ -395,6 +435,31 @@ describe("runInteractiveFlow", () => {
 
     expect(result).not.toBeNull();
     expect(result!.connectionAction).toBeNull();
+  });
+
+  it("returns an explicit future-only result in the empty-queue TUI path", async () => {
+    const { io, sendKeyBatches } = createMockIO();
+
+    const resultPromise = runInteractiveFlow([], 3, { widgetIO: io });
+    sendKeyBatches(["\r"], ["\r"]);
+
+    const result = await resultPromise;
+    expect(result).not.toBeNull();
+    expect(result!.itemIds).toEqual([]);
+    expect(result!.allSelected).toBe(false);
+    expect(result!.futureOnly).toBe(true);
+    expect(result!.mergeStrategy).toBe("manual");
+    expect(result!.wipLimit).toBe(3);
+  });
+
+  it("returns null when the empty-queue TUI path is cancelled", async () => {
+    const { io, sendKeys } = createMockIO();
+
+    const resultPromise = runInteractiveFlow([], 3, { widgetIO: io });
+    sendKeys(["\x1B"]);
+
+    const result = await resultPromise;
+    expect(result).toBeNull();
   });
 });
 

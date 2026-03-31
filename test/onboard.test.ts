@@ -506,6 +506,33 @@ describe("cmdNoArgs", () => {
     expect(watchArgs).toContain("--watch");
   });
 
+  it("passes --watch without --items when futureOnly is true", async () => {
+    const projectDir = setupTempRepo();
+    mkdirSync(join(projectDir, ".ninthwave", "work"), { recursive: true });
+
+    let watchArgs: string[] = [];
+
+    await cmdNoArgs(projectDir, {
+      isTTY: true,
+      parseWorkItems: () => [],
+      isDaemonRunning: () => null,
+      loadConfig: () => ({ review_external: false, schedule_enabled: false }),
+      runInteractiveFlow: async () => ({
+        itemIds: [],
+        mergeStrategy: "auto" as MergeStrategy,
+        wipLimit: 4,
+        allSelected: false,
+        futureOnly: true,
+        reviewMode: "mine",
+        connectionAction: null,
+      }),
+      runWatch: async (args) => { watchArgs = args; },
+    });
+
+    expect(watchArgs).toContain("--watch");
+    expect(watchArgs).not.toContain("--items");
+  });
+
   it("passes --review-external when reviewMode is 'all'", async () => {
     const projectDir = setupTempRepo();
     mkdirSync(join(projectDir, ".ninthwave", "work"), { recursive: true });

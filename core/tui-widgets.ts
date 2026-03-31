@@ -74,6 +74,8 @@ export interface TextInputResult {
 export interface SelectionScreenResult {
   itemIds: string[];
   allSelected: boolean;
+  /** True when starting with no current items and watching future work only. */
+  futureOnly?: boolean;
   mergeStrategy: MergeStrategy;
   wipLimit: number;
   reviewMode: "all" | "mine" | "off";
@@ -645,6 +647,7 @@ export function toCheckboxItems(items: WorkItem[]): CheckboxItem[] {
  */
 /** Sentinel id for the "select all" checkbox item. */
 const ALL_SENTINEL_ID = "__ALL__";
+const FUTURE_TASKS_ID = "__FUTURE__";
 
 export async function runSelectionScreen(
   io: WidgetIO,
@@ -659,20 +662,25 @@ export async function runSelectionScreen(
     savedToolIds?: string[];
   } = {},
 ): Promise<SelectionScreenResult | null> {
-  if (items.length === 0) {
-    return null;
-  }
-
   const sorted = sortWorkItems(items);
-  const checkboxItems = toCheckboxItems(sorted);
-
-  // Prepend __ALL__ sentinel (checked by default)
-  const allSentinel: CheckboxItem = {
-    id: ALL_SENTINEL_ID,
-    label: "All \u2014 includes future items",
-    checked: true,
-  };
-  const checkboxItemsWithAll = [allSentinel, ...checkboxItems];
+  const hasCurrentItems = sorted.length > 0;
+  const checkboxItemsWithAll: CheckboxItem[] = hasCurrentItems
+    ? [
+      {
+        id: ALL_SENTINEL_ID,
+        label: "All \u2014 includes future items",
+        checked: true,
+      },
+      ...toCheckboxItems(sorted),
+    ]
+    : [
+      {
+        id: FUTURE_TASKS_ID,
+        label: "Future tasks",
+        detail: "Start automatically when new work arrives",
+        checked: true,
+      },
+    ];
 
   // Build dependency validator: warn when selected items have deps in the
   // list that aren't selected (those deps will be treated as already complete).
@@ -696,9 +704,15 @@ export async function runSelectionScreen(
   // Step 1: Item selection
   io.write(CLEAR_SCREEN + HIDE_CURSOR);
   const itemResult = await runCheckboxList(io, checkboxItemsWithAll, {
-    title: `Ninthwave \u00b7 Select work items (${sorted.length} available)`,
-    linkAllId: ALL_SENTINEL_ID,
-    validate: validateDeps,
+    title: hasCurrentItems
+      ? `Ninthwave \u00b7 Select work items (${sorted.length} available)`
+      : "Ninthwave \u00b7 No work items queued",
+    ...(hasCurrentItems
+      ? {
+        linkAllId: ALL_SENTINEL_ID,
+        validate: validateDeps,
+      }
+      : {}),
   });
 
   if (itemResult.cancelled) {
@@ -706,8 +720,11 @@ export async function runSelectionScreen(
     return null;
   }
 
-  // Filter __ALL__ sentinel from the selected ids
-  const selectedItemIds = itemResult.selectedIds.filter((id) => id !== ALL_SENTINEL_ID);
+  // Filter synthetic sentinels from the selected ids.
+  const futureOnly = !hasCurrentItems && itemResult.selectedIds.includes(FUTURE_TASKS_ID);
+  const selectedItemIds = itemResult.selectedIds.filter(
+    (id) => id !== ALL_SENTINEL_ID && id !== FUTURE_TASKS_ID,
+  );
 
   // Local-first defaults -- no prompts for these
   const mergeStrategy: MergeStrategy = "manual";
@@ -752,7 +769,11 @@ export async function runSelectionScreen(
   // Step 3: Confirmation summary
   // Items summary
   let itemLines: string[];
-  if (itemResult.allSelected) {
+  if (futureOnly) {
+    itemLines = [
+      `${BOLD}Items:${RESET}  Future tasks ${DIM}(start when new work arrives)${RESET}`,
+    ];
+  } else if (itemResult.allSelected) {
     itemLines = [
       `${BOLD}Items:${RESET}  All ${DIM}(dynamic \u2014 new items auto-included)${RESET}`,
     ];
@@ -796,6 +817,7 @@ export async function runSelectionScreen(
   return {
     itemIds: selectedItemIds,
     allSelected: itemResult.allSelected,
+    futureOnly,
     mergeStrategy,
     wipLimit,
     reviewMode,

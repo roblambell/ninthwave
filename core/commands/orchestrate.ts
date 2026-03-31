@@ -2156,6 +2156,7 @@ export async function cmdOrchestrate(
       process.exit(0);
     }
     itemIds = result.itemIds;
+    watchMode = watchMode || result.allSelected || result.futureOnly === true;
     // Local-first: merge strategy, WIP, and review mode use CLI-parsed values
     // (which default to manual, computed WIP, and reviews off).
     // The interactive flow no longer prompts for these.

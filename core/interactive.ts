@@ -28,6 +28,8 @@ export interface InteractiveResult {
   mergeStrategy: MergeStrategy;
   wipLimit: number;
   allSelected: boolean;
+  /** True when starting with no current items and watching future work only. */
+  futureOnly?: boolean;
   reviewMode: "all" | "mine" | "off";
   connectionAction: ConnectionAction | null;
   /** Selected AI tool ID, undefined when the step was skipped. */
@@ -418,10 +420,14 @@ export async function confirmSummary(
   console.log();
   console.log(`${BOLD}━━━ Summary ━━━${RESET}`);
   console.log();
-  console.log(`  ${BOLD}Items (${result.itemIds.length}):${RESET}`);
-  for (const id of result.itemIds) {
-    const t = itemMap.get(id);
-    console.log(`    ${CYAN}${id}${RESET}  ${t?.title ?? ""}`);
+  if (result.futureOnly) {
+    console.log(`  ${BOLD}Items:${RESET}  Future tasks ${DIM}(start when new work arrives)${RESET}`);
+  } else {
+    console.log(`  ${BOLD}Items (${result.itemIds.length}):${RESET}`);
+    for (const id of result.itemIds) {
+      const t = itemMap.get(id);
+      console.log(`    ${CYAN}${id}${RESET}  ${t?.title ?? ""}`);
+    }
   }
   console.log(`  ${BOLD}Merge strategy:${RESET}  ${result.mergeStrategy}`);
   console.log(`  ${BOLD}WIP limit:${RESET}       ${result.wipLimit}`);
@@ -485,6 +491,7 @@ export async function runTuiSelectionFlow(
       mergeStrategy: result.mergeStrategy,
       wipLimit: result.wipLimit,
       allSelected: result.allSelected,
+      futureOnly: result.futureOnly,
       reviewMode: result.reviewMode,
       connectionAction: result.connectionAction,
       aiTool: result.aiTool,
@@ -608,6 +615,7 @@ async function runReadlineFlow(
     mergeStrategy,
     wipLimit,
     allSelected: itemResult.allSelected,
+    futureOnly: false,
     reviewMode,
     connectionAction,
     aiTool,
