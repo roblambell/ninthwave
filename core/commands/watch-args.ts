@@ -36,7 +36,7 @@ export interface ParsedWatchArgs {
 
 export function parseWatchArgs(args: string[]): ParsedWatchArgs {
   const itemIds: string[] = [];
-  let mergeStrategy: MergeStrategy = "auto";
+  let mergeStrategy: MergeStrategy = "manual";
   let wipLimitOverride: number | undefined;
   let pollIntervalOverride: number | undefined;
   let frictionDir: string | undefined;

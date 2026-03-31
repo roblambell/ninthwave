@@ -2003,19 +2003,11 @@ export async function cmdOrchestrate(
       process.exit(0);
     }
     itemIds = result.itemIds;
-    mergeStrategy = result.mergeStrategy;
-    wipLimit = result.wipLimit;
-    // Capture review mode from interactive selection
-    if (result.reviewMode === "off") {
-      interactiveSkipReview = true;
-    }
-    if (result.connectionAction) {
-      if (result.connectionAction.type === "connect") {
-        connectMode = true;
-      } else if (result.connectionAction.type === "join") {
-        crewCode = result.connectionAction.code;
-      }
-    }
+    // Local-first: merge strategy, WIP, and review mode use CLI-parsed values
+    // (which default to manual, computed WIP, and reviews off).
+    // The interactive flow no longer prompts for these.
+    interactiveSkipReview = result.reviewMode === "off";
+    // connectionAction is always null (local) from local-first interactive flow
     // Capture AI tool choice from TUI -- flows to selectAiTools via toolOverride
     if (result.aiTools && result.aiTools.length > 0) {
       toolOverride = result.aiTools.join(",");
@@ -2763,21 +2755,8 @@ export async function cmdOrchestrate(
           }
         }
         if (newDomains.size > 0) ensureDomainLabels(projectRoot, [...newDomains]);
-        wipLimit = interactiveResult.wipLimit;
-        mergeStrategy = interactiveResult.mergeStrategy;
-        orch.setMergeStrategy(mergeStrategy);
-
-        // Update review config based on user's review mode selection
-        if (interactiveResult.reviewMode === "all") {
-          loopConfig.reviewExternal = true;
-          orch.setSkipReview(false);
-        } else if (interactiveResult.reviewMode === "off") {
-          loopConfig.reviewExternal = false;
-          orch.setSkipReview(true);
-        } else {
-          // "items" mode: review work items only, not external PRs
-          orch.setSkipReview(false);
-        }
+        // Local-first: keep current session's merge/review/WIP policy.
+        // The interactive flow only selects items and AI tools.
 
         // Restore keyboard shortcuts for the main TUI
         cleanupKeyboard = setupKeyboardShortcuts(abortController, log, process.stdin, tuiState);
@@ -2787,7 +2766,6 @@ export async function cmdOrchestrate(
           level: "info",
           event: "run_more_restart",
           newItems: interactiveResult.itemIds,
-          reviewMode: interactiveResult.reviewMode,
         });
         continue; // Restart the orchestrate loop
       }
