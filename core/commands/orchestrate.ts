@@ -40,7 +40,7 @@ import { confirmPrompt } from "../prompt.ts";
 import { shouldEnterInteractive, runInteractiveFlow } from "../interactive.ts";
 import type { WorkItem, LogEntry } from "../types.ts";
 import { ID_IN_FILENAME, PRIORITY_NUM } from "../types.ts";
-import { loadConfig, saveConfig, loadUserConfig } from "../config.ts";
+import { loadConfig, saveConfig, loadUserConfig, saveUserConfig } from "../config.ts";
 import { preflight } from "../preflight.ts";
 import {
   collectRunMetrics,
@@ -1976,8 +1976,11 @@ export async function cmdOrchestrate(
   }
 
   // Compute memory-aware WIP default, allow --wip-limit to override
+  // Precedence: CLI --wip-limit > persisted user preference > computed default
   const computedWipLimit = computeDefaultWipLimit();
-  let wipLimit = wipLimitOverride ?? computedWipLimit;
+  const persistedUserCfg = loadUserConfig();
+  const wipLimitFromCli = wipLimitOverride !== undefined;
+  let wipLimit = wipLimitOverride ?? persistedUserCfg.wip_limit ?? computedWipLimit;
 
   // Parse work items (needed for both interactive and flag-based modes)
   // Pass projectRoot to filter to only items pushed to origin/main
@@ -1989,8 +1992,7 @@ export async function cmdOrchestrate(
     // Pre-detect tools and config for TUI flow
     const installedTools = detectInstalledAITools();
     const preConfig = loadConfig(projectRoot);
-    const userCfg = loadUserConfig();
-    const skipToolStep = !!toolOverride || (userCfg.ai_tools?.length ?? 0) > 0;
+    const skipToolStep = !!toolOverride || (persistedUserCfg.ai_tools?.length ?? 0) > 0;
     const defaultReviewMode = preConfig.review_external ? "all" as const : "mine" as const;
 
     const result = await runInteractiveFlow(workItems, wipLimit, {
@@ -2021,8 +2023,9 @@ export async function cmdOrchestrate(
     level: "info",
     event: "wip_limit_resolved",
     computedDefault: computedWipLimit,
+    persistedUserWip: persistedUserCfg.wip_limit,
     effectiveLimit: wipLimit,
-    overridden: wipLimitOverride !== undefined,
+    overridden: wipLimitFromCli,
     totalMemoryGB: Math.round(totalmem() / (1024 ** 3)),
   });
 
@@ -2431,6 +2434,25 @@ export async function cmdOrchestrate(
     onExtendTimeout: (itemId) => orch.extendTimeout(itemId),
     onStrategyChange: (strategy) => {
       orch.setMergeStrategy(strategy);
+    },
+    onWipChange: (delta) => {
+      const newLimit = Math.max(1, orch.config.wipLimit + delta);
+      if (newLimit === orch.config.wipLimit) return;
+      const oldLimit = orch.config.wipLimit;
+      orch.setWipLimit(newLimit);
+      wipLimit = newLimit;
+      log({
+        ts: new Date().toISOString(),
+        level: "info",
+        event: "wip_limit_changed",
+        oldLimit,
+        newLimit,
+        source: "keyboard",
+      });
+      // Persist to user-level config unless this run used an explicit CLI --wip-limit
+      if (!wipLimitFromCli) {
+        try { saveUserConfig({ wip_limit: newLimit }); } catch { /* best-effort */ }
+      }
     },
     onPanelModeChange: (mode) => {
       writeLayoutPreference(projectRoot, mode);

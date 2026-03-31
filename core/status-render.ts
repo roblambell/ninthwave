@@ -2053,6 +2053,7 @@ export function renderHelpOverlay(
   sections.push([
     `${BOLD}Keyboard Shortcuts${RESET}`,
     `  Shift+Tab   Cycle merge strategy`,
+    `  +/-         Adjust WIP limit`,
     `  ?           Toggle this help overlay`,
     `  Enter/i     Item detail panel`,
     `  Escape      Close overlay/detail`,

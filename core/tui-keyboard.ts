@@ -103,6 +103,8 @@ export interface TuiState {
   onStrategyChange?: (strategy: MergeStrategy) => void;
   /** Called when the user cycles panel mode via Tab (for preference persistence). */
   onPanelModeChange?: (mode: PanelMode) => void;
+  /** Called when the user presses +/- to adjust WIP limit. Receives the delta (+1 or -1). */
+  onWipChange?: (delta: number) => void;
   /** Called after any key that should trigger an immediate re-render. */
   onUpdate?: () => void;
   /** Resolve item ID at the given index in the visible item list. */
@@ -307,6 +309,16 @@ export function setupKeyboardShortcuts(
           newStrategy: tuiState.mergeStrategy,
         });
         tuiState.onStrategyChange?.(tuiState.mergeStrategy);
+        break;
+      }
+      case "+":
+      case "=": { // + (or = without shift) -- increase WIP limit
+        tuiState.onWipChange?.(1);
+        break;
+      }
+      case "-":
+      case "_": { // - (or _ with shift) -- decrease WIP limit
+        tuiState.onWipChange?.(-1);
         break;
       }
       default:
