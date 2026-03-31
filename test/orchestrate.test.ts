@@ -2130,6 +2130,91 @@ describe("setupKeyboardShortcuts", () => {
     expect(visited).toEqual(["manual", "auto", "manual", "auto"]);
   });
 
+  // ── +/- WIP limit adjustment ──────────────────────────────────────
+
+  it("'+' calls onWipChange with +1", () => {
+    const ac = new AbortController();
+    const stdin = mockStdin();
+    const deltas: number[] = [];
+    const tuiState: TuiState = {
+      scrollOffset: 0,
+      viewOptions: { mergeStrategy: "auto" },
+      mergeStrategy: "auto",
+      bypassEnabled: false,
+      ctrlCPending: false,
+      ctrlCTimestamp: 0,
+      showHelp: false,
+      onWipChange: (d) => deltas.push(d),
+    };
+
+    setupKeyboardShortcuts(ac, () => {}, stdin, tuiState);
+    (stdin as any)._emit("data", "+");
+
+    expect(deltas).toEqual([1]);
+  });
+
+  it("'-' calls onWipChange with -1", () => {
+    const ac = new AbortController();
+    const stdin = mockStdin();
+    const deltas: number[] = [];
+    const tuiState: TuiState = {
+      scrollOffset: 0,
+      viewOptions: { mergeStrategy: "auto" },
+      mergeStrategy: "auto",
+      bypassEnabled: false,
+      ctrlCPending: false,
+      ctrlCTimestamp: 0,
+      showHelp: false,
+      onWipChange: (d) => deltas.push(d),
+    };
+
+    setupKeyboardShortcuts(ac, () => {}, stdin, tuiState);
+    (stdin as any)._emit("data", "-");
+
+    expect(deltas).toEqual([-1]);
+  });
+
+  it("'=' (unshifted +) calls onWipChange with +1", () => {
+    const ac = new AbortController();
+    const stdin = mockStdin();
+    const deltas: number[] = [];
+    const tuiState: TuiState = {
+      scrollOffset: 0,
+      viewOptions: { mergeStrategy: "auto" },
+      mergeStrategy: "auto",
+      bypassEnabled: false,
+      ctrlCPending: false,
+      ctrlCTimestamp: 0,
+      showHelp: false,
+      onWipChange: (d) => deltas.push(d),
+    };
+
+    setupKeyboardShortcuts(ac, () => {}, stdin, tuiState);
+    (stdin as any)._emit("data", "=");
+
+    expect(deltas).toEqual([1]);
+  });
+
+  it("no-op when onWipChange not provided", () => {
+    const ac = new AbortController();
+    const stdin = mockStdin();
+    const tuiState: TuiState = {
+      scrollOffset: 0,
+      viewOptions: { mergeStrategy: "auto" },
+      mergeStrategy: "auto",
+      bypassEnabled: false,
+      ctrlCPending: false,
+      ctrlCTimestamp: 0,
+      showHelp: false,
+    };
+
+    setupKeyboardShortcuts(ac, () => {}, stdin, tuiState);
+    // Should not throw
+    (stdin as any)._emit("data", "+");
+    (stdin as any)._emit("data", "-");
+    expect(ac.signal.aborted).toBe(false);
+  });
+
   // ── Ctrl+C double-tap ──────────────────────────────────────────────
 
   it("first Ctrl+C sets ctrlCPending, does not abort", () => {

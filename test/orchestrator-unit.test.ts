@@ -471,6 +471,64 @@ describe("setMergeStrategy", () => {
   });
 });
 
+// ── setWipLimit ─────────────────────────────────────────────────────
+
+describe("setWipLimit", () => {
+  it("changes config.wipLimit immediately", () => {
+    const orch = new Orchestrator({ wipLimit: 3 });
+    expect(orch.config.wipLimit).toBe(3);
+    orch.setWipLimit(5);
+    expect(orch.config.wipLimit).toBe(5);
+  });
+
+  it("clamps to minimum of 1", () => {
+    const orch = new Orchestrator({ wipLimit: 3 });
+    orch.setWipLimit(0);
+    expect(orch.config.wipLimit).toBe(1);
+    orch.setWipLimit(-5);
+    expect(orch.config.wipLimit).toBe(1);
+  });
+
+  it("floors fractional values", () => {
+    const orch = new Orchestrator({ wipLimit: 3 });
+    orch.setWipLimit(4.9);
+    expect(orch.config.wipLimit).toBe(4);
+  });
+
+  it("clears memory-adjusted effective limit", () => {
+    const orch = new Orchestrator({ wipLimit: 5 });
+    orch.setEffectiveWipLimit(2); // simulate memory pressure
+    expect(orch.effectiveWipLimit).toBe(2);
+    orch.setWipLimit(4);
+    // After setWipLimit, effectiveWipLimit should reflect the new configured value
+    expect(orch.effectiveWipLimit).toBe(4);
+  });
+
+  it("updates wipSlots calculation immediately", () => {
+    const orch = new Orchestrator({ wipLimit: 2 });
+    orch.addItem(makeWorkItem("H-1-1"));
+    orch.hydrateState("H-1-1", "implementing"); // 1 WIP slot used
+    expect(orch.wipSlots).toBe(1);
+    orch.setWipLimit(4);
+    expect(orch.wipSlots).toBe(3);
+  });
+
+  it("reducing WIP below current count does not eject items", () => {
+    const orch = new Orchestrator({ wipLimit: 3 });
+    orch.addItem(makeWorkItem("H-1-1"));
+    orch.addItem(makeWorkItem("H-1-2"));
+    orch.addItem(makeWorkItem("H-1-3"));
+    orch.hydrateState("H-1-1", "implementing");
+    orch.hydrateState("H-1-2", "ci-pending");
+    orch.hydrateState("H-1-3", "implementing");
+    expect(orch.wipCount).toBe(3);
+    orch.setWipLimit(1);
+    // All items stay in their current states -- wipSlots just goes to 0
+    expect(orch.wipCount).toBe(3);
+    expect(orch.wipSlots).toBe(0);
+  });
+});
+
 // ── handleImplementing (tested via processTransitions) ───────────────
 
 describe("handleImplementing", () => {
