@@ -217,6 +217,35 @@ describe("seedAgentFiles", () => {
     rmSync(worktree, { recursive: true, force: true });
   });
 
+  it("preserves inbox-listener instructions in seeded implementer prompt", () => {
+    const hubRoot = makeTmpDir();
+    const worktree = makeTmpDir();
+    const localContent = [
+      "# Implementer agent",
+      "## 0. Open Inbox Listener",
+      "nw inbox --wait YOUR_TODO_ID",
+    ].join("\n");
+
+    mkdirSync(join(hubRoot, "agents"), { recursive: true });
+    writeFileSync(join(hubRoot, "agents", "implementer.md"), localContent);
+
+    const deps = createDeps({
+      run: vi.fn(() => ({
+        stdout: "",
+        stderr: "fatal: not found",
+        exitCode: 128,
+      })) as any,
+    });
+
+    seedAgentFiles(worktree, hubRoot, deps);
+
+    const claudeAgent = join(worktree, ".claude/agents/implementer.md");
+    expect(readFileSync(claudeAgent, "utf-8")).toContain("nw inbox --wait YOUR_TODO_ID");
+
+    rmSync(hubRoot, { recursive: true, force: true });
+    rmSync(worktree, { recursive: true, force: true });
+  });
+
   it("skips files that already exist in worktree", () => {
     const hubRoot = makeTmpDir();
     const worktree = makeTmpDir();

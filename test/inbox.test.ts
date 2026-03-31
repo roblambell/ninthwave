@@ -4,8 +4,7 @@ import {
   checkInbox,
   waitForInbox,
   cleanInbox,
-  inboxFilePath,
-  inboxDir,
+  itemInboxDir,
   cmdInbox,
   type InboxIO,
   type InboxDeps,
@@ -19,6 +18,12 @@ function makeMemIO() {
   const io: InboxIO = {
     existsSync: (p) => files.has(p) || dirs.has(p),
     mkdirSync: (p) => { dirs.add(p); },
+    readdirSync: (p) => {
+      const prefix = `${p}/`;
+      return [...files.keys()]
+        .filter((file) => file.startsWith(prefix) && !file.slice(prefix.length).includes("/"))
+        .map((file) => file.slice(prefix.length));
+    },
     readFileSync: (p) => {
       const content = files.get(p);
       if (content === undefined) throw new Error(`ENOENT: ${p}`);
@@ -43,22 +48,27 @@ describe("inbox", () => {
     it("writes a message atomically", () => {
       const { io, files } = makeMemIO();
       writeInbox("/fake/project", "H-FOO-1", "Fix CI failure", io);
-      const path = inboxFilePath("/fake/project", "H-FOO-1");
-      expect(files.get(path)).toBe("Fix CI failure");
+      const prefix = `${itemInboxDir("/fake/project", "H-FOO-1")}/`;
+      const queued = [...files.entries()].filter(([path]) => path.startsWith(prefix));
+      expect(queued).toHaveLength(1);
+      expect(queued[0]![1]).toBe("Fix CI failure");
     });
 
     it("creates inbox directory if missing", () => {
       const { io, dirs } = makeMemIO();
       writeInbox("/fake/project", "H-FOO-2", "msg", io);
-      expect(dirs.has(inboxDir("/fake/project"))).toBe(true);
+      expect(dirs.has(itemInboxDir("/fake/project", "H-FOO-2"))).toBe(true);
     });
 
-    it("overwrites existing message", () => {
+    it("queues back-to-back messages instead of overwriting", () => {
       const { io, files } = makeMemIO();
       writeInbox("/fake/project", "H-FOO-1", "first", io);
       writeInbox("/fake/project", "H-FOO-1", "second", io);
-      const path = inboxFilePath("/fake/project", "H-FOO-1");
-      expect(files.get(path)).toBe("second");
+      const prefix = `${itemInboxDir("/fake/project", "H-FOO-1")}/`;
+      const queued = [...files.entries()]
+        .filter(([path]) => path.startsWith(prefix))
+        .sort(([a], [b]) => a.localeCompare(b));
+      expect(queued.map(([, content]) => content)).toEqual(["first", "second"]);
     });
   });
 
@@ -73,7 +83,16 @@ describe("inbox", () => {
       writeInbox("/fake/project", "H-FOO-1", "hello", io);
       const msg = checkInbox("/fake/project", "H-FOO-1", io);
       expect(msg).toBe("hello");
-      expect(files.has(inboxFilePath("/fake/project", "H-FOO-1"))).toBe(false);
+      expect(files.size).toBe(0);
+    });
+
+    it("returns queued messages in order", () => {
+      const { io } = makeMemIO();
+      writeInbox("/fake/project", "H-FOO-1", "first", io);
+      writeInbox("/fake/project", "H-FOO-1", "second", io);
+      expect(checkInbox("/fake/project", "H-FOO-1", io)).toBe("first");
+      expect(checkInbox("/fake/project", "H-FOO-1", io)).toBe("second");
+      expect(checkInbox("/fake/project", "H-FOO-1", io)).toBeNull();
     });
   });
 
@@ -113,8 +132,9 @@ describe("inbox", () => {
     it("removes inbox file if exists", () => {
       const { io, files } = makeMemIO();
       writeInbox("/fake/project", "H-FOO-1", "msg", io);
+      writeInbox("/fake/project", "H-FOO-1", "msg-2", io);
       cleanInbox("/fake/project", "H-FOO-1", io);
-      expect(files.has(inboxFilePath("/fake/project", "H-FOO-1"))).toBe(false);
+      expect(files.size).toBe(0);
     });
 
     it("no-ops when file does not exist", () => {
@@ -133,7 +153,9 @@ describe("inbox", () => {
         getBranch: () => "ninthwave/H-FOO-1",
       };
       const out = captureOutput(() => cmdInbox(["--write", "H-FOO-1", "-m", "Fix it"], "/fake/project", deps));
-      expect(files.get(inboxFilePath("/fake/project", "H-FOO-1"))).toBe("Fix it");
+      const prefix = `${itemInboxDir("/fake/project", "H-FOO-1")}/`;
+      const queued = [...files.entries()].filter(([path]) => path.startsWith(prefix));
+      expect(queued.map(([, content]) => content)).toEqual(["Fix it"]);
       expect(out).toContain("wrote message");
     });
 
@@ -164,7 +186,9 @@ describe("inbox", () => {
         getBranch: () => "ninthwave/AUTO-DETECT-1",
       };
       captureOutput(() => cmdInbox(["--write", "-m", "auto msg"], "/fake/project", deps));
-      expect(files.get(inboxFilePath("/fake/project", "AUTO-DETECT-1"))).toBe("auto msg");
+      const prefix = `${itemInboxDir("/fake/project", "AUTO-DETECT-1")}/`;
+      const queued = [...files.entries()].filter(([path]) => path.startsWith(prefix));
+      expect(queued.map(([, content]) => content)).toEqual(["auto msg"]);
     });
 
     it("dies when no item ID and not on ninthwave branch", () => {

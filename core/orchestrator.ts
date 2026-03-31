@@ -1255,13 +1255,13 @@ export class Orchestrator {
       case "notify-ci-failure":
         return executeNotifyCiFailure(handle, item, action, ctx, deps);
       case "notify-review":
-        return executeNotifyReview(item, action, deps);
+        return executeNotifyReview(item, action, ctx, deps);
       case "clean":
         return executeClean(item, ctx, deps);
       case "workspace-close":
         return executeWorkspaceClose(item, deps);
       case "rebase":
-        return executeRebase(item, action, deps);
+        return executeRebase(item, action, ctx, deps);
       case "daemon-rebase":
         return executeDaemonRebase(handle, item, action, ctx, deps);
       case "retry":
@@ -1281,7 +1281,7 @@ export class Orchestrator {
       case "clean-forward-fixer":
         return executeCleanForwardFixer(item, deps);
       case "send-message":
-        return executeSendMessage(item, action, deps);
+        return executeSendMessage(item, action, ctx, deps);
       case "set-commit-status":
         return executeSetCommitStatus(item, action, ctx, deps);
       case "post-review":

@@ -78,17 +78,7 @@ function attemptSend(
   return verifyDelivery(workspaceRef, message, runner, true);
 }
 
-/**
- * Fallback: use `cmux send` for non-terminal surfaces (TUIs like Copilot CLI / Claude Code).
- *
- * Uses a "belt and suspenders" approach: after delivering text, tries both
- * `cmux send "\r"` (carriage return via character stream) and `cmux send-key Return`
- * (key event). If neither submits on the first attempt, retries with verification.
- *
- * This addresses an intermittent race condition where `send-key Return` is dropped
- * when the TUI is mid-render after receiving the keystroke text. Extra Returns are
- * harmless -- blank input does nothing in Copilot/Claude.
- */
+/** Fallback: use `cmux send` for non-terminal surfaces (TUIs like Claude Code). */
 function attemptDirectSend(
   workspaceRef: string,
   message: string,
@@ -106,27 +96,23 @@ function attemptDirectSend(
   if (result.exitCode !== 0) return false;
 
   // Wait for keystrokes to be processed by the TUI input handler.
+  // cmux send returns after queuing keystrokes, but delivery to the target
+  // surface is asynchronous. 500ms provides generous headroom for Copilot
+  // and other TUIs to process the full message before we send Return.
   sleep(500);
 
-  // Try multiple submission methods with verification.
-  // Copilot CLI's TUI can drop `send-key Return` during state transitions,
-  // so we retry up to 4 times total, using both delivery paths each attempt.
-  const maxSubmitAttempts = 4;
-  for (let i = 0; i < maxSubmitAttempts; i++) {
-    // Carriage return via character stream -- may trigger Enter on some TUIs
-    runner("cmux", ["send", "--workspace", workspaceRef, "\\r"]);
-    sleep(100);
+  // Submit with send-key Return (same pattern as the paste-buffer path)
+  const key = runner("cmux", [
+    "send-key",
+    "--workspace",
+    workspaceRef,
+    "Return",
+  ]);
+  if (key.exitCode !== 0) return false;
 
-    // Key event -- the standard approach, works most of the time
-    runner("cmux", ["send-key", "--workspace", workspaceRef, "Return"]);
-    sleep(200);
-
-    if (verifyDelivery(workspaceRef, message, runner, false)) {
-      return true;
-    }
-  }
-
-  return false;
+  // Brief wait then verify
+  sleep(100);
+  return verifyDelivery(workspaceRef, message, runner, false);
 }
 
 /**

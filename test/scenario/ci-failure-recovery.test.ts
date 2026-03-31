@@ -87,8 +87,8 @@ describe("scenario: CI failure recovery", () => {
     // CI fail count should be at least 1 from the failure
     expect(finalItem!.ciFailCount).toBeGreaterThanOrEqual(1);
 
-    // notify-ci-failure action should have been emitted (sendMessage called)
-    expect(actionDeps.sendMessage).toHaveBeenCalled();
+    // notify-ci-failure action should have queued an inbox message for the worker
+    expect(actionDeps.writeInbox).toHaveBeenCalled();
     expect(actionDeps.prMerge).toHaveBeenCalled();
   });
 
@@ -205,13 +205,16 @@ describe("scenario: CI failure recovery", () => {
     expect(finalItem!.ciFailCount).toBeGreaterThanOrEqual(1);
     expect(finalItem!.failureReason).toContain("merge conflicts");
 
-    // Verify daemon-rebase action was emitted by checking that sendMessage
-    // was called with a rebase message (executeDaemonRebase falls through
-    // to sendMessage when daemonRebase dep is not available)
-    const sendCalls = (actionDeps.sendMessage as ReturnType<typeof import("vitest").vi.fn>).mock.calls;
-    const rebaseMessages = sendCalls.filter(
-      ([_ref, msg]: [string, string]) =>
-        typeof msg === "string" && msg.includes("Rebase"),
+    // Verify daemon-rebase action queued a rebase message for the live worker.
+    const inboxCalls = (actionDeps.writeInbox as ReturnType<typeof import("vitest").vi.fn>).mock.calls;
+    const rebaseMessages = inboxCalls.filter(
+      (call) => {
+        const [projectRoot, itemId, msg] = call as [string, string, string];
+        return projectRoot === "/tmp/worktree"
+          && itemId === "CF-3"
+          && typeof msg === "string"
+          && msg.includes("Rebase");
+      },
     );
     expect(rebaseMessages.length).toBeGreaterThanOrEqual(1);
   });
@@ -316,11 +319,16 @@ describe("scenario: CI failure recovery", () => {
     expect(finalItem).toBeDefined();
     expect(finalItem!.state).toBe("ci-failed");
 
-    // sendMessage should have been called with a CI failure message
-    const sendCalls = (actionDeps.sendMessage as ReturnType<typeof import("vitest").vi.fn>).mock.calls;
-    const ciFailureMessages = sendCalls.filter(
-      ([_ref, msg]: [string, string]) =>
-        typeof msg === "string" && msg.includes("CI"),
+    // Inbox should have been queued with a CI failure message
+    const inboxCalls = (actionDeps.writeInbox as ReturnType<typeof import("vitest").vi.fn>).mock.calls;
+    const ciFailureMessages = inboxCalls.filter(
+      (call) => {
+        const [projectRoot, itemId, msg] = call as [string, string, string];
+        return projectRoot === "/tmp/worktree"
+          && itemId === "CF-5"
+          && typeof msg === "string"
+          && msg.includes("CI");
+      },
     );
     expect(ciFailureMessages.length).toBeGreaterThanOrEqual(1);
   });

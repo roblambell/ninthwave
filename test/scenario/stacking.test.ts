@@ -188,11 +188,17 @@ describe("scenario: stacking", () => {
     expect(itemB.workspaceRef).toBeDefined();
     expect(itemB.baseBranch).toBe("ninthwave/A-1");
 
-    // sendMessage should have been called with a resume message for B
-    const sendCalls = (actionDeps.sendMessage as ReturnType<typeof vi.fn>).mock.calls;
-    const resumeMessages = sendCalls.filter(
-      ([_ref, msg]: [string, string]) =>
-        typeof msg === "string" && msg.includes("Resume") && msg.includes("A-1"),
+    // Inbox delivery should queue a resume message for B
+    const inboxCalls = (actionDeps.writeInbox as ReturnType<typeof vi.fn>).mock.calls;
+    const resumeMessages = inboxCalls.filter(
+      (call) => {
+        const [projectRoot, itemId, msg] = call as [string, string, string];
+        return projectRoot === "/tmp/worktree"
+          && itemId === "B-1"
+          && typeof msg === "string"
+          && msg.includes("Resume")
+          && msg.includes("A-1");
+      },
     );
     expect(resumeMessages.length).toBeGreaterThanOrEqual(1);
   });

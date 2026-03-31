@@ -139,58 +139,6 @@ describe("attemptSend", () => {
     expect(subcommands).toContain("send");
   });
 
-  it("direct send uses both send \\r and send-key Return", () => {
-    const { runner, calls } = mockRunner({
-      "paste-buffer": fail("not a terminal"),
-      "read-screen": ok("Thinking...\nclaude> "),
-    });
-    const { sleep } = mockSleeper();
-    const deps: SendMessageDeps = { runner, sleep, maxRetries: 0 };
-
-    expect(sendMessageImpl("ws1", "hello", deps)).toBe(true);
-
-    // Should call cmux send with "\r" (carriage return escape)
-    const sendCalls = calls.filter((c) => c.args[0] === "send");
-    const crSend = sendCalls.find((c) => c.args.includes("\\r"));
-    expect(crSend).toBeDefined();
-
-    // Should also call send-key with Return
-    const sendKeyCalls = calls.filter((c) => c.args[0] === "send-key");
-    expect(sendKeyCalls.length).toBeGreaterThanOrEqual(1);
-    expect(sendKeyCalls[0]!.args).toContain("Return");
-  });
-
-  it("direct send retries submission when verify fails", () => {
-    const { runner, calls } = mockRunner({
-      "paste-buffer": fail("not a terminal"),
-      // First verify: stuck. Second verify: delivered.
-      "read-screen": [
-        ok("Previous output\nhello"),  // stuck on first submit attempt
-        ok("Thinking...\nclaude> "),   // delivered on second submit attempt
-      ],
-    });
-    const { sleep } = mockSleeper();
-    const deps: SendMessageDeps = { runner, sleep, maxRetries: 0 };
-
-    expect(sendMessageImpl("ws1", "hello", deps)).toBe(true);
-
-    // Should have called send-key Return at least twice (retry)
-    const sendKeyCalls = calls.filter((c) => c.args[0] === "send-key");
-    expect(sendKeyCalls.length).toBeGreaterThanOrEqual(2);
-  });
-
-  it("direct send returns false after all submit attempts exhausted", () => {
-    const { runner } = mockRunner({
-      "paste-buffer": fail("not a terminal"),
-      // Every verify shows message stuck
-      "read-screen": ok("Previous output\nhello"),
-    });
-    const { sleep } = mockSleeper();
-    const deps: SendMessageDeps = { runner, sleep, maxRetries: 0 };
-
-    expect(sendMessageImpl("ws1", "hello", deps)).toBe(false);
-  });
-
   it("returns false when both paste-buffer and direct send fail", () => {
     const { runner } = mockRunner({
       "paste-buffer": fail("not a terminal"),

@@ -2839,13 +2839,14 @@ describe("orchestrateLoop post-merge conflict detection", () => {
     // checkPrMergeable: T-1-2 (PR #11) has conflicts, T-1-3 (PR #12) is fine
     const checkPrMergeable = vi.fn((_: string, prNum: number) => prNum !== 11);
     const sendMessage = vi.fn(() => true);
+    const writeInbox = vi.fn();
     const warn = vi.fn();
 
     const deps: OrchestrateLoopDeps = {
       buildSnapshot,
       sleep: () => Promise.resolve(),
       log: () => {},
-      actionDeps: mockActionDeps({ checkPrMergeable, sendMessage, warn }),
+      actionDeps: mockActionDeps({ checkPrMergeable, sendMessage, writeInbox, warn }),
     };
 
     await orchestrateLoop(orch, defaultCtx, deps, { maxIterations: 200 });
@@ -2854,11 +2855,13 @@ describe("orchestrateLoop post-merge conflict detection", () => {
     expect(checkPrMergeable).toHaveBeenCalledWith(defaultCtx.projectRoot, 11);
     expect(checkPrMergeable).toHaveBeenCalledWith(defaultCtx.projectRoot, 12);
 
-    // Rebase message should be sent to T-1-2 (conflicting)
-    expect(sendMessage).toHaveBeenCalledWith(
-      "workspace:2",
+    // Rebase message should be queued to T-1-2 (conflicting)
+    expect(writeInbox).toHaveBeenCalledWith(
+      `${defaultCtx.worktreeDir}/ninthwave-T-1-2`,
+      "T-1-2",
       expect.stringContaining("merge conflicts"),
     );
+    expect(sendMessage).not.toHaveBeenCalled();
   });
 
   it("does not check sibling PRs when checkPrMergeable is not provided", async () => {

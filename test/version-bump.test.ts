@@ -51,8 +51,22 @@ function makeTmpDir(): string {
 // Strip git env vars so temp repos aren't poisoned by pre-commit hook context.
 // GIT_DIR, GIT_INDEX_FILE, etc. are set by git when running hooks and leak into
 // child processes, breaking tests that create isolated git repos.
-for (const key of Object.keys(process.env)) {
-  if (key.startsWith("GIT_")) delete process.env[key];
+function withGitEnvCleared<T>(fn: () => T): T {
+  const saved = new Map<string, string>();
+  for (const key of Object.keys(process.env)) {
+    if (!key.startsWith("GIT_")) continue;
+    const value = process.env[key];
+    if (value !== undefined) saved.set(key, value);
+    delete process.env[key];
+  }
+
+  try {
+    return fn();
+  } finally {
+    for (const [key, value] of saved) {
+      process.env[key] = value;
+    }
+  }
 }
 
 function git(args: string[]): void {
@@ -154,7 +168,7 @@ describe("cmdVersionBump", { timeout: 30_000 }, () => {
     const origLog = console.log;
     console.log = (msg: string) => logs.push(String(msg));
     try {
-      cmdVersionBump(repo);
+      withGitEnvCleared(() => cmdVersionBump(repo));
     } finally {
       console.log = origLog;
     }
@@ -179,7 +193,7 @@ describe("cmdVersionBump", { timeout: 30_000 }, () => {
     const origLog = console.log;
     console.log = (msg: string) => logs.push(String(msg));
     try {
-      cmdVersionBump(repo);
+      withGitEnvCleared(() => cmdVersionBump(repo));
     } finally {
       console.log = origLog;
     }
@@ -200,7 +214,7 @@ describe("cmdVersionBump", { timeout: 30_000 }, () => {
     const origLog = console.log;
     console.log = (msg: string) => logs.push(String(msg));
     try {
-      cmdVersionBump(repo);
+      withGitEnvCleared(() => cmdVersionBump(repo));
     } finally {
       console.log = origLog;
     }
@@ -219,7 +233,7 @@ describe("cmdVersionBump", { timeout: 30_000 }, () => {
     const origLog = console.log;
     console.log = (msg: string) => logs.push(String(msg));
     try {
-      cmdVersionBump(repo);
+      withGitEnvCleared(() => cmdVersionBump(repo));
     } finally {
       console.log = origLog;
     }
@@ -260,7 +274,7 @@ describe("cmdVersionBump", { timeout: 30_000 }, () => {
     const origLog = console.log;
     console.log = (msg: string) => logs.push(String(msg));
     try {
-      cmdVersionBump(repo);
+      withGitEnvCleared(() => cmdVersionBump(repo));
     } finally {
       console.log = origLog;
     }
@@ -280,7 +294,7 @@ describe("cmdVersionBump", { timeout: 30_000 }, () => {
     git(["-C", repo, "checkout", "-b", "feature-branch", "--quiet"]);
 
     // die() calls process.exit which we've patched to throw
-    expect(() => cmdVersionBump(repo)).toThrow();
+    expect(() => withGitEnvCleared(() => cmdVersionBump(repo))).toThrow();
   });
 
   it("sequential PATCH bumps increment correctly", () => {
@@ -292,7 +306,7 @@ describe("cmdVersionBump", { timeout: 30_000 }, () => {
     const origLog = console.log;
     console.log = () => {};
     try {
-      cmdVersionBump(repo);
+      withGitEnvCleared(() => cmdVersionBump(repo));
     } finally {
       console.log = origLog;
     }
@@ -305,7 +319,7 @@ describe("cmdVersionBump", { timeout: 30_000 }, () => {
     const logs: string[] = [];
     console.log = (msg: string) => logs.push(String(msg));
     try {
-      cmdVersionBump(repo);
+      withGitEnvCleared(() => cmdVersionBump(repo));
     } finally {
       console.log = origLog;
     }
@@ -326,7 +340,7 @@ describe("cmdVersionBump", { timeout: 30_000 }, () => {
     const origLog = console.log;
     console.log = (msg: string) => logs.push(String(msg));
     try {
-      cmdVersionBump(repo);
+      withGitEnvCleared(() => cmdVersionBump(repo));
     } finally {
       console.log = origLog;
     }

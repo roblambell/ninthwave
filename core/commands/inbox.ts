@@ -9,7 +9,7 @@
 //   nw inbox --check <item-id>             Non-blocking check for message
 //   nw inbox --write <item-id> -m <text>   Write a message to the inbox
 
-import { existsSync, mkdirSync, readFileSync, unlinkSync, writeFileSync, renameSync } from "fs";
+import { existsSync, mkdirSync, readFileSync, readdirSync, unlinkSync, writeFileSync, renameSync } from "fs";
 import { join } from "path";
 import { die } from "../output.ts";
 import { userStateDir } from "../daemon.ts";
@@ -19,6 +19,7 @@ import { userStateDir } from "../daemon.ts";
 export interface InboxIO {
   existsSync: (path: string) => boolean;
   mkdirSync: (path: string, opts?: { recursive?: boolean }) => void;
+  readdirSync: (path: string) => string[];
   readFileSync: (path: string, encoding: BufferEncoding) => string;
   writeFileSync: (path: string, data: string) => void;
   unlinkSync: (path: string) => void;
@@ -32,7 +33,7 @@ export interface InboxDeps {
 }
 
 const defaultDeps: InboxDeps = {
-  io: { existsSync, mkdirSync, readFileSync, writeFileSync, unlinkSync, renameSync },
+  io: { existsSync, mkdirSync, readdirSync, readFileSync, writeFileSync, unlinkSync, renameSync },
   sleep: (ms) => Bun.sleepSync(ms),
   getBranch: () => {
     try {
@@ -51,16 +52,40 @@ export function inboxDir(projectRoot: string): string {
   return join(userStateDir(projectRoot), "inbox");
 }
 
-/** Path to a single inbox file: ~/.ninthwave/projects/{slug}/inbox/{id}.msg */
-export function inboxFilePath(projectRoot: string, itemId: string): string {
-  return join(inboxDir(projectRoot), `${itemId}.msg`);
+/** Directory for a single item's pending messages. */
+export function itemInboxDir(projectRoot: string, itemId: string): string {
+  return join(inboxDir(projectRoot), itemId);
 }
 
 // ── Core operations ──────────────────────────────────────────────────
 
+let inboxWriteSequence = 0;
+
+function nextInboxFileName(): string {
+  const now = String(Date.now()).padStart(13, "0");
+  const seq = String(inboxWriteSequence++).padStart(6, "0");
+  return `${now}-${seq}.msg`;
+}
+
+function listInboxFiles(
+  projectRoot: string,
+  itemId: string,
+  io: InboxIO,
+): string[] {
+  const dir = itemInboxDir(projectRoot, itemId);
+  if (!io.existsSync(dir)) return [];
+  try {
+    return io.readdirSync(dir)
+      .filter((name) => name.endsWith(".msg"))
+      .sort()
+      .map((name) => join(dir, name));
+  } catch {
+    return [];
+  }
+}
+
 /**
- * Write a message to the inbox atomically (temp file + rename).
- * Creates the inbox directory if it doesn't exist.
+ * Queue a message atomically (temp file + rename) under the item's inbox directory.
  */
 export function writeInbox(
   projectRoot: string,
@@ -68,27 +93,27 @@ export function writeInbox(
   message: string,
   io: InboxIO = defaultDeps.io,
 ): void {
-  const dir = inboxDir(projectRoot);
+  const dir = itemInboxDir(projectRoot, itemId);
   if (!io.existsSync(dir)) {
     io.mkdirSync(dir, { recursive: true });
   }
-  const filePath = inboxFilePath(projectRoot, itemId);
+  const filePath = join(dir, nextInboxFileName());
   const tmpPath = `${filePath}.tmp.${Date.now()}`;
   io.writeFileSync(tmpPath, message);
   io.renameSync(tmpPath, filePath);
 }
 
 /**
- * Check for a message without blocking. Returns the message or null.
- * Removes the inbox file after reading.
+ * Check for the oldest pending message without blocking.
+ * Returns the message or null. Removes only the consumed message file.
  */
 export function checkInbox(
   projectRoot: string,
   itemId: string,
   io: InboxIO = defaultDeps.io,
 ): string | null {
-  const filePath = inboxFilePath(projectRoot, itemId);
-  if (!io.existsSync(filePath)) return null;
+  const filePath = listInboxFiles(projectRoot, itemId, io)[0];
+  if (!filePath) return null;
   try {
     const content = io.readFileSync(filePath, "utf-8");
     io.unlinkSync(filePath);
@@ -100,7 +125,7 @@ export function checkInbox(
 
 /**
  * Block until a message arrives. Polls every `pollMs` milliseconds.
- * Returns the message content. Removes the inbox file after reading.
+ * Returns the oldest pending message and removes only that file.
  */
 export function waitForInbox(
   projectRoot: string,
@@ -108,31 +133,24 @@ export function waitForInbox(
   deps: Pick<InboxDeps, "io" | "sleep"> = defaultDeps,
   pollMs: number = 1000,
 ): string {
-  const filePath = inboxFilePath(projectRoot, itemId);
   while (true) {
-    if (deps.io.existsSync(filePath)) {
-      try {
-        const content = deps.io.readFileSync(filePath, "utf-8");
-        deps.io.unlinkSync(filePath);
-        return content;
-      } catch {
-        // File may have been removed between exists check and read; retry.
-      }
+    const message = checkInbox(projectRoot, itemId, deps.io);
+    if (message !== null) {
+      return message;
     }
     deps.sleep(pollMs);
   }
 }
 
 /**
- * Remove an inbox file if it exists. Used during worker cleanup.
+ * Remove all pending inbox files for an item. Used during worker cleanup.
  */
 export function cleanInbox(
   projectRoot: string,
   itemId: string,
   io: InboxIO = defaultDeps.io,
 ): void {
-  const filePath = inboxFilePath(projectRoot, itemId);
-  if (io.existsSync(filePath)) {
+  for (const filePath of listInboxFiles(projectRoot, itemId, io)) {
     try {
       io.unlinkSync(filePath);
     } catch {

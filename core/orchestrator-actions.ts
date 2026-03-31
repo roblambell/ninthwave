@@ -21,6 +21,10 @@ import {
   getNextTool,
 } from "./orchestrator-types.ts";
 
+function inboxProjectRoot(item: OrchestratorItem, ctx: ExecutionContext): string {
+  return item.worktreePath ?? item.resolvedRepoRoot ?? ctx.projectRoot;
+}
+
 /**
  * Bootstrap a target repo for a cross-repo item.
  * On success, sets resolvedRepoRoot and transitions to launching.
@@ -212,11 +216,7 @@ export function executeMerge(
       // Daemon rebase unavailable or failed -- send worker a rebase message
       if (item.workspaceRef) {
         const rebaseMsg = `[ORCHESTRATOR] Rebase Required: merge failed due to conflicts with main. Please rebase onto latest main and push.`;
-        deps.writeInbox(item.id, rebaseMsg);
-        deps.sendMessage(
-          item.workspaceRef,
-          rebaseMsg,
-        );
+        deps.writeInbox(inboxProjectRoot(item, ctx), item.id, rebaseMsg);
       }
       orch.transition(item, "ci-pending");
       return { success: false, error: `Merge failed for PR #${prNum} due to conflicts, rebase requested` };
@@ -300,18 +300,16 @@ export function executeMerge(
 
     const otherWtInfo = getWorktreeInfo(other.id, crossRepoIndex, ctx.worktreeDir, cachedEntries);
     const otherRepoRoot = otherWtInfo?.repoRoot ?? other.resolvedRepoRoot ?? ctx.projectRoot;
-    const otherWorktreePath = otherWtInfo?.worktreePath ?? join(otherRepoRoot, ".ninthwave", ".worktrees", `ninthwave-${other.id}`);
+    const otherWorktreePath = other.worktreePath
+      ?? otherWtInfo?.worktreePath
+      ?? join(otherRepoRoot, ".ninthwave", ".worktrees", `ninthwave-${other.id}`);
     const otherBranch = `ninthwave/${other.id}`;
 
     if (!deps.rebaseOnto || !deps.forcePush) {
       // rebaseOnto or forcePush not available -- send worker manual rebase instructions
       if (other.workspaceRef) {
         const restackMsg = `[ORCHESTRATOR] Restack Required: dependency ${item.id} was squash-merged. Run: git rebase --onto main ${depBranch} ${otherBranch} && git push --force-with-lease`;
-        deps.writeInbox(other.id, restackMsg);
-        deps.sendMessage(
-          other.workspaceRef,
-          restackMsg,
-        );
+        deps.writeInbox(otherWorktreePath, other.id, restackMsg);
       }
       continue;
     }
@@ -326,22 +324,14 @@ export function executeMerge(
         // Conflict -- send worker manual rebase instructions
         if (other.workspaceRef) {
           const conflictMsg = `[ORCHESTRATOR] Restack Conflict: dependency ${item.id} was squash-merged but rebase --onto had conflicts. Run manually: git rebase --onto main ${depBranch} ${otherBranch}`;
-          deps.writeInbox(other.id, conflictMsg);
-          deps.sendMessage(
-            other.workspaceRef,
-            conflictMsg,
-          );
+          deps.writeInbox(otherWorktreePath, other.id, conflictMsg);
         }
       }
     } catch {
       // Unexpected error -- fall back to worker message
       if (other.workspaceRef) {
         const restackMsg2 = `[ORCHESTRATOR] Restack Required: dependency ${item.id} was squash-merged. Run: git rebase --onto main ${depBranch} ${otherBranch} && git push --force-with-lease`;
-        deps.writeInbox(other.id, restackMsg2);
-        deps.sendMessage(
-          other.workspaceRef,
-          restackMsg2,
-        );
+        deps.writeInbox(otherWorktreePath, other.id, restackMsg2);
       }
     }
   }
@@ -354,12 +344,10 @@ export function executeMerge(
     if (!WIP_STATES.has(other.state)) continue;
     if (restackedIds.has(other.id)) continue;
     if (other.workspaceRef) {
+      const otherWorktreePath = other.worktreePath
+        ?? join(other.resolvedRepoRoot ?? ctx.projectRoot, ".ninthwave", ".worktrees", `ninthwave-${other.id}`);
       const rebaseMsg2 = `Dependency ${item.id} merged. Please rebase onto latest main.`;
-      deps.writeInbox(other.id, rebaseMsg2);
-      deps.sendMessage(
-        other.workspaceRef,
-        rebaseMsg2,
-      );
+      deps.writeInbox(otherWorktreePath, other.id, rebaseMsg2);
     }
   }
 
@@ -380,7 +368,9 @@ export function executeMerge(
 
     const otherBranch = `ninthwave/${other.id}`;
     const otherWtInfo2 = getWorktreeInfo(other.id, crossRepoIndex, ctx.worktreeDir, cachedEntries);
-    const otherWorktreePath = otherWtInfo2?.worktreePath ?? join(otherRepoRoot2, ".ninthwave", ".worktrees", `ninthwave-${other.id}`);
+    const otherWorktreePath = other.worktreePath
+      ?? otherWtInfo2?.worktreePath
+      ?? join(otherRepoRoot2, ".ninthwave", ".worktrees", `ninthwave-${other.id}`);
 
     // Try daemon-rebase first for all siblings
     let daemonSuccess = false;
@@ -401,11 +391,7 @@ export function executeMerge(
         // Actually conflicting -- send worker rebase message as fallback
         if (other.workspaceRef) {
           const siblingMsg = `Sibling PR #${other.prNumber} has merge conflicts after ${item.id} was merged. Please rebase onto latest main.`;
-          deps.writeInbox(other.id, siblingMsg);
-          deps.sendMessage(
-            other.workspaceRef,
-            siblingMsg,
-          );
+          deps.writeInbox(otherWorktreePath, other.id, siblingMsg);
         } else {
           deps.warn?.(
             `[Orchestrator] PR #${other.prNumber} (${other.id}) has merge conflicts but daemon rebase failed and worker has no workspace reference. Manual rebase needed.`,
@@ -452,8 +438,7 @@ export function executeNotifyCiFailure(
     return { success: true };
   }
 
-  deps.writeInbox(item.id, message);
-  const sent = deps.sendMessage(item.workspaceRef, message);
+  deps.writeInbox(inboxProjectRoot(item, ctx), item.id, message);
 
   if (item.prNumber) {
     const repoRoot = item.resolvedRepoRoot ?? ctx.projectRoot;
@@ -471,14 +456,12 @@ export function executeNotifyCiFailure(
 export function executeNotifyReview(
   item: OrchestratorItem,
   action: Action,
+  ctx: ExecutionContext,
   deps: OrchestratorDeps,
 ): ActionResult {
   const message = action.message || "Review feedback received -- please address.";
 
-  deps.writeInbox(item.id, message);
-  if (item.workspaceRef) {
-    deps.sendMessage(item.workspaceRef, message);
-  }
+  deps.writeInbox(inboxProjectRoot(item, ctx), item.id, message);
 
   return { success: true };
 }
@@ -520,7 +503,7 @@ export function executeClean(
 
   // Clean up inbox file (best-effort)
   try {
-    cleanInbox(ctx.projectRoot, item.id);
+    cleanInbox(item.worktreePath ?? repoRoot, item.id);
   } catch { /* best-effort */ }
 
   // Partial cleanup (one of two succeeds) is still OK.
@@ -571,14 +554,12 @@ export function executeWorkspaceClose(
 export function executeSendMessage(
   item: OrchestratorItem,
   action: Action,
+  ctx: ExecutionContext,
   deps: OrchestratorDeps,
 ): ActionResult {
   const message = action.message || "Are you still making progress?";
 
-  deps.writeInbox(item.id, message);
-  if (item.workspaceRef) {
-    deps.sendMessage(item.workspaceRef, message);
-  }
+  deps.writeInbox(inboxProjectRoot(item, ctx), item.id, message);
 
   return { success: true };
 }
@@ -613,14 +594,12 @@ export function executeSetCommitStatus(
 export function executeRebase(
   item: OrchestratorItem,
   action: Action,
+  ctx: ExecutionContext,
   deps: OrchestratorDeps,
 ): ActionResult {
   const message = action.message || "Please rebase onto latest main.";
 
-  deps.writeInbox(item.id, message);
-  if (item.workspaceRef) {
-    deps.sendMessage(item.workspaceRef, message);
-  }
+  deps.writeInbox(inboxProjectRoot(item, ctx), item.id, message);
 
   return { success: true };
 }
@@ -659,14 +638,9 @@ export function executeDaemonRebase(
   // Daemon rebase failed -- prefer sending message to live worker over launching rebaser.
   // The original worker knows the code best and can resolve conflicts properly.
   const message = action.message || "Please rebase onto latest main.";
-  deps.writeInbox(item.id, message);
+  deps.writeInbox(inboxProjectRoot(item, ctx), item.id, message);
   if (item.workspaceRef) {
-    const sent = deps.sendMessage(item.workspaceRef, message);
-    if (sent) {
-      return { success: true };
-    }
-    // sendMessage failed -- worker may be unresponsive, fall through to rebaser
-    // (inbox message was still written as fallback)
+    return { success: true };
   }
 
   // Circuit breaker: stop launching rebasers after maxRebaseAttempts
