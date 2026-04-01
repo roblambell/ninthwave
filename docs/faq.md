@@ -14,7 +14,7 @@ Instead of running one AI session at a time -- writing code, creating a PR, wait
 
 - **Git** -- version control (you already have this)
 - **GitHub CLI (`gh`)** -- for PR operations. Install via `brew install gh` and authenticate with `gh auth login`
-- **tmux** -- terminal multiplexer for managing parallel sessions. Usually pre-installed on macOS/Linux, or `brew install tmux`. For the richest experience (sidebar status, progress bars), use [cmux](https://cmux.com) instead
+- **Optional interactive backend** -- install [tmux](https://github.com/tmux/tmux/wiki) or [cmux](https://cmux.com) if you want attachable terminal sessions. Headless works by default, so neither mux is mandatory. `tmux` is a broadly available terminal option; `cmux` gives the richest sidebar/progress UI on macOS
 - **An AI coding tool** -- at least one of: [Claude Code](https://docs.anthropic.com/en/docs/claude-code), [OpenCode](https://opencode.ai), or [GitHub Copilot CLI](https://docs.github.com/en/copilot/github-copilot-in-the-cli)
 
 ### How do I install ninthwave?
@@ -97,7 +97,7 @@ If you don't see a finished item in `.ninthwave/work/`, that's the expected succ
 
 ### What is the orchestrator?
 
-The orchestrator (`nw`) is a deterministic state machine that manages the lifecycle of work items from start to merged PR. It runs as a continuous loop, polling GitHub for CI/PR status and the multiplexer for worker health every few seconds.
+The orchestrator (`nw`) is a deterministic state machine that manages the lifecycle of work items from start to merged PR. It runs as a continuous loop, polling GitHub for CI/PR status and the active worker backend (`tmux`, `cmux`, or headless) every few seconds.
 
 It handles: launching workers, tracking CI status, dispatching review feedback, retrying failures, resolving merge conflicts, and auto-merging PRs when all gates pass.
 
@@ -199,6 +199,21 @@ nw --items H-AUTH-1,H-AUTH-2 --wip-limit 3
 After you pick work items (and choose an AI tool if more than one is configured), `nw` shows one startup settings screen before the live status UI. That screen lets you set merge strategy, review mode, collaboration mode, WIP limit, and backend selection in one place.
 
 There is no separate arming step after that screen. Once you confirm the startup settings, orchestration starts and the live status UI takes over.
+
+### When should I choose `Auto`, `tmux`, `cmux`, or `headless`?
+
+Use the startup settings screen to choose how workers should run:
+
+| Backend | Choose it when |
+|---|---|
+| `Auto` | You want the default. ninthwave stays on your current cmux/tmux session when present, otherwise prefers installed tmux, then cmux, then falls back to headless |
+| `tmux` | You want attachable terminal-native sessions, or already live in tmux/iTerm2 tmux control mode |
+| `cmux` | You want the macOS sidebar/status UI and already have cmux available |
+| `headless` | You want detached, programmatic operation and do not need an attachable mux workspace |
+
+Interactive backends (`tmux`, `cmux`) give you attachable sessions you can jump into. `headless` runs detached instead.
+
+The backend choice you confirm is saved as `backend_mode` and becomes the next startup default. For a one-off run, `NINTHWAVE_MUX=tmux|cmux|headless nw` takes precedence over the saved `backend_mode`, and the saved preference takes precedence over normal auto-detection. Invalid `NINTHWAVE_MUX` values warn and fall through instead of changing your saved default.
 
 ### What merge strategies are available?
 
