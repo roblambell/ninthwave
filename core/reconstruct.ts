@@ -12,6 +12,125 @@ import type { Multiplexer } from "./mux.ts";
 
 // ── State reconstruction (crash recovery) ──────────────────────────
 
+function isRepairPrCandidate(itemId: string, candidateId: string): boolean {
+  return candidateId === `fix-forward-${itemId}` || candidateId === `revert-${itemId}`;
+}
+
+function trackedPrStatusIds(item: OrchestratorItem): string[] {
+  if (item.state === "fixing-forward" || (item.priorPrNumbers?.length ?? 0) > 0) {
+    return [`fix-forward-${item.id}`, `revert-${item.id}`];
+  }
+  return [item.id];
+}
+
+function resolveTrackedPrStatus(
+  item: OrchestratorItem,
+  repoRoot: string,
+  checkPr: (id: string, root: string) => string | null,
+  options: { forceRepairCandidates?: boolean } = {},
+): string | null {
+  let fallback: string | null = null;
+  const candidateIds = options.forceRepairCandidates
+    ? [`fix-forward-${item.id}`, `revert-${item.id}`]
+    : trackedPrStatusIds(item);
+  for (const candidateId of candidateIds) {
+    const statusLine = checkPr(candidateId, repoRoot);
+    if (!statusLine) continue;
+    const status = statusLine.split("\t")[2];
+    if (status && status !== "no-pr") {
+      return statusLine;
+    }
+    if (!fallback) {
+      fallback = statusLine;
+    }
+  }
+  return fallback;
+}
+
+function adoptTrackedPrNumber(item: OrchestratorItem, prNumber: number | undefined): void {
+  if (prNumber == null) return;
+  if (item.prNumber != null && item.prNumber !== prNumber) {
+    const priorPrNumbers = [...(item.priorPrNumbers ?? [])];
+    if (!priorPrNumbers.includes(item.prNumber)) {
+      priorPrNumbers.push(item.prNumber);
+    }
+    item.priorPrNumbers = priorPrNumbers;
+  }
+  item.prNumber = prNumber;
+}
+
+function isRepairReentryState(state: string | undefined): state is OrchestratorItemState {
+  return state === "ci-pending"
+    || state === "ci-passed"
+    || state === "ci-failed"
+    || state === "review-pending"
+    || state === "reviewing"
+    || state === "merging"
+    || state === "merged";
+}
+
+function restoreRepairPrTrackingState(
+  orch: Orchestrator,
+  item: OrchestratorItem,
+  repoRoot: string,
+  checkPr: (id: string, root: string) => string | null,
+  savedState: OrchestratorItemState,
+): boolean {
+  const statusLine = resolveTrackedPrStatus(item, repoRoot, checkPr, {
+    forceRepairCandidates: savedState === "fixing-forward",
+  });
+  if (!statusLine) {
+    if (item.prNumber != null) {
+      orch.hydrateState(item.id, savedState);
+      return true;
+    }
+    return false;
+  }
+
+  const parts = statusLine.split("\t");
+  const candidateId = parts[0] ?? item.id;
+  const prNumStr = parts[1];
+  const status = parts[2];
+  const previousPrNumber = item.prNumber;
+
+  if (prNumStr) {
+    adoptTrackedPrNumber(item, parseInt(prNumStr, 10));
+  }
+
+  switch (status) {
+    case "merged": {
+      const mergedPrTitle = parts[5] ?? "";
+      const mergedPrNum = prNumStr ? parseInt(prNumStr, 10) : undefined;
+      const alreadyTracked = mergedPrNum != null && previousPrNumber === mergedPrNum;
+      if (isRepairPrCandidate(item.id, candidateId) || alreadyTracked || !mergedPrTitle || prTitleMatchesWorkItem(mergedPrTitle, item.workItem.title)) {
+        orch.hydrateState(item.id, "merged");
+      } else {
+        orch.hydrateState(item.id, savedState);
+      }
+      return true;
+    }
+    case "ready":
+    case "ci-passed":
+      orch.hydrateState(item.id, "ci-passed");
+      return true;
+    case "failing":
+      orch.hydrateState(item.id, "ci-failed");
+      return true;
+    case "open":
+    case "pending":
+      orch.hydrateState(item.id, "ci-pending");
+      return true;
+    case "no-pr":
+      if (item.prNumber != null) {
+        orch.hydrateState(item.id, savedState);
+        return true;
+      }
+      return false;
+    default:
+      return false;
+  }
+}
+
 /**
  * Reconstruct orchestrator state from existing worktrees and GitHub PRs.
  * Called on startup to resume after a crash or restart.
@@ -30,7 +149,7 @@ export function reconstructState(
   daemonState?: DaemonState | null,
 ): void {
   // Build a lookup map from saved daemon state for restoring persisted counters and review fields
-  const savedItems = new Map<string, { state: string; ciFailCount: number; retryCount: number; prNumber: number | null; reviewWorkspaceRef?: string; reviewCompleted?: boolean; reviewRound?: number; lastCommentCheck?: string; rebaseRequested?: boolean; ciFailureNotified?: boolean; ciFailureNotifiedAt?: string | null; rebaserWorkspaceRef?: string; mergeCommitSha?: string; defaultBranch?: string; fixForwardFailCount?: number; fixForwardWorkspaceRef?: string; aiTool?: string }>();
+  const savedItems = new Map<string, { state: string; ciFailCount: number; retryCount: number; prNumber: number | null; priorPrNumbers?: number[]; reviewWorkspaceRef?: string; reviewCompleted?: boolean; reviewRound?: number; lastCommentCheck?: string; rebaseRequested?: boolean; ciFailureNotified?: boolean; ciFailureNotifiedAt?: string | null; rebaserWorkspaceRef?: string; mergeCommitSha?: string; defaultBranch?: string; fixForwardFailCount?: number; fixForwardWorkspaceRef?: string; aiTool?: string }>();
   if (daemonState?.items) {
     for (const si of daemonState.items) {
       // Backward compat: map old field names to new names
@@ -43,6 +162,7 @@ export function reconstructState(
         ciFailCount: si.ciFailCount,
         retryCount: si.retryCount,
         prNumber: si.prNumber,
+        priorPrNumbers: si.priorPrNumbers,
         reviewWorkspaceRef: si.reviewWorkspaceRef,
         reviewCompleted: si.reviewCompleted,
         reviewRound: si.reviewRound,
@@ -73,6 +193,7 @@ export function reconstructState(
       item.ciFailCount = saved.ciFailCount;
       item.retryCount = saved.retryCount;
       if (saved.prNumber != null) item.prNumber = saved.prNumber;
+      if (saved.priorPrNumbers?.length) item.priorPrNumbers = [...saved.priorPrNumbers];
       if (saved.reviewWorkspaceRef) item.reviewWorkspaceRef = saved.reviewWorkspaceRef;
       if (saved.reviewCompleted) item.reviewCompleted = saved.reviewCompleted;
       if (saved.reviewRound != null) item.reviewRound = saved.reviewRound;
@@ -101,8 +222,21 @@ export function reconstructState(
       if (savedState === "verifying") savedState = "forward-fix-pending";
       if (savedState === "verify-failed") savedState = "fix-forward-failed";
       if (savedState === "repairing-main") savedState = "fixing-forward";
-      if (savedState === "forward-fix-pending" || savedState === "fix-forward-failed" || savedState === "fixing-forward") {
+      if (savedState === "fixing-forward") {
+        if (restoreRepairPrTrackingState(orch, item, item.resolvedRepoRoot ?? projectRoot, checkPr, "fixing-forward")) {
+          continue;
+        }
+        orch.hydrateState(item.id, "fixing-forward");
+        continue;
+      }
+      if (savedState === "forward-fix-pending" || savedState === "fix-forward-failed") {
         orch.hydrateState(item.id, savedState as OrchestratorItemState);
+        continue;
+      }
+    }
+
+    if (saved && saved.priorPrNumbers?.length && isRepairReentryState(saved.state)) {
+      if (restoreRepairPrTrackingState(orch, item, item.resolvedRepoRoot ?? projectRoot, checkPr, saved.state)) {
         continue;
       }
     }
@@ -114,7 +248,7 @@ export function reconstructState(
     if (!existsSync(wtPath)) continue;
 
     // Item has a worktree -- check PR status in the correct repo
-    const statusLine = checkPr(item.id, repoRoot);
+    const statusLine = resolveTrackedPrStatus(item, repoRoot, checkPr);
     if (!statusLine) {
       hydrateKnownPrTrackingOrImplementing(orch, item.id);
       recoverWorkspaceRef(orch, item.id, workspaceList);
@@ -122,6 +256,7 @@ export function reconstructState(
     }
 
     const parts = statusLine.split("\t");
+    const candidateId = parts[0] ?? item.id;
     const prNumStr = parts[1];
     const status = parts[2];
 
@@ -131,7 +266,7 @@ export function reconstructState(
 
     if (prNumStr) {
       const orchItem = orch.getItem(item.id)!;
-      orchItem.prNumber = parseInt(prNumStr, 10);
+      adoptTrackedPrNumber(orchItem, parseInt(prNumStr, 10));
     }
 
     switch (status) {
@@ -144,7 +279,7 @@ export function reconstructState(
         // so it's definitely ours regardless of how the worker titled it.
         const mergedPrNum = prNumStr ? parseInt(prNumStr, 10) : undefined;
         const alreadyTracked = mergedPrNum != null && previousPrNumber === mergedPrNum;
-        if (alreadyTracked) {
+        if (isRepairPrCandidate(item.id, candidateId) || alreadyTracked) {
           orch.hydrateState(item.id, "merged");
         } else {
           const mergedPrTitle = parts[5] ?? "";
@@ -187,7 +322,7 @@ function restoreMergedWaitingState(
   repoRoot: string,
   checkPr: (id: string, root: string) => string | null,
 ): boolean {
-  const statusLine = checkPr(item.id, repoRoot);
+  const statusLine = resolveTrackedPrStatus(item, repoRoot, checkPr);
   if (!statusLine) {
     if (item.prNumber != null || item.mergeCommitSha) {
       orch.hydrateState(item.id, "merged");
@@ -197,18 +332,19 @@ function restoreMergedWaitingState(
   }
 
   const parts = statusLine.split("\t");
+  const candidateId = parts[0] ?? item.id;
   const prNumStr = parts[1];
   const status = parts[2];
   const previousPrNumber = item.prNumber;
 
   if (prNumStr) {
-    item.prNumber = parseInt(prNumStr, 10);
+    adoptTrackedPrNumber(item, parseInt(prNumStr, 10));
   }
 
   if (status === "merged") {
     const mergedPrTitle = parts[5] ?? "";
     const trackedPrMatches = prNumStr ? previousPrNumber === parseInt(prNumStr, 10) : false;
-    if (trackedPrMatches || !mergedPrTitle || prTitleMatchesWorkItem(mergedPrTitle, item.workItem.title)) {
+    if (isRepairPrCandidate(item.id, candidateId) || trackedPrMatches || !mergedPrTitle || prTitleMatchesWorkItem(mergedPrTitle, item.workItem.title)) {
       orch.hydrateState(item.id, "merged");
       return true;
     }

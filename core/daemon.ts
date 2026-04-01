@@ -24,6 +24,8 @@ export interface DaemonStateItem {
   id: string;
   state: string;
   prNumber: number | null;
+  /** Prior active PR numbers for this item, oldest first. */
+  priorPrNumbers?: number[];
   title: string;
   /** Work item priority for snapshot-driven detail rendering. */
   priority?: string;
@@ -609,6 +611,7 @@ export function serializeOrchestratorState(
         id: item.id,
         state: item.state,
         prNumber: item.prNumber ?? null,
+        ...(item.priorPrNumbers?.length ? { priorPrNumbers: item.priorPrNumbers } : {}),
         title: item.workItem.title,
         ...(item.workItem.priority ? { priority: item.workItem.priority } : {}),
         ...(item.workItem.descriptionSnippet

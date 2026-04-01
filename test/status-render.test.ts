@@ -3706,6 +3706,19 @@ describe("renderDetailOverlay", () => {
     expect(text).toContain("Show markdown-derived context in the detail overlay.");
   });
 
+  it("shows prior repair PR references when available", () => {
+    const item = makeStatusItem({
+      id: "H-PR-1",
+      prNumber: 88,
+      priorPrNumbers: [41, 77],
+    });
+
+    const lines = renderDetailOverlay(item, 100, 40);
+    const text = lines.map(stripAnsi).join("\n");
+    expect(text).toContain("PRs:");
+    expect(text).toContain("#41 → #77 → #88");
+  });
+
   it("shows worktree path for stuck items", () => {
     const item = makeStatusItem({
       id: "H-WT-1",

@@ -582,14 +582,16 @@ export function launchForwardFixerWorker(
 
   const hubRepoNwoLine = options.hubRepoNwo ? `HUB_REPO_NWO: ${options.hubRepoNwo}\n` : "";
   const defaultBranchLine = `REPO_DEFAULT_BRANCH: ${defaultBranch}\n`;
+  const repairPrOutcomesLine = "REPAIR_PR_OUTCOMES: fix-forward,revert\n";
+  const syntheticChildWorkItemLine = "CREATE_SYNTHETIC_CHILD_WORK_ITEM: false\n";
   const systemPrompt = `YOUR_VERIFY_ITEM_ID: ${itemId}
 YOUR_VERIFY_MERGE_SHA: ${mergeCommitSha}
 PROJECT_ROOT: ${worktreePath}
 REPO_ROOT: ${repoRoot}
-${defaultBranchLine}
+${defaultBranchLine}${repairPrOutcomesLine}${syntheticChildWorkItemLine}
 ${hubRepoNwoLine}`;
 
-  const safeTitle = sanitizeTitle(`Fix-forward ${itemId}`);
+  const safeTitle = sanitizeTitle(`Repair ${itemId}`);
   info(`Launching ${aiTool} forward-fixer session for ${itemId}: merge SHA ${mergeCommitSha.slice(0, 8)}`);
   const promptFile = join(worktreePath, ".ninthwave", ".prompt");
   mkdirSync(join(worktreePath, ".ninthwave"), { recursive: true });

@@ -167,6 +167,7 @@ describe("collectRunMetrics", () => {
       retryCount: undefined,
       tool: "cursor",
       prNumber: 42,
+      prNumbers: [42],
     });
   });
 

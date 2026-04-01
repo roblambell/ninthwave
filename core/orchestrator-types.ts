@@ -35,6 +35,8 @@ export interface OrchestratorItem {
   state: OrchestratorItemState;
   /** Active PR currently driving this item's lifecycle. Can switch to a repair PR after post-merge CI failure. */
   prNumber?: number;
+  /** Prior active PR numbers for this item, oldest first. Preserved when repair PRs replace the canonical PR. */
+  priorPrNumbers?: number[];
   partition?: number;
   /** Multiplexer workspace reference (e.g., "workspace:1" or "session:nw:H-1-1"). */
   workspaceRef?: string;
@@ -169,6 +171,8 @@ export interface OrchestratorConfig {
 export interface ItemSnapshot {
   id: string;
   prNumber?: number;
+  /** Prior active PR numbers for this item, oldest first. */
+  priorPrNumbers?: number[];
   /** CI status from GitHub checks. */
   ciStatus?: "pass" | "fail" | "pending" | "unknown";
   /** Review decision from GitHub. */
