@@ -70,26 +70,19 @@ describe("checkAutoLaunch", () => {
     expect((result as { reason: string }).reason).toBe("cmux-not-in-session");
   });
 
-  it("returns error with install prompt when nothing available", () => {
+  it("returns proceed when nothing available (headless fallback)", () => {
     const deps = makeDeps({
       env: {},
       checkBinary: () => false,
     });
-    const result = checkAutoLaunch(deps);
-    expect(result.action).toBe("error");
-    expect((result as { message: string; reason: string }).message).toContain("No multiplexer available");
-    expect((result as { reason: string }).reason).toBe("nothing-installed");
+    expect(checkAutoLaunch(deps)).toEqual({ action: "proceed" });
   });
 
-  it("returns error with install prompt when nothing available + non-TTY", () => {
+  it("returns proceed when NINTHWAVE_MUX=headless", () => {
     const deps = makeDeps({
-      env: {},
-      checkBinary: () => false,
+      env: { NINTHWAVE_MUX: "headless" },
     });
-    const result = checkAutoLaunch(deps);
-    expect(result.action).toBe("error");
-    expect((result as { message: string; reason: string }).message).toContain("No multiplexer available");
-    expect((result as { reason: string }).reason).toBe("nothing-installed");
+    expect(checkAutoLaunch(deps)).toEqual({ action: "proceed" });
   });
 
   it("prioritizes CMUX_WORKSPACE_ID over missing binary", () => {
@@ -214,18 +207,13 @@ describe("ensureMuxOrAutoLaunch", () => {
     expect(stderr).toContain("Open cmux");
   });
 
-  it("dies with install prompt when nothing available", () => {
+  it("returns normally when nothing is available (headless fallback)", () => {
     const deps = makeDeps({
       env: {},
       checkBinary: () => false,
     });
 
-    const { exitCode, stderr } = withMockedExit(() => {
-      ensureMuxOrAutoLaunch(["watch"], deps);
-    });
-
-    expect(exitCode).toBe(1);
-    expect(stderr).toContain("No multiplexer available");
+    ensureMuxOrAutoLaunch(["watch"], deps);
   });
 
   it("returns normally when tmux available outside session", () => {
@@ -301,13 +289,9 @@ describe("ensureMuxInteractiveOrDie", () => {
     await ensureMuxInteractiveOrDie([], deps);
   });
 
-  it("non-TTY: dies with message when nothing installed", async () => {
+  it("non-TTY: returns normally when nothing installed (headless fallback)", async () => {
     const deps = makeInteractiveDeps({ isTTY: false, checkBinary: () => false });
-    const { exitCode, stderr } = await withMockedExitAsync(async () => {
-      await ensureMuxInteractiveOrDie([], deps);
-    });
-    expect(exitCode).toBe(1);
-    expect(stderr).toContain("No multiplexer available");
+    await ensureMuxInteractiveOrDie([], deps);
   });
 
   it("cmux-not-in-session + user says Y: opens cmux and exits", async () => {
@@ -335,58 +319,14 @@ describe("ensureMuxInteractiveOrDie", () => {
     expect(stderr).toContain("Open cmux");
   });
 
-  it("nothing-installed + macOS + picks tmux: installs brew tmux and relaunches", async () => {
+  it("nothing-installed does not prompt for install", async () => {
     const deps = makeInteractiveDeps({
       checkBinary: () => false,
-      promptAnswers: ["1"],
       platform: "darwin",
     });
-    const { exitCode } = await withMockedExitAsync(async () => {
-      await ensureMuxInteractiveOrDie(["watch"], deps);
-    });
-    expect(exitCode).toBe(0);
-    expect(deps.installed).toEqual([["brew", "install", "tmux"]]);
-    expect(deps.relaunched).toEqual([["watch"]]);
-  });
-
-  it("nothing-installed + macOS + picks cmux: installs brew cask and opens cmux", async () => {
-    const deps = makeInteractiveDeps({
-      checkBinary: () => false,
-      promptAnswers: ["2"],
-      platform: "darwin",
-    });
-    const { exitCode } = await withMockedExitAsync(async () => {
-      await ensureMuxInteractiveOrDie([], deps);
-    });
-    expect(exitCode).toBe(0);
-    expect(deps.installed).toEqual([["brew", "install", "--cask", "manaflow-ai/cmux/cmux"]]);
-    expect(deps.opened).toContain("cmux");
-  });
-
-  it("nothing-installed + Linux: exits 1 after showing install instructions", async () => {
-    const deps = makeInteractiveDeps({
-      checkBinary: () => false,
-      platform: "linux",
-    });
-    const { exitCode } = await withMockedExitAsync(async () => {
-      await ensureMuxInteractiveOrDie([], deps);
-    });
-    expect(exitCode).toBe(1);
+    await ensureMuxInteractiveOrDie([], deps);
     expect(deps.installed).toHaveLength(0);
-  });
-
-  it("install failure: dies with error message", async () => {
-    const deps = makeInteractiveDeps({
-      checkBinary: () => false,
-      promptAnswers: ["1"],
-      platform: "darwin",
-      installExitCode: 1,
-    });
-    const { exitCode, stderr } = await withMockedExitAsync(async () => {
-      await ensureMuxInteractiveOrDie([], deps);
-    });
-    expect(exitCode).toBe(1);
-    expect(stderr).toContain("Installation failed");
+    expect(deps.opened).toHaveLength(0);
   });
 });
 

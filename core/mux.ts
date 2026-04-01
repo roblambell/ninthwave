@@ -3,6 +3,7 @@
 
 import { createInterface } from "readline";
 import * as cmux from "./cmux.ts";
+import { HeadlessAdapter } from "./headless.ts";
 import { TmuxAdapter } from "./tmux.ts";
 import { die, warn as defaultWarn } from "./output.ts";
 import { resolveCmuxBinary } from "./cmux-resolve.ts";
@@ -77,7 +78,7 @@ export class CmuxAdapter implements Multiplexer {
 export type MuxType = "cmux" | "tmux" | "headless";
 
 /** Valid values for the NINTHWAVE_MUX environment variable. */
-const VALID_MUX_VALUES: readonly MuxType[] = ["cmux", "tmux"] as const;
+const VALID_MUX_VALUES: readonly MuxType[] = ["cmux", "tmux", "headless"] as const;
 
 /** Injectable dependencies for multiplexer detection -- enables testing without vi.mock. */
 export interface DetectMuxDeps {
@@ -105,7 +106,7 @@ const defaultDetectDeps: DetectMuxDeps = {
  * 3. $TMUX -- inside a tmux session
  * 4. tmux binary available (preferred over cmux outside session)
  * 5. cmux binary available
- * 6. Error -- no multiplexer found
+ * 6. headless fallback
  */
 export function detectMuxType(deps: DetectMuxDeps = defaultDetectDeps): MuxType {
   const { env, checkBinary, warn } = deps;
@@ -134,36 +135,29 @@ export function detectMuxType(deps: DetectMuxDeps = defaultDetectDeps): MuxType 
   // 5. cmux binary available
   if (checkBinary("cmux")) return "cmux";
 
-  // 6. No multiplexer found
-  throw new Error(
-    "No multiplexer available. Install tmux (brew install tmux) or cmux (brew install --cask manaflow-ai/cmux/cmux).",
-  );
+  // 6. No multiplexer found -- use headless fallback
+  return "headless";
 }
 
 /**
  * Return the active multiplexer adapter based on auto-detection.
  *
- * When detection fails (no mux available), falls back to CmuxAdapter so that
- * callers using `getMux()` as a default parameter don't crash at import time.
- * The adapter's `isAvailable()` will return false, and the caller can handle
- * the error.
+ * Falls back to a headless adapter when no terminal multiplexer is available.
  */
 export function getMux(deps?: DetectMuxDeps): Multiplexer {
-  try {
-    const muxType = detectMuxType(deps);
-    if (muxType === "tmux") {
-      return new TmuxAdapter({
-        runner: defaultShellRun,
-        sleep: process.env.NODE_ENV === "test" ? () => {} : (ms) => Bun.sleepSync(ms),
-        env: process.env,
-        cwd: () => process.cwd(),
-      });
-    }
-    return new CmuxAdapter();
-  } catch {
-    // No mux available -- fall back to CmuxAdapter (isAvailable() will report false)
-    return new CmuxAdapter();
+  const muxType = detectMuxType(deps);
+  if (muxType === "tmux") {
+    return new TmuxAdapter({
+      runner: defaultShellRun,
+      sleep: process.env.NODE_ENV === "test" ? () => {} : (ms) => Bun.sleepSync(ms),
+      env: process.env,
+      cwd: () => process.cwd(),
+    });
   }
+  if (muxType === "headless") {
+    return new HeadlessAdapter(process.cwd());
+  }
+  return new CmuxAdapter();
 }
 
 // ── Ensure we're inside a mux session ───────────────────────────────
@@ -184,12 +178,12 @@ export type AutoLaunchResult =
  * Pure detection logic: determine whether to proceed or error.
  *
  * Detection chain:
- * 1. NINTHWAVE_MUX override → tmux: proceed, cmux: must be in session, invalid: warn+fallthrough
+ * 1. NINTHWAVE_MUX override → tmux/headless: proceed, cmux: must be in session, invalid: warn+fallthrough
  * 2. CMUX_WORKSPACE_ID set → proceed (already inside cmux)
  * 3. $TMUX set → proceed (inside tmux session)
  * 4. tmux installed → proceed (adapter creates its own session)
  * 5. cmux installed → error (detected but not in a session)
- * 6. Nothing → error (install prompt)
+ * 6. Nothing → proceed (headless fallback)
  */
 export function checkAutoLaunch(deps: AutoLaunchDeps): AutoLaunchResult {
   const { env, checkBinary, warn } = deps;
@@ -198,6 +192,7 @@ export function checkAutoLaunch(deps: AutoLaunchDeps): AutoLaunchResult {
   if (env.NINTHWAVE_MUX) {
     const override = env.NINTHWAVE_MUX as string;
     if (override === "tmux") return { action: "proceed" };
+    if (override === "headless") return { action: "proceed" };
     if (override === "cmux") {
       // Must be inside a cmux session
       if (env.CMUX_WORKSPACE_ID) return { action: "proceed" };
@@ -209,7 +204,7 @@ export function checkAutoLaunch(deps: AutoLaunchDeps): AutoLaunchResult {
     }
     // Invalid value -- warn and fall through to auto-detect
     (warn ?? defaultWarn)(
-      `Invalid NINTHWAVE_MUX="${override}". Valid values: cmux, tmux. Falling back to auto-detect.`,
+      `Invalid NINTHWAVE_MUX="${override}". Valid values: cmux, tmux, headless. Falling back to auto-detect.`,
     );
   }
 
@@ -231,13 +226,8 @@ export function checkAutoLaunch(deps: AutoLaunchDeps): AutoLaunchResult {
     };
   }
 
-  // 6. Nothing installed
-  return {
-    action: "error",
-    message:
-      "No multiplexer available. Install tmux (brew install tmux) or cmux (brew install --cask manaflow-ai/cmux/cmux).",
-    reason: "nothing-installed",
-  };
+  // 6. Nothing installed -- proceed with headless fallback
+  return { action: "proceed" };
 }
 
 const defaultAutoLaunchDeps: AutoLaunchDeps = {

@@ -16,6 +16,7 @@ vi.mock("../core/cmux.ts", () => ({
 }));
 
 import * as cmux from "../core/cmux.ts";
+import { HeadlessAdapter } from "../core/headless.ts";
 import {
   CmuxAdapter,
   detectMuxType,
@@ -131,11 +132,9 @@ describe("detectMuxType", () => {
     expect(detectMuxType(deps)).toBe("cmux");
   });
 
-  it("throws when no multiplexer is available", () => {
+  it("falls back to headless when no multiplexer is available", () => {
     const deps = makeDeps({}, []);
-    expect(() => detectMuxType(deps)).toThrow(
-      "No multiplexer available",
-    );
+    expect(detectMuxType(deps)).toBe("headless");
   });
 
   it("prefers session env var over binary detection", () => {
@@ -153,6 +152,11 @@ describe("detectMuxType", () => {
   it("returns cmux when NINTHWAVE_MUX=cmux", () => {
     const deps = makeDeps({ NINTHWAVE_MUX: "cmux" });
     expect(detectMuxType(deps)).toBe("cmux");
+  });
+
+  it("returns headless when NINTHWAVE_MUX=headless", () => {
+    const deps = makeDeps({ NINTHWAVE_MUX: "headless" });
+    expect(detectMuxType(deps)).toBe("headless");
   });
 
   it("warns and falls through on invalid NINTHWAVE_MUX", () => {
@@ -253,11 +257,10 @@ describe("getMux", () => {
     expect(typeof mux.setProgress).toBe("function");
   });
 
-  it("falls back to CmuxAdapter when no mux available", () => {
+  it("returns HeadlessAdapter when no mux is available", () => {
     const deps = makeDeps({}, []);
     const mux = getMux(deps);
-    // Falls back gracefully -- caller can check isAvailable()
-    expect(mux).toBeInstanceOf(CmuxAdapter);
+    expect(mux).toBeInstanceOf(HeadlessAdapter);
   });
 
   it("returns TmuxAdapter when detection picks tmux", () => {
