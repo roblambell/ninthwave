@@ -1142,6 +1142,12 @@ export interface FrameLayout {
   headerLines: string[];
   itemLines: string[];
   footerLines: string[];
+  /**
+   * Index into itemLines where the queue section begins (the blank line before
+   * "Queue (N waiting...)"). undefined when there are no queued items.
+   * Used by render functions to pin a queue affordance when the queue is scrolled off.
+   */
+  queueStartIndex?: number;
 }
 
 /**
@@ -1236,6 +1242,37 @@ export function formatConnectionInline(status: CrewStatusInfo): string {
   if (!status.connected) return "Offline";
   if (status.daemonCount <= 1) return "Sharing";
   return `${status.daemonCount} online`;
+}
+
+/**
+ * Format a dim mode indicator line for the status header.
+ * Shows collaboration mode and review mode inline on the main page.
+ * E.g., "  local · reviews off" or "  shared · reviews: ninthwave PRs"
+ * Returns empty string when no mode info is available in viewOptions.
+ */
+export function formatModeIndicator(viewOptions?: ViewOptions): string {
+  if (!viewOptions) return "";
+  const collab = viewOptions.collaborationMode;
+  const review = viewOptions.reviewMode;
+  if (!collab && !review) return "";
+
+  const parts: string[] = [];
+  if (collab) parts.push(collab);
+  if (review) {
+    const label = review === "off" ? "reviews off"
+      : review === "ninthwave-prs" ? "reviews: ninthwave PRs"
+      : "reviews: all PRs";
+    parts.push(label);
+  }
+  return `  ${DIM}${parts.join(" · ")}${RESET}`;
+}
+
+/**
+ * Format a pinned queue summary line shown when queued items are scrolled off.
+ * E.g., "  ↓ Queue: 5 waiting"
+ */
+export function formatQueueSummary(queuedCount: number): string {
+  return `  ${DIM}↓ Queue: ${queuedCount} waiting${RESET}`;
 }
 
 /**
@@ -1343,6 +1380,13 @@ export function buildStatusLayout(
 
   // Header: title with inline crew status + right-aligned metrics
   headerLines.push(formatTitleMetrics(items, termWidth, opts.sessionStartedAt, opts.crewStatus));
+
+  // Mode indicator: collaboration + review state (always visible on main page)
+  const modeIndicator = formatModeIndicator(viewOptions);
+  if (modeIndicator) {
+    headerLines.push(modeIndicator);
+  }
+
   headerLines.push("");
   const depPad = hasDeps ? "  " : "";
   headerLines.push(`  ${DIM}  ${pad("ID", 12)}${pad("STATE", stateColWidth)} ${pad("DURATION", 8)} ${depPad}TITLE${RESET}`);
@@ -1351,6 +1395,7 @@ export function buildStatusLayout(
 
   // Build item lines
   const itemLines: string[] = [];
+  let queueStartIndex: number | undefined;
 
   if (hasDeps) {
     const sorted = sortByBlockedThenId(items, blockedBy!);
@@ -1377,6 +1422,7 @@ export function buildStatusLayout(
       let queueHeader = `Queue (${queuedItems.length} waiting`;
       if (wipLimit !== undefined) queueHeader += `, ${activeCount}/${wipLimit} WIP slots active`;
       queueHeader += ")";
+      queueStartIndex = itemLines.length;
       itemLines.push("");
       itemLines.push(`  ${DIM}${queueHeader}${RESET}`);
       itemLines.push(sep);
@@ -1404,6 +1450,7 @@ export function buildStatusLayout(
       let queueHeader = `Queue (${queuedItems.length} waiting`;
       if (wipLimit !== undefined) queueHeader += `, ${activeCount}/${wipLimit} WIP slots active`;
       queueHeader += ")";
+      queueStartIndex = itemLines.length;
       itemLines.push("");
       itemLines.push(`  ${DIM}${queueHeader}${RESET}`);
       itemLines.push(sep);
@@ -1449,7 +1496,7 @@ export function buildStatusLayout(
     footerLines.push(`  ${DIM}${shortcuts}${RESET}`);
   }
 
-  return { headerLines, itemLines, footerLines };
+  return { headerLines, itemLines, footerLines, queueStartIndex };
 }
 
 /**
@@ -1479,12 +1526,18 @@ export function renderFullScreenFrame(
   termCols: number,
   scrollOffset: number,
 ): string[] {
-  const { headerLines, itemLines, footerLines } = layout;
+  const { headerLines, itemLines, footerLines, queueStartIndex } = layout;
 
   // Reserve space for scroll indicators (1 line each when needed)
   const hasScrollUp = scrollOffset > 0;
   const maxOffset = Math.max(0, itemLines.length - Math.max(1, termRows - headerLines.length - footerLines.length));
   const hasScrollDown = scrollOffset < maxOffset && itemLines.length > (termRows - headerLines.length - footerLines.length);
+
+  // Check if we need a pinned queue summary (queue exists but is entirely below the fold)
+  const queuedCount = queueStartIndex != null
+    ? itemLines.length - queueStartIndex  // lines from queue start to end
+    : 0;
+  const needsQueuePin = queueStartIndex != null && queuedCount > 0;
 
   const scrollIndicatorLines = (hasScrollUp ? 1 : 0) + (hasScrollDown ? 1 : 0);
   const viewportHeight = Math.max(1, termRows - headerLines.length - footerLines.length - scrollIndicatorLines);
@@ -1492,8 +1545,17 @@ export function renderFullScreenFrame(
   // Clamp scroll offset
   const clampedOffset = clampScrollOffset(scrollOffset, itemLines.length, viewportHeight);
 
-  // Slice visible items
-  const visibleItems = itemLines.slice(clampedOffset, clampedOffset + viewportHeight);
+  // Determine if queue is entirely scrolled off
+  const viewEnd = clampedOffset + viewportHeight;
+  const queueScrolledOff = needsQueuePin && queueStartIndex! >= viewEnd;
+
+  // If queue is scrolled off, reserve 1 line for the pinned queue summary
+  const effectiveViewport = queueScrolledOff
+    ? Math.max(1, viewportHeight - 1)
+    : viewportHeight;
+
+  // Re-slice with effective viewport
+  const visibleItems = itemLines.slice(clampedOffset, clampedOffset + effectiveViewport);
 
   // Assemble output
   const output: string[] = [...headerLines];
@@ -1506,9 +1568,19 @@ export function renderFullScreenFrame(
 
   output.push(...visibleItems);
 
+  // Pinned queue summary when queue is below the fold
+  if (queueScrolledOff) {
+    // Count actual queued items (not header/separator lines)
+    const queueItemCount = itemLines
+      .slice(queueStartIndex!)
+      .filter((line) => line.trim() !== "" && !stripAnsiForWidth(line).match(/^[\s─]*$/) && !stripAnsiForWidth(line).startsWith("Queue ("))
+      .length;
+    output.push(formatQueueSummary(queueItemCount > 0 ? queueItemCount : queuedCount));
+  }
+
   // Scroll-down indicator
-  const hiddenBelow = Math.max(0, itemLines.length - clampedOffset - viewportHeight);
-  if (hiddenBelow > 0) {
+  const hiddenBelow = Math.max(0, itemLines.length - clampedOffset - effectiveViewport);
+  if (hiddenBelow > 0 && !queueScrolledOff) {
     output.push(`  ${DIM}↓ ${hiddenBelow} more below${RESET}`);
   }
 
@@ -1711,6 +1783,7 @@ export function buildPanelLayout(
     headerLines: statusLayout.headerLines,
     itemLines: statusLayout.itemLines,
     footerLines: [], // managed by panel footer
+    queueStartIndex: statusLayout.queueStartIndex,
   };
 
   // Build log panel
@@ -1798,6 +1871,7 @@ export function renderPanelFrame(
       headerLines: statusPanel.headerLines,
       itemLines: statusPanel.itemLines,
       footerLines,
+      queueStartIndex: statusPanel.queueStartIndex,
     };
     const frame = renderFullScreenFrame(fullLayout, termRows, termCols, statusScrollOffset);
     return padToHeight(frame, termRows);
@@ -1851,7 +1925,7 @@ export function renderPanelFrame(
 
   const output: string[] = [];
 
-  // Status panel with scroll indicators
+  // Status panel with scroll indicators and queue pinning
   const statusHeader = statusPanel.headerLines;
   const statusItemViewport = Math.max(1, statusRows - statusHeader.length);
   const clampedStatusOffset = clampScrollOffset(statusScrollOffset, statusPanel.itemLines.length, statusItemViewport);
@@ -1859,7 +1933,15 @@ export function renderPanelFrame(
   const hasStatusScrollUp = clampedStatusOffset > 0;
   const hasStatusScrollDown = statusPanel.itemLines.length > clampedStatusOffset + statusItemViewport;
   const statusScrollLines = (hasStatusScrollUp ? 1 : 0) + (hasStatusScrollDown ? 1 : 0);
-  const adjustedStatusViewport = Math.max(1, statusItemViewport - statusScrollLines);
+  let adjustedStatusViewport = Math.max(1, statusItemViewport - statusScrollLines);
+
+  // Check if queue is scrolled off in split mode
+  const qsi = statusPanel.queueStartIndex;
+  const statusViewEnd = clampedStatusOffset + adjustedStatusViewport;
+  const queueScrolledOffSplit = qsi != null && qsi >= statusViewEnd && statusPanel.itemLines.length > qsi;
+  if (queueScrolledOffSplit) {
+    adjustedStatusViewport = Math.max(1, adjustedStatusViewport - 1);
+  }
 
   output.push(...statusHeader);
 
@@ -1874,7 +1956,16 @@ export function renderPanelFrame(
   );
   output.push(...visibleStatusItems);
 
-  if (hasStatusScrollDown) {
+  // Pinned queue summary in split mode
+  if (queueScrolledOffSplit) {
+    const queueItemCount = statusPanel.itemLines
+      .slice(qsi!)
+      .filter((line) => line.trim() !== "" && !stripAnsiForWidth(line).match(/^[\s─]*$/) && !stripAnsiForWidth(line).startsWith("Queue ("))
+      .length;
+    output.push(formatQueueSummary(queueItemCount > 0 ? queueItemCount : statusPanel.itemLines.length - qsi!));
+  }
+
+  if (hasStatusScrollDown && !queueScrolledOffSplit) {
     const hidden = Math.max(0, statusPanel.itemLines.length - clampedStatusOffset - adjustedStatusViewport);
     output.push(`  ${DIM}↓ ${hidden} more below${RESET}`);
   }

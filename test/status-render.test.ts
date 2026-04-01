@@ -56,6 +56,8 @@ import {
   renderDetailOverlay,
   collaborationLabel,
   reviewModeLabel,
+  formatModeIndicator,
+  formatQueueSummary,
   type CollaborationMode,
   type ReviewMode,
 } from "../core/status-render.ts";
@@ -3434,5 +3436,300 @@ describe("buildStatusLayout footer controls hint", () => {
     const footerText = stripAnsi(layout.footerLines.join("\n"));
     expect(footerText).toContain("c controls");
     expect(footerText).toContain("? help");
+  });
+});
+
+// ── Mode indicator (M-STUI-4) ────────────────────────────────────────────────
+
+describe("formatModeIndicator", () => {
+  it("returns empty string with no viewOptions", () => {
+    expect(formatModeIndicator()).toBe("");
+    expect(formatModeIndicator({})).toBe("");
+  });
+
+  it("shows collaboration mode alone", () => {
+    const result = formatModeIndicator({ collaborationMode: "shared" });
+    expect(stripAnsi(result)).toContain("shared");
+  });
+
+  it("shows review mode alone", () => {
+    const result = formatModeIndicator({ reviewMode: "ninthwave-prs" });
+    expect(stripAnsi(result)).toContain("reviews: ninthwave PRs");
+  });
+
+  it("shows both collaboration and review mode", () => {
+    const result = formatModeIndicator({
+      collaborationMode: "local",
+      reviewMode: "off",
+    });
+    const plain = stripAnsi(result);
+    expect(plain).toContain("local");
+    expect(plain).toContain("reviews off");
+  });
+
+  it("shows 'reviews: all PRs' for all-prs mode", () => {
+    const result = formatModeIndicator({ reviewMode: "all-prs" });
+    expect(stripAnsi(result)).toContain("reviews: all PRs");
+  });
+});
+
+describe("formatQueueSummary", () => {
+  it("formats a pinned queue summary line", () => {
+    const result = formatQueueSummary(5);
+    const plain = stripAnsi(result);
+    expect(plain).toContain("Queue: 5 waiting");
+    expect(plain).toContain("↓");
+  });
+});
+
+// ── Layout rules: mode indicator in header (M-STUI-4) ───────────────────────
+
+describe("buildStatusLayout mode indicator in header", () => {
+  it("includes collaboration and review mode in header when provided", () => {
+    const items = [makeStatusItem({ state: "implementing" })];
+    const layout = buildStatusLayout(items, 80, 5, false, {
+      collaborationMode: "shared",
+      reviewMode: "ninthwave-prs",
+    });
+    const headerText = layout.headerLines.map(stripAnsi).join("\n");
+    expect(headerText).toContain("shared");
+    expect(headerText).toContain("reviews: ninthwave PRs");
+  });
+
+  it("does not include mode line when no mode info in viewOptions", () => {
+    const items = [makeStatusItem({ state: "implementing" })];
+    const layout = buildStatusLayout(items, 80);
+    const headerText = layout.headerLines.map(stripAnsi).join("\n");
+    expect(headerText).not.toContain("local");
+    expect(headerText).not.toContain("reviews");
+  });
+
+  it("includes mode indicator for all collaboration modes", () => {
+    for (const mode of ["local", "shared", "joined"] as CollaborationMode[]) {
+      const items = [makeStatusItem({ state: "implementing" })];
+      const layout = buildStatusLayout(items, 80, 5, false, {
+        collaborationMode: mode,
+      });
+      const headerText = layout.headerLines.map(stripAnsi).join("\n");
+      expect(headerText).toContain(mode);
+    }
+  });
+});
+
+// ── Layout rules: queueStartIndex tracking (M-STUI-4) ───────────────────────
+
+describe("buildStatusLayout queueStartIndex", () => {
+  it("sets queueStartIndex when queued items exist", () => {
+    const items = [
+      makeStatusItem({ id: "A-1", state: "implementing" }),
+      makeStatusItem({ id: "A-2", state: "implementing" }),
+      makeStatusItem({ id: "A-3", state: "queued" }),
+    ];
+    const layout = buildStatusLayout(items, 80);
+    expect(layout.queueStartIndex).toBeDefined();
+    expect(layout.queueStartIndex).toBeGreaterThan(0);
+    // Queue section should start after active items
+    const textBefore = layout.itemLines.slice(0, layout.queueStartIndex!).map(stripAnsi).join("\n");
+    expect(textBefore).toContain("A-1");
+    expect(textBefore).toContain("A-2");
+    const textAfter = layout.itemLines.slice(layout.queueStartIndex!).map(stripAnsi).join("\n");
+    expect(textAfter).toContain("A-3");
+  });
+
+  it("queueStartIndex is undefined when no queued items", () => {
+    const items = [
+      makeStatusItem({ id: "A-1", state: "implementing" }),
+      makeStatusItem({ id: "A-2", state: "merged" }),
+    ];
+    const layout = buildStatusLayout(items, 80);
+    expect(layout.queueStartIndex).toBeUndefined();
+  });
+
+  it("tracks queueStartIndex with dependencies", () => {
+    const items = [
+      makeStatusItem({ id: "A-1", state: "implementing", dependencies: [] }),
+      makeStatusItem({ id: "A-2", state: "queued", dependencies: ["A-1"] }),
+    ];
+    const layout = buildStatusLayout(items, 80);
+    expect(layout.queueStartIndex).toBeDefined();
+  });
+});
+
+// ── Layout rules: long active lists with queue pinning (M-STUI-4) ────────────
+
+describe("renderFullScreenFrame queue pinning", () => {
+  it("pins queue summary when queue is scrolled off", () => {
+    // Create a layout with many active items and some queued items
+    const activeItems: string[] = [];
+    for (let i = 0; i < 20; i++) {
+      activeItems.push(`  active-item-${i}`);
+    }
+    const queueItems = ["", "  Queue (3 waiting)", "  ───", "  q-1", "  q-2", "  q-3"];
+
+    const layout: FrameLayout = {
+      headerLines: ["Title", ""],
+      itemLines: [...activeItems, ...queueItems],
+      footerLines: ["footer"],
+      queueStartIndex: activeItems.length,
+    };
+
+    // Small viewport: only 10 rows total, so header=2, footer=1 → 7 for items
+    const frame = renderFullScreenFrame(layout, 10, 80, 0);
+    const plain = frame.map(stripAnsi).join("\n");
+    // Queue is scrolled off, so a pinned summary should appear
+    expect(plain).toContain("Queue:");
+    expect(plain).toContain("waiting");
+  });
+
+  it("does not pin queue summary when queue is visible", () => {
+    const layout: FrameLayout = {
+      headerLines: ["Title"],
+      itemLines: ["  active-1", "", "  Queue (1 waiting)", "  ───", "  q-1"],
+      footerLines: ["footer"],
+      queueStartIndex: 1,
+    };
+
+    // Large viewport: all items fit
+    const frame = renderFullScreenFrame(layout, 20, 80, 0);
+    const plain = frame.map(stripAnsi).join("\n");
+    // Queue header is directly visible, no need for pinned summary
+    expect(plain).toContain("Queue (1 waiting)");
+    // Should NOT have the pinned queue summary line
+    const lines = frame.map(stripAnsi);
+    const queueSummaryLines = lines.filter((l) => l.includes("↓ Queue:"));
+    expect(queueSummaryLines).toHaveLength(0);
+  });
+
+  it("does not pin queue summary when no queued items", () => {
+    const layout: FrameLayout = {
+      headerLines: ["Title"],
+      itemLines: ["  active-1", "  active-2"],
+      footerLines: ["footer"],
+    };
+    const frame = renderFullScreenFrame(layout, 10, 80, 0);
+    const plain = frame.map(stripAnsi).join("\n");
+    expect(plain).not.toContain("Queue:");
+  });
+});
+
+// ── Layout rules: long queued lists (M-STUI-4) ──────────────────────────────
+
+describe("layout with long queued lists", () => {
+  it("status page remains legible with many queued items", () => {
+    const items: StatusItem[] = [];
+    // 3 active + 15 queued
+    for (let i = 0; i < 3; i++) {
+      items.push(makeStatusItem({ id: `A-${i}`, state: "implementing" }));
+    }
+    for (let i = 0; i < 15; i++) {
+      items.push(makeStatusItem({ id: `Q-${i}`, state: "queued" }));
+    }
+    const layout = buildStatusLayout(items, 80, 5);
+    expect(layout.queueStartIndex).toBeDefined();
+
+    // The queue header should mention 15 waiting
+    const queueLines = layout.itemLines.slice(layout.queueStartIndex!).map(stripAnsi).join("\n");
+    expect(queueLines).toContain("15 waiting");
+  });
+});
+
+// ── Layout rules: narrow and short terminals (M-STUI-4) ─────────────────────
+
+describe("layout with narrow terminals", () => {
+  it("renders without crashing at narrow width (40 cols)", () => {
+    const items = [
+      makeStatusItem({ id: "A-1", state: "implementing" }),
+      makeStatusItem({ id: "A-2", state: "queued" }),
+    ];
+    const layout = buildStatusLayout(items, 40, 3, false, {
+      collaborationMode: "local",
+      reviewMode: "off",
+    });
+    expect(layout.headerLines.length).toBeGreaterThan(0);
+    expect(layout.itemLines.length).toBeGreaterThan(0);
+    // Mode indicator should be present
+    const headerText = layout.headerLines.map(stripAnsi).join("\n");
+    expect(headerText).toContain("local");
+  });
+
+  it("renders without crashing at minimum terminal height", () => {
+    const items = [
+      makeStatusItem({ id: "A-1", state: "implementing" }),
+      makeStatusItem({ id: "A-2", state: "queued" }),
+    ];
+    const layout = buildStatusLayout(items, 80, 3, false, {
+      collaborationMode: "shared",
+      reviewMode: "ninthwave-prs",
+    });
+    // Render at very small terminal height
+    const frame = renderFullScreenFrame(layout, MIN_FULLSCREEN_ROWS, 80, 0);
+    expect(frame.length).toBeGreaterThan(0);
+    // Should have at least the header
+    const text = frame.map(stripAnsi).join("\n");
+    expect(text).toContain("Ninthwave");
+  });
+});
+
+// ── Panel layout queue pinning in split mode (M-STUI-4) ─────────────────────
+
+describe("renderPanelFrame split mode queue pinning", () => {
+  it("pins queue summary in split mode when queue is scrolled off", () => {
+    // Build a large active list that pushes queue off
+    const activeLines: string[] = [];
+    for (let i = 0; i < 25; i++) {
+      activeLines.push(`  active-${i}`);
+    }
+    const queueLines = ["", "  Queue (3 waiting)", "  ───", "  q-1", "  q-2", "  q-3"];
+
+    const panelLayout: PanelLayout = {
+      mode: "split",
+      statusPanel: {
+        headerLines: ["Title", ""],
+        itemLines: [...activeLines, ...queueLines],
+        footerLines: [],
+        queueStartIndex: activeLines.length,
+      },
+      logPanel: {
+        lines: ["  log-1", "  log-2"],
+        totalEntries: 2,
+        scrollOffset: 0,
+      },
+      footerLines: ["separator", "  progress", "  controls"],
+    };
+
+    const frame = renderPanelFrame(panelLayout, 40, 80, 0);
+    const plain = frame.map(stripAnsi).join("\n");
+    expect(plain).toContain("Queue:");
+    expect(plain).toContain("waiting");
+  });
+});
+
+// ── buildPanelLayout passes queueStartIndex through (M-STUI-4) ──────────────
+
+describe("buildPanelLayout queueStartIndex passthrough", () => {
+  it("passes queueStartIndex to status panel in split mode", () => {
+    const items = [
+      makeStatusItem({ id: "A-1", state: "implementing" }),
+      makeStatusItem({ id: "A-2", state: "queued" }),
+    ];
+    const logs: LogEntry[] = [{ timestamp: "2024-01-01T00:00:00Z", itemId: "A-1", message: "test" }];
+    const layout = buildPanelLayout("split", items, logs, 80, 50, {
+      wipLimit: 3,
+    });
+    expect(layout.statusPanel).not.toBeNull();
+    expect(layout.statusPanel!.queueStartIndex).toBeDefined();
+  });
+
+  it("passes queueStartIndex to status panel in status-only mode", () => {
+    const items = [
+      makeStatusItem({ id: "A-1", state: "implementing" }),
+      makeStatusItem({ id: "A-2", state: "queued" }),
+    ];
+    const logs: LogEntry[] = [];
+    const layout = buildPanelLayout("status-only", items, logs, 80, 50, {
+      wipLimit: 3,
+    });
+    expect(layout.statusPanel).not.toBeNull();
+    expect(layout.statusPanel!.queueStartIndex).toBeDefined();
   });
 });
