@@ -63,6 +63,8 @@ export class Orchestrator {
   private items: Map<string, OrchestratorItem> = new Map();
   /** Memory-adjusted WIP limit. When set, takes precedence over config.wipLimit for slot calculation. */
   private _effectiveWipLimit?: number;
+  /** Re-evaluate review-pending items once on the next poll after a strategy change. */
+  private reevaluateReviewPendingOnNextPoll = false;
 
   constructor(config: Partial<OrchestratorConfig> = {}) {
     this.config = { ...DEFAULT_CONFIG, ...config };
@@ -97,14 +99,18 @@ export class Orchestrator {
   /**
    * Change the merge strategy at runtime.
    * "bypass" is only allowed when config.bypassEnabled is true (set via --dangerously-bypass).
-   * Forward-only: existing items keep their current state; only subsequent evaluateMerge calls
-   * are affected by the new strategy.
+   * Existing items keep their current state immediately; review-pending items are
+   * re-evaluated on the next poll cycle under the new strategy.
    */
   setMergeStrategy(strategy: MergeStrategy): void {
     if (strategy === "bypass" && !this.config.bypassEnabled) {
       throw new Error('Cannot set merge strategy to "bypass" without --dangerously-bypass flag');
     }
+    if (strategy === this.config.mergeStrategy) {
+      return;
+    }
     (this.config as { mergeStrategy: MergeStrategy }).mergeStrategy = strategy;
+    this.reevaluateReviewPendingOnNextPoll = true;
   }
 
   /**
@@ -182,6 +188,8 @@ export class Orchestrator {
    */
   processTransitions(snapshot: PollSnapshot, now: Date = new Date()): Action[] {
     const actions: Action[] = [];
+    const forceReviewPendingReevaluation = this.reevaluateReviewPendingOnNextPoll;
+    this.reevaluateReviewPendingOnNextPoll = false;
 
     // Build lookup for snapshot items
     const snapshotMap = new Map<string, ItemSnapshot>();
@@ -192,7 +200,7 @@ export class Orchestrator {
     // Process each tracked item against the snapshot
     for (const item of this.getAllItems()) {
       const snap = snapshotMap.get(item.id);
-      const newActions = this.transitionItem(item, snap, now);
+      const newActions = this.transitionItem(item, snap, now, forceReviewPendingReevaluation);
       actions.push(...newActions);
     }
 
@@ -278,6 +286,7 @@ export class Orchestrator {
     item: OrchestratorItem,
     snap: ItemSnapshot | undefined,
     now: Date,
+    forceReviewPendingReevaluation: boolean,
   ): Action[] {
     const prevState = item.state;
     let actions: Action[];
@@ -342,7 +351,7 @@ export class Orchestrator {
         break;
 
       case "review-pending":
-        actions = this.handleReviewPending(item, snap);
+        actions = this.handleReviewPending(item, snap, forceReviewPendingReevaluation);
         break;
 
       case "merging":
@@ -723,6 +732,7 @@ export class Orchestrator {
   private handleReviewPending(
     item: OrchestratorItem,
     snap: ItemSnapshot | undefined,
+    forceReevaluation: boolean,
   ): Action[] {
     const actions: Action[] = [];
 
@@ -733,8 +743,10 @@ export class Orchestrator {
       return actions;
     }
 
-    // If review approved and CI still passes, evaluate merge
-    if (snap?.reviewDecision === "APPROVED" && snap?.ciStatus === "pass") {
+    // Re-evaluate review-pending items after a strategy change on the next poll.
+    // This lets manual→auto/bypass revisit already-parked items without requiring
+    // another state transition. CHANGES_REQUESTED is still enforced in evaluateMerge().
+    if (snap?.ciStatus === "pass" && (snap?.reviewDecision === "APPROVED" || forceReevaluation)) {
       actions.push(...this.evaluateMerge(item, snap, snap?.eventTime));
       return actions;
     }
