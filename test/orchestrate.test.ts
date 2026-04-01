@@ -35,6 +35,7 @@ import {
   formatArmingBanner,
   waitForArmingKey,
   shouldShowStartupArmingWindow,
+  applyRuntimeCollaborationAction,
   createRuntimeControlHandlers,
   runInteractiveWatchOperatorSession,
   spawnInteractiveEngineChild,
@@ -4813,6 +4814,152 @@ describe("createRuntimeControlHandlers", () => {
   });
 });
 
+describe("applyRuntimeCollaborationAction", () => {
+  function makeBroker(overrides: Partial<CrewBroker> = {}): CrewBroker {
+    return {
+      connect: vi.fn(async () => {}),
+      sync: vi.fn(),
+      claim: vi.fn(async () => null),
+      complete: vi.fn(),
+      scheduleClaim: vi.fn(async () => false),
+      heartbeat: vi.fn(),
+      disconnect: vi.fn(),
+      isConnected: vi.fn(() => true),
+      getCrewStatus: vi.fn(() => null),
+      report: vi.fn(),
+      ...overrides,
+    };
+  }
+
+  it("shares once, connects, and reuses the active code on repeat share", async () => {
+    const state = {
+      mode: "local" as const,
+      connectMode: false,
+    };
+    const fetchFn = vi.fn(async () => ({
+      ok: true,
+      json: async () => ({ code: "ABCD-1234" }),
+    }));
+    const broker = makeBroker();
+    const createBroker = vi.fn(() => broker);
+    const saveCrewCodeFn = vi.fn();
+    const onBrokerChanged = vi.fn();
+
+    const firstResult = await applyRuntimeCollaborationAction(state, { action: "share" }, {
+      projectRoot: "/project",
+      crewRepoUrl: "git@github.com:test/repo.git",
+      crewName: "operator",
+      log: () => {},
+      fetchFn: fetchFn as unknown as typeof fetch,
+      createBroker,
+      saveCrewCodeFn,
+      onBrokerChanged,
+    });
+    const secondResult = await applyRuntimeCollaborationAction(state, { action: "share" }, {
+      projectRoot: "/project",
+      crewRepoUrl: "git@github.com:test/repo.git",
+      crewName: "operator",
+      log: () => {},
+      fetchFn: fetchFn as unknown as typeof fetch,
+      createBroker,
+      saveCrewCodeFn,
+      onBrokerChanged,
+    });
+
+    expect(firstResult).toEqual({ mode: "shared", code: "ABCD-1234" });
+    expect(secondResult).toEqual({ mode: "shared", code: "ABCD-1234" });
+    expect(fetchFn).toHaveBeenCalledTimes(1);
+    expect(createBroker).toHaveBeenCalledTimes(1);
+    expect(broker.connect).toHaveBeenCalledTimes(1);
+    expect(saveCrewCodeFn).toHaveBeenCalledTimes(1);
+    expect(onBrokerChanged).toHaveBeenCalledTimes(1);
+    expect(state).toMatchObject({
+      mode: "shared",
+      crewCode: "ABCD-1234",
+      connectMode: true,
+      crewBroker: broker,
+    });
+  });
+
+  it("keeps the current session intact on a rejected join", async () => {
+    const currentBroker = makeBroker();
+    const rejectedBroker = makeBroker({
+      connect: vi.fn(async () => {
+        throw new Error("Invalid session code");
+      }),
+    });
+    const state = {
+      mode: "shared" as const,
+      crewCode: "KEEP-1234",
+      crewUrl: "wss://ninthwave.sh",
+      crewBroker: currentBroker,
+      connectMode: true,
+    };
+
+    const result = await applyRuntimeCollaborationAction(state, { action: "join", code: "BAD1" }, {
+      projectRoot: "/project",
+      crewRepoUrl: "git@github.com:test/repo.git",
+      log: () => {},
+      createBroker: vi.fn(() => rejectedBroker),
+      saveCrewCodeFn: vi.fn(),
+      onBrokerChanged: vi.fn(),
+    });
+
+    expect(result).toEqual({ error: "Invalid session code" });
+    expect(currentBroker.disconnect).not.toHaveBeenCalled();
+    expect(state).toMatchObject({
+      mode: "shared",
+      crewCode: "KEEP-1234",
+      crewBroker: currentBroker,
+      connectMode: true,
+    });
+  });
+
+  it("joins a new code, then disconnects cleanly back to local mode", async () => {
+    const currentBroker = makeBroker();
+    const joinedBroker = makeBroker();
+    const saveCrewCodeFn = vi.fn();
+    const onBrokerChanged = vi.fn();
+    const state = {
+      mode: "shared" as const,
+      crewCode: "SHARE-1234",
+      crewUrl: "wss://ninthwave.sh",
+      crewBroker: currentBroker,
+      connectMode: true,
+    };
+
+    const joinResult = await applyRuntimeCollaborationAction(state, { action: "join", code: "JOIN-5678" }, {
+      projectRoot: "/project",
+      crewRepoUrl: "git@github.com:test/repo.git",
+      log: () => {},
+      createBroker: vi.fn(() => joinedBroker),
+      saveCrewCodeFn,
+      onBrokerChanged,
+    });
+    const localResult = await applyRuntimeCollaborationAction(state, { action: "local" }, {
+      projectRoot: "/project",
+      crewRepoUrl: "git@github.com:test/repo.git",
+      log: () => {},
+      createBroker: vi.fn(),
+      saveCrewCodeFn,
+      onBrokerChanged,
+    });
+
+    expect(joinResult).toEqual({ mode: "joined", code: "JOIN-5678" });
+    expect(localResult).toEqual({ mode: "local" });
+    expect(joinedBroker.connect).toHaveBeenCalledTimes(1);
+    expect(currentBroker.disconnect).toHaveBeenCalledTimes(1);
+    expect(joinedBroker.disconnect).toHaveBeenCalledTimes(1);
+    expect(saveCrewCodeFn).toHaveBeenCalledTimes(1);
+    expect(state).toMatchObject({
+      mode: "local",
+      crewCode: undefined,
+      crewBroker: undefined,
+      connectMode: false,
+    });
+  });
+});
+
 describe("interactive watch instrumentation", () => {
   it("captures stage timings and warns on long blocking stages in tui mode", async () => {
     const orch = new Orchestrator({ fixForward: false, wipLimit: 1, mergeStrategy: "auto" });
@@ -5879,6 +6026,49 @@ describe("interactive watch operator session", () => {
     });
     expect(tuiState.engineDisconnected).toBe(false);
     expect(result.completionAction).toBeUndefined();
+  });
+
+  it("bridges live collaboration requests to the engine and resolves control results", async () => {
+    const stdin = makeOperatorStdin();
+    const { stream: stdout } = makeOperatorStdout();
+    const tuiState = makeOperatorTuiState();
+    const child = makeOperatorChild();
+    let requestCollaboration!: (request: { action: "share" | "join" | "local"; code?: string }) => Promise<{ mode?: "local" | "shared" | "joined"; code?: string; error?: string }>;
+
+    const sessionPromise = runInteractiveWatchOperatorSession({
+      projectRoot: "/project",
+      childArgs: ["--items", "H-TRS-3"],
+      tuiState,
+      log: () => {},
+      initialSnapshot: {
+        daemonState: makeOperatorSnapshot().state,
+        runtime: makeOperatorSnapshot().runtime,
+      },
+      watchMode: true,
+      stdin,
+      stdout,
+      spawnChild: () => child,
+      bindCollaborationRequester: (requester) => {
+        requestCollaboration = requester as typeof requestCollaboration;
+      },
+    });
+
+    await Promise.resolve();
+
+    const resultPromise = requestCollaboration({ action: "share" });
+    const requestMessage = JSON.parse((child.stdin.write as any).mock.calls.at(-1)[0]);
+    expect(requestMessage).toMatchObject({ type: "runtime-collaboration", action: "share" });
+
+    child.emitLine({
+      type: "control-result",
+      requestId: requestMessage.requestId,
+      result: { mode: "shared", code: "ABCD-1234" },
+    });
+
+    await expect(resultPromise).resolves.toEqual({ mode: "shared", code: "ABCD-1234" });
+
+    (stdin as any)._emit("data", "q");
+    await sessionPromise;
   });
 });
 

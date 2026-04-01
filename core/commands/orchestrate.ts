@@ -5,7 +5,8 @@
 
 import { existsSync, mkdirSync, readdirSync, appendFileSync } from "fs";
 import { join, basename, dirname } from "path";
-import { totalmem, freemem } from "os";
+import { totalmem, freemem, hostname } from "os";
+import { randomUUID } from "crypto";
 import { execSync, spawn } from "node:child_process";
 import { getAvailableMemory } from "../memory.ts";
 import {
@@ -143,6 +144,8 @@ import {
   createDetachedDaemonEngineRunner,
   createInteractiveChildEngineRunner,
   createRuntimeControlHandlers,
+  type RuntimeCollaborationActionRequest,
+  type RuntimeCollaborationActionResult,
   type WatchEngineControlCommand,
   type WatchEngineSnapshotEvent,
 } from "../watch-engine-runner.ts";
@@ -434,6 +437,7 @@ export type InteractiveEngineTransportMessage =
   | { type: "snapshot"; event: WatchEngineSnapshotEvent }
   | { type: "log"; entry: LogEntry }
   | { type: "result"; result: OrchestrateLoopResult }
+  | { type: "control-result"; requestId: string; result: RuntimeCollaborationActionResult }
   | { type: "fatal"; error: string };
 
 export const TEST_INTERACTIVE_ENGINE_STARTUP_FAIL_ENV = "NINTHWAVE_TEST_ENGINE_STARTUP_FAIL";
@@ -546,6 +550,187 @@ export function buildInteractiveEngineChildArgs(
   if (parsed.frictionDir) childArgs.push("--friction-log", parsed.frictionDir);
 
   return childArgs;
+}
+
+const DEFAULT_CREW_URL = "wss://ninthwave.sh";
+
+export interface CollaborationSessionState {
+  mode: "local" | "shared" | "joined";
+  crewCode?: string;
+  crewUrl?: string;
+  crewBroker?: CrewBroker;
+  connectMode: boolean;
+}
+
+export interface CollaborationSessionBrokerInfo {
+  mode: CollaborationSessionState["mode"];
+  crewCode?: string;
+}
+
+export interface ApplyRuntimeCollaborationActionDeps {
+  projectRoot: string;
+  crewRepoUrl: string;
+  crewName?: string;
+  log: (entry: LogEntry) => void;
+  fetchFn?: typeof fetch;
+  saveCrewCodeFn?: typeof saveCrewCode;
+  createBroker?: (
+    projectRoot: string,
+    crewUrl: string,
+    crewCode: string,
+    crewRepoUrl: string,
+    deps: ConstructorParameters<typeof WebSocketCrewBroker>[4],
+    crewName?: string,
+  ) => CrewBroker;
+  onBrokerChanged?: (broker: CrewBroker | undefined, info: CollaborationSessionBrokerInfo) => void;
+}
+
+function resolveCrewSocketUrl(crewUrl?: string): string {
+  return crewUrl ?? DEFAULT_CREW_URL;
+}
+
+function resolveCrewHttpUrl(crewUrl?: string): string {
+  return resolveCrewSocketUrl(crewUrl).replace(/^wss?:\/\//, "https://");
+}
+
+async function createCrewCode(
+  crewUrl: string | undefined,
+  crewRepoUrl: string,
+  fetchFn: typeof fetch,
+): Promise<string> {
+  const response = await fetchFn(`${resolveCrewHttpUrl(crewUrl)}/api/crews`, {
+    method: "POST",
+    body: JSON.stringify({ repoUrl: crewRepoUrl }),
+    headers: { "Content-Type": "application/json" },
+  });
+
+  if (!response.ok) {
+    const body = await response.text();
+    throw new Error(`Failed to create session: ${response.status}${body ? ` ${body}` : ""}`);
+  }
+
+  const payload = await response.json() as { code?: string };
+  if (!payload.code) {
+    throw new Error("Failed to create session: missing crew code");
+  }
+  return payload.code;
+}
+
+function createCrewBrokerInstance(
+  projectRoot: string,
+  crewUrl: string,
+  crewCode: string,
+  crewRepoUrl: string,
+  log: (entry: LogEntry) => void,
+  crewName?: string,
+  createBroker?: ApplyRuntimeCollaborationActionDeps["createBroker"],
+): CrewBroker {
+  const resolvedName = crewName ?? hostname();
+  if (createBroker) {
+    return createBroker(
+      projectRoot,
+      crewUrl,
+      crewCode,
+      crewRepoUrl,
+      { log: (level, msg) => log({ ts: new Date().toISOString(), level, event: "crew_client", message: msg }) },
+      resolvedName,
+    );
+  }
+  return new WebSocketCrewBroker(
+    projectRoot,
+    crewUrl,
+    crewCode,
+    crewRepoUrl,
+    { log: (level, msg) => log({ ts: new Date().toISOString(), level, event: "crew_client", message: msg }) },
+    resolvedName,
+  );
+}
+
+export async function applyRuntimeCollaborationAction(
+  state: CollaborationSessionState,
+  request: RuntimeCollaborationActionRequest,
+  deps: ApplyRuntimeCollaborationActionDeps,
+): Promise<RuntimeCollaborationActionResult> {
+  const fetchFn = deps.fetchFn ?? fetch;
+  const saveCrewCodeFn = deps.saveCrewCodeFn ?? saveCrewCode;
+
+  if (request.action === "local") {
+    state.crewBroker?.disconnect();
+    state.crewBroker = undefined;
+    state.crewCode = undefined;
+    state.connectMode = false;
+    state.mode = "local";
+    deps.onBrokerChanged?.(undefined, { mode: "local" });
+    deps.log({ ts: new Date().toISOString(), level: "info", event: "runtime_local_selected" });
+    return { mode: "local" };
+  }
+
+  if (request.action === "share"
+    && state.mode === "shared"
+    && state.crewCode
+    && state.crewBroker?.isConnected()) {
+    deps.log({ ts: new Date().toISOString(), level: "info", event: "runtime_share_reused", crewCode: state.crewCode });
+    return { mode: "shared", code: state.crewCode };
+  }
+
+  const nextCrewUrl = resolveCrewSocketUrl(state.crewUrl);
+  let nextCrewCode: string;
+  try {
+    nextCrewCode = request.action === "share"
+      ? await createCrewCode(state.crewUrl, deps.crewRepoUrl, fetchFn)
+      : (request.code ?? "").trim().toUpperCase();
+  } catch (error) {
+    deps.log({
+      ts: new Date().toISOString(),
+      level: "warn",
+      event: request.action === "share" ? "runtime_share_failed" : "runtime_join_failed",
+      error: error instanceof Error ? error.message : String(error),
+    });
+    return { error: error instanceof Error ? error.message : String(error) };
+  }
+
+  if (!nextCrewCode) {
+    return { error: "Enter a session code to join." };
+  }
+
+  if (request.action === "share") {
+    deps.log({ ts: new Date().toISOString(), level: "info", event: "runtime_share_created", crewCode: nextCrewCode });
+  }
+
+  const nextMode = request.action === "share" ? "shared" : "joined";
+  const nextBroker = createCrewBrokerInstance(
+    deps.projectRoot,
+    nextCrewUrl,
+    nextCrewCode,
+    deps.crewRepoUrl,
+    deps.log,
+    deps.crewName,
+    deps.createBroker,
+  );
+
+  try {
+    await nextBroker.connect();
+  } catch (error) {
+    deps.log({
+      ts: new Date().toISOString(),
+      level: "warn",
+      event: request.action === "share" ? "runtime_share_connect_failed" : "runtime_join_failed",
+      crewCode: nextCrewCode,
+      error: error instanceof Error ? error.message : String(error),
+    });
+    return { error: error instanceof Error ? error.message : String(error) };
+  }
+
+  state.crewBroker?.disconnect();
+  state.crewBroker = nextBroker;
+  state.crewCode = nextCrewCode;
+  state.crewUrl = nextCrewUrl;
+  state.connectMode = request.action === "share";
+  state.mode = nextMode;
+  deps.onBrokerChanged?.(nextBroker, { mode: nextMode, crewCode: nextCrewCode });
+  saveCrewCodeFn(deps.projectRoot, nextCrewCode);
+  deps.log({ ts: new Date().toISOString(), level: "info", event: "runtime_crew_connected", crewCode: nextCrewCode, mode: nextMode });
+  return { mode: nextMode, code: nextCrewCode };
 }
 
 export function spawnInteractiveEngineChild(
@@ -1048,6 +1233,7 @@ export interface InteractiveWatchOperatorSessionOptions {
   stdout?: NodeJS.WriteStream;
   spawnChild?: (childArgs: string[], projectRoot: string) => InteractiveEngineChildProcess;
   bindControlSender?: (sender: (command: WatchEngineControlCommand) => void) => void;
+  bindCollaborationRequester?: (requester: (request: RuntimeCollaborationActionRequest) => Promise<RuntimeCollaborationActionResult>) => void;
   setupKeyboardShortcutsFn?: typeof setupKeyboardShortcuts;
   waitForCompletionKeyFn?: typeof waitForCompletionKey;
   renderFrame?: typeof renderTuiPanelFrameFromStatusItems;
@@ -1065,6 +1251,7 @@ export async function runInteractiveWatchOperatorSession(
   const stdout = opts.stdout ?? process.stdout;
   const spawnChild = opts.spawnChild ?? spawnInteractiveEngineChild;
   const bindControlSender = opts.bindControlSender ?? (() => {});
+  const bindCollaborationRequester = opts.bindCollaborationRequester ?? (() => {});
   const setupKeyboardShortcutsFn = opts.setupKeyboardShortcutsFn ?? setupKeyboardShortcuts;
   const waitForCompletionKeyFn = opts.waitForCompletionKeyFn ?? waitForCompletionKey;
   const renderFrame = opts.renderFrame ?? renderTuiPanelFrameFromStatusItems;
@@ -1097,6 +1284,10 @@ export async function runInteractiveWatchOperatorSession(
   const abortController = opts.abortController ?? new AbortController();
   let cleanupKeyboard = () => {};
   let altScreenActive = false;
+  let pendingCollaborationRequests = new Map<string, {
+    resolve: (result: RuntimeCollaborationActionResult) => void;
+    reject: (error: Error) => void;
+  }>();
 
   try {
     if (manageTerminal) {
@@ -1122,6 +1313,19 @@ export async function runInteractiveWatchOperatorSession(
 
       const child = spawnChild(opts.childArgs, opts.projectRoot);
       bindControlSender((command) => writeInteractiveEngineControl(child.stdin, command));
+      bindCollaborationRequester((request) => {
+        const requestId = randomUUID();
+        return new Promise<RuntimeCollaborationActionResult>((resolve, reject) => {
+          pendingCollaborationRequests.set(requestId, { resolve, reject });
+          writeInteractiveEngineControl(child.stdin, {
+            type: "runtime-collaboration",
+            requestId,
+            action: request.action,
+            ...(request.code ? { code: request.code } : {}),
+            ...(request.source ? { source: request.source } : {}),
+          });
+        });
+      });
 
       const closePromise = new Promise<void>((resolve) => {
         child.on("close", (code, signal) => {
@@ -1170,6 +1374,13 @@ export async function runInteractiveWatchOperatorSession(
             childResult = message.result;
             continue;
           }
+          if (message.type === "control-result") {
+            const pending = pendingCollaborationRequests.get(message.requestId);
+            if (!pending) continue;
+            pendingCollaborationRequests.delete(message.requestId);
+            pending.resolve(message.result);
+            continue;
+          }
           if (message.type === "fatal") {
             childError = new Error(message.error);
           }
@@ -1209,6 +1420,11 @@ export async function runInteractiveWatchOperatorSession(
         });
       } finally {
         bindControlSender(() => {});
+        bindCollaborationRequester(async () => ({ error: "Collaboration engine unavailable." }));
+        for (const pending of pendingCollaborationRequests.values()) {
+          pending.reject(new Error("Collaboration engine unavailable."));
+        }
+        pendingCollaborationRequests = new Map();
         if (child.stdout) {
           child.stdout.removeListener("data", onChildData);
         }
@@ -1266,6 +1482,7 @@ export async function runInteractiveWatchOperatorSession(
     }
   } finally {
     bindControlSender(() => {});
+    bindCollaborationRequester(async () => ({ error: "Collaboration engine unavailable." }));
     if (manageKeyboard) cleanupKeyboard();
     if (altScreenActive) {
       write(ALT_SCREEN_OFF);
@@ -3521,45 +3738,58 @@ export async function cmdOrchestrate(
   // Previous collaboration state does not carry into a new run.
   // Explicit --crew or --connect is required to enter collaboration mode.
 
+  const collaborationState: CollaborationSessionState = {
+    mode: crewCode ? (connectMode ? "shared" : "joined") : "local",
+    ...(crewCode ? { crewCode } : {}),
+    ...(crewUrl ? { crewUrl } : {}),
+    connectMode,
+  };
+
+  let updateRuntimeCollaborationBindings = () => {};
+
+  const syncCollaborationLocals = () => {
+    crewBroker = collaborationState.crewBroker;
+    crewCode = collaborationState.crewCode;
+    crewUrl = collaborationState.crewUrl;
+    connectMode = collaborationState.connectMode;
+    updateRuntimeCollaborationBindings();
+  };
+
   if (connectMode && !crewCode) {
     info("Sharing session via ninthwave.sh...");
-    const brokerBaseUrl = crewUrl ?? "https://ninthwave.sh";
-    const httpUrl = brokerBaseUrl.replace(/^wss?:\/\//, "https://");
-    const res = await fetch(`${httpUrl}/api/crews`, {
-      method: "POST",
-      body: JSON.stringify({ repoUrl: crewRepoUrl }),
-      headers: { "Content-Type": "application/json" },
+    const result = await applyRuntimeCollaborationAction(collaborationState, { action: "share", source: "startup" }, {
+      projectRoot,
+      crewRepoUrl,
+      crewName,
+      log,
     });
-    if (!res.ok) {
-      const body = await res.text();
-      die(`Failed to create session: ${res.status} ${body}`);
+    if (result.error || !result.code) {
+      die(result.error ?? "Failed to create session");
     }
-    const body = (await res.json()) as { code: string };
-    crewCode = body.code;
-    if (!crewUrl) crewUrl = "wss://ninthwave.sh";
+    syncCollaborationLocals();
     info(`Session created: ${crewCode}`);
     info(`  Join: nw watch --crew ${crewCode}`);
   }
 
-  let resolvedCrewName: string | undefined;
   if (crewCode) {
-    if (!crewUrl) {
-      crewUrl = "wss://ninthwave.sh";
+    if (!collaborationState.crewBroker) {
+      info(`Joining session via ninthwave.sh (${crewCode})...`);
+      const result = await applyRuntimeCollaborationAction(collaborationState, {
+        action: "join",
+        code: crewCode,
+        source: "startup",
+      }, {
+        projectRoot,
+        crewRepoUrl,
+        crewName,
+        log,
+      });
+      if (result.error) {
+        die(`Failed to connect to crew server: ${result.error}`);
+      }
+      syncCollaborationLocals();
     }
-    resolvedCrewName = crewName ?? (await import("os")).hostname();
-    info(`Joining session via ninthwave.sh (${crewCode})...`);
-    const broker = new WebSocketCrewBroker(projectRoot, crewUrl, crewCode, crewRepoUrl, {
-      log: (level, msg) => log({ ts: new Date().toISOString(), level, event: "crew_client", message: msg }),
-    }, resolvedCrewName);
-
-    try {
-      await broker.connect();
-      info(`Session active on ninthwave.sh as "${resolvedCrewName}"`);
-    } catch (err) {
-      die(`Failed to connect to crew server: ${(err as Error).message}`);
-    }
-    crewBroker = broker;
-    saveCrewCode(projectRoot, crewCode);
+    info(`Session active on ninthwave.sh as "${crewName ?? hostname()}"`);
   }
 
   /** Get broker-fed remote item snapshots for live TUI rendering. */
@@ -3624,9 +3854,9 @@ export async function cmdOrchestrate(
   // TUI state: scroll offset and view option toggles (shared with keyboard handler)
   // Read persisted layout preference (defaults to "status-only" if missing/corrupt)
   const savedPanelMode = tuiMode ? readLayoutPreference(projectRoot) : "status-only";
-  const initialCollaborationMode = persistedCollaborationModeToRuntime(
-    interactiveStartupConfig.defaults.collaborationMode,
-  );
+  const initialCollaborationMode = collaborationState.mode === "local"
+    ? persistedCollaborationModeToRuntime(interactiveStartupConfig.defaults.collaborationMode)
+    : collaborationState.mode;
   const initialReviewMode = orch.config.skipReview
     ? "off" as const
     : reviewExternalEnabled ? "all-prs" as const : "ninthwave-prs" as const;
@@ -3643,11 +3873,66 @@ export async function cmdOrchestrate(
   let lastTuiItems: OrchestratorItem[] = orch.getAllItems();
   let lastTuiHeartbeats = new Map<string, WorkerProgress>();
   let sendRuntimeControl = (_command: WatchEngineControlCommand) => {};
+  let requestCollaborationFromEngine = async (_request: RuntimeCollaborationActionRequest): Promise<RuntimeCollaborationActionResult> => ({
+    error: "Collaboration engine unavailable.",
+  });
+  const applyLocalRuntimeCollaborationAction = async (
+    request: RuntimeCollaborationActionRequest,
+  ): Promise<RuntimeCollaborationActionResult> => {
+    const result = await applyRuntimeCollaborationAction(collaborationState, request, {
+      projectRoot,
+      crewRepoUrl,
+      crewName,
+      log,
+    });
+    syncCollaborationLocals();
+    return result;
+  };
+  const requestRuntimeCollaborationAction = async (
+    request: RuntimeCollaborationActionRequest,
+  ): Promise<RuntimeCollaborationActionResult> => {
+    if (isInteractiveEngineChild || !tuiMode) {
+      return applyLocalRuntimeCollaborationAction(request);
+    }
+
+    const result = await requestCollaborationFromEngine(request);
+    if (result.error) return result;
+
+    if (request.action === "local") {
+      return applyLocalRuntimeCollaborationAction(request);
+    }
+
+    if (
+      request.action === "share"
+      && collaborationState.mode === "shared"
+      && collaborationState.crewCode === result.code
+      && collaborationState.crewBroker?.isConnected()
+    ) {
+      return result;
+    }
+
+    const mirrorResult = await applyLocalRuntimeCollaborationAction({
+      action: "join",
+      code: result.code ?? request.code,
+      source: request.source,
+    });
+    if (mirrorResult.error) return mirrorResult;
+
+    if (request.action === "share") {
+      collaborationState.mode = "shared";
+      collaborationState.connectMode = true;
+      syncCollaborationLocals();
+      return { mode: "shared", code: result.code };
+    }
+
+    return { mode: "joined", code: result.code ?? request.code };
+  };
   const runtimeControlHandlers = createRuntimeControlHandlers({
     sendControl: (command) => {
       sendRuntimeControl(command);
     },
     getWipLimit: () => tuiState.pendingWipLimit ?? wipLimit,
+    requestCollaborationAction: (request) => requestRuntimeCollaborationAction(request),
   });
   const tuiState: TuiState = {
     scrollOffset: 0,
@@ -3747,18 +4032,7 @@ export async function cmdOrchestrate(
         ]),
     );
     applyRuntimeSnapshotToTuiState(tuiState, runtime);
-    // Update crew status from broker
-    if (crewBroker && crewCode) {
-      const cs = crewBroker.getCrewStatus();
-      tuiState.viewOptions.crewStatus = {
-        crewCode: cs?.crewCode ?? crewCode,
-        daemonCount: cs?.daemonCount ?? 0,
-        availableCount: cs?.availableCount ?? 0,
-        claimedCount: cs?.claimedCount ?? 0,
-        completedCount: cs?.completedCount ?? 0,
-        connected: crewBroker.isConnected(),
-      };
-    }
+    updateRuntimeCollaborationBindings();
     try {
       writeStateFile(projectRoot, state);
     } catch {
@@ -3907,6 +4181,25 @@ export async function cmdOrchestrate(
     } : {}),
   };
 
+  updateRuntimeCollaborationBindings = () => {
+    loopDeps.crewBroker = crewBroker;
+    tuiState.sessionCode = crewCode ?? undefined;
+    if (crewBroker && crewCode) {
+      const crewStatus = crewBroker.getCrewStatus();
+      tuiState.viewOptions.crewStatus = {
+        crewCode: crewStatus?.crewCode ?? crewCode,
+        daemonCount: crewStatus?.daemonCount ?? 0,
+        availableCount: crewStatus?.availableCount ?? 0,
+        claimedCount: crewStatus?.claimedCount ?? 0,
+        completedCount: crewStatus?.completedCount ?? 0,
+        connected: crewBroker.isConnected(),
+      };
+      return;
+    }
+    tuiState.viewOptions.crewStatus = undefined;
+  };
+  updateRuntimeCollaborationBindings();
+
   // Resolve repo URL for PR URL construction in completion event
   let repoUrl: string | undefined;
   try {
@@ -3969,6 +4262,33 @@ export async function cmdOrchestrate(
     process.stdin.setEncoding("utf8");
     process.stdin.resume();
     let controlBuffer = "";
+    const handleInteractiveEngineControl = async (command: WatchEngineControlCommand) => {
+      if (command.type !== "runtime-collaboration") {
+        sendRuntimeControl(command);
+        return;
+      }
+
+      const result = await applyLocalRuntimeCollaborationAction({
+        action: command.action,
+        ...(command.code ? { code: command.code } : {}),
+        ...(command.source ? { source: command.source } : {}),
+      });
+
+      if (!result.error && result.mode) {
+        sendRuntimeControl({
+          type: "set-collaboration-mode",
+          mode: result.mode,
+          ...(result.code ? { code: result.code } : {}),
+          ...(command.source ? { source: command.source } : {}),
+        });
+      }
+
+      process.stdout.write(JSON.stringify({
+        type: "control-result",
+        requestId: command.requestId,
+        result,
+      } satisfies InteractiveEngineTransportMessage) + "\n");
+    };
     process.stdin.on("data", (chunk: string | Buffer) => {
       controlBuffer += chunk.toString();
       const lines = controlBuffer.split("\n");
@@ -3978,7 +4298,7 @@ export async function cmdOrchestrate(
         if (!trimmed) continue;
         try {
           const command = JSON.parse(trimmed) as WatchEngineControlCommand;
-          sendRuntimeControl(command);
+          void handleInteractiveEngineControl(command);
         } catch {
           // Ignore malformed control commands.
         }
@@ -4044,26 +4364,21 @@ export async function cmdOrchestrate(
 
     // Handle arming window result
     if (armingIntent === "share") {
-      connectMode = true;
-      // Share flow: create session
-      const brokerBaseUrl = crewUrl ?? "https://ninthwave.sh";
-      const httpUrl = brokerBaseUrl.replace(/^wss?:\/\//, "https://");
       try {
-        const res = await fetch(`${httpUrl}/api/crews`, {
-          method: "POST",
-          body: JSON.stringify({ repoUrl: crewRepoUrl }),
-          headers: { "Content-Type": "application/json" },
-        });
-        if (res.ok) {
-          const body = (await res.json()) as { code: string };
-          crewCode = body.code;
-          if (!crewUrl) crewUrl = "wss://ninthwave.sh";
+        const result = await applyLocalRuntimeCollaborationAction({ action: "share", source: "arming" });
+        if (result.code) {
           log({ ts: new Date().toISOString(), level: "info", event: "arming_share_created", crewCode });
-        } else {
-          log({ ts: new Date().toISOString(), level: "warn", event: "arming_share_failed", status: res.status });
         }
-      } catch {
-        log({ ts: new Date().toISOString(), level: "warn", event: "arming_share_unreachable" });
+        if (result.error) {
+          log({ ts: new Date().toISOString(), level: "warn", event: "arming_share_failed", error: result.error });
+        }
+      } catch (error) {
+        log({
+          ts: new Date().toISOString(),
+          level: "warn",
+          event: "arming_share_unreachable",
+          error: error instanceof Error ? error.message : String(error),
+        });
       }
     } else if (armingIntent === "join") {
       // Join flow: prompt for crew code
@@ -4081,37 +4396,19 @@ export async function cmdOrchestrate(
       process.stdout.write(ALT_SCREEN_ON);
       cleanupKeyboard = setupKeyboardShortcuts(abortController, log, process.stdin, tuiState);
       if (joinCode) {
-        crewCode = joinCode;
-        if (!crewUrl) crewUrl = "wss://ninthwave.sh";
-        log({ ts: new Date().toISOString(), level: "info", event: "arming_join_code", crewCode });
+        const result = await applyLocalRuntimeCollaborationAction({ action: "join", code: joinCode, source: "arming" });
+        if (result.error) {
+          log({ ts: new Date().toISOString(), level: "warn", event: "arming_crew_connect_failed", error: result.error });
+        } else {
+          log({ ts: new Date().toISOString(), level: "info", event: "arming_join_code", crewCode });
+        }
       }
     }
     // "local" and "paused" intents: proceed without crew broker.
     // "paused" will be handled by the claimsGatedMs mechanism if needed in the future.
 
-    // Set up crew broker if arming window chose share or join
-    if (crewCode && !crewBroker) {
-      if (!crewUrl) crewUrl = "wss://ninthwave.sh";
-      const resolvedName = crewName ?? (await import("os")).hostname();
-      const broker = new WebSocketCrewBroker(projectRoot, crewUrl, crewCode, crewRepoUrl, {
-        log: (level, msg) => log({ ts: new Date().toISOString(), level, event: "crew_client", message: msg }),
-      }, resolvedName);
-      try {
-        await broker.connect();
-        crewBroker = broker;
-        tuiState.sessionCode = crewCode;
-        loopDeps.crewBroker = broker;
-        saveCrewCode(projectRoot, crewCode);
-        log({ ts: new Date().toISOString(), level: "info", event: "arming_crew_connected", crewCode });
-      } catch (err) {
-        log({
-          ts: new Date().toISOString(),
-          level: "warn",
-          event: "arming_crew_connect_failed",
-          error: (err as Error).message,
-        });
-        // Fall through to local mode
-      }
+    if (crewBroker && crewCode) {
+      log({ ts: new Date().toISOString(), level: "info", event: "arming_crew_connected", crewCode });
     }
   }
 
@@ -4215,6 +4512,9 @@ export async function cmdOrchestrate(
           abortController,
           bindControlSender: (sender) => {
             sendRuntimeControl = sender;
+          },
+          bindCollaborationRequester: (requester) => {
+            requestCollaborationFromEngine = requester;
           },
         });
         operatorLastSnapshot = operatorResult.lastSnapshot;

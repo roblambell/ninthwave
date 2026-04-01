@@ -34,11 +34,26 @@ export interface WatchEngineSnapshotEvent {
   };
 }
 
+export type RuntimeCollaborationAction = "share" | "join" | "local";
+
+export interface RuntimeCollaborationActionRequest {
+  action: RuntimeCollaborationAction;
+  code?: string;
+  source?: string;
+}
+
+export interface RuntimeCollaborationActionResult {
+  mode?: CollaborationMode;
+  code?: string;
+  error?: string;
+}
+
 export type WatchEngineControlCommand =
   | { type: "set-merge-strategy"; strategy: MergeStrategy; source?: string }
   | { type: "set-wip-limit"; limit: number; source?: string }
   | { type: "set-review-mode"; mode: ReviewMode; source?: string }
   | { type: "set-collaboration-mode"; mode: CollaborationMode; code?: string; source?: string }
+  | { type: "runtime-collaboration"; requestId: string; action: RuntimeCollaborationAction; code?: string; source?: string }
   | { type: "extend-timeout"; itemId: string; source?: string }
   | { type: "shutdown"; source?: string };
 
@@ -47,9 +62,9 @@ export interface RuntimeControlHandlers {
   onWipChange?: (delta: number) => void;
   onReviewChange?: (mode: ReviewMode) => void;
   onCollaborationChange?: (mode: CollaborationMode) => void;
-  onCollaborationLocal?: () => { mode: "local" };
-  onCollaborationShare?: () => { mode: "shared" };
-  onCollaborationJoinSubmit?: (code: string) => { mode: "joined" };
+  onCollaborationLocal?: () => void | RuntimeCollaborationActionResult | Promise<void | RuntimeCollaborationActionResult>;
+  onCollaborationShare?: () => void | RuntimeCollaborationActionResult | Promise<void | RuntimeCollaborationActionResult>;
+  onCollaborationJoinSubmit?: (code: string) => void | RuntimeCollaborationActionResult | Promise<void | RuntimeCollaborationActionResult>;
   onExtendTimeout?: (itemId: string) => boolean;
   onShutdown?: () => void;
 }
@@ -58,6 +73,7 @@ export interface RuntimeControlHandlerDeps {
   sendControl: (command: WatchEngineControlCommand) => void;
   getWipLimit: () => number;
   saveUserConfigFn?: typeof saveUserConfig;
+  requestCollaborationAction?: (request: RuntimeCollaborationActionRequest) => void | RuntimeCollaborationActionResult | Promise<void | RuntimeCollaborationActionResult>;
 }
 
 export function createRuntimeControlHandlers(
@@ -100,14 +116,23 @@ export function createRuntimeControlHandlers(
       deps.sendControl({ type: "set-collaboration-mode", mode, source: "keyboard" });
     },
     onCollaborationLocal: () => {
+      if (deps.requestCollaborationAction) {
+        return deps.requestCollaborationAction({ action: "local", source: "keyboard" });
+      }
       deps.sendControl({ type: "set-collaboration-mode", mode: "local", source: "keyboard" });
       return { mode: "local" };
     },
     onCollaborationShare: () => {
+      if (deps.requestCollaborationAction) {
+        return deps.requestCollaborationAction({ action: "share", source: "keyboard" });
+      }
       deps.sendControl({ type: "set-collaboration-mode", mode: "shared", source: "keyboard" });
       return { mode: "shared" };
     },
     onCollaborationJoinSubmit: (code) => {
+      if (deps.requestCollaborationAction) {
+        return deps.requestCollaborationAction({ action: "join", code, source: "keyboard" });
+      }
       deps.sendControl({ type: "set-collaboration-mode", mode: "joined", code, source: "keyboard" });
       return { mode: "joined" };
     },
@@ -220,6 +245,9 @@ export function createWatchEngineRunner(
           ...(command.code ? { code: command.code } : {}),
           source: command.source ?? "runtime-control",
         });
+        return;
+      }
+      case "runtime-collaboration": {
         return;
       }
       case "extend-timeout": {
