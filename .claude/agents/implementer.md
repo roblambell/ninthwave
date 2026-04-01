@@ -165,6 +165,8 @@ Closes YOUR_TODO_ID: <title>
 - [x] <criterion>
 
 ## Work Item Reference
+ID: YOUR_TODO_ID
+Lineage: <lineage token from the work item file>
 Priority: <priority>
 Source: <source>
 EOF
@@ -316,6 +318,8 @@ Implements YOUR_TODO_ID: <title>
 - [ ] <specific test cases relevant to this work item>
 
 ## Work Item Reference
+ID: YOUR_TODO_ID
+Lineage: <lineage token from the work item file>
 Priority: <priority>
 Source: <source>
 EOF

@@ -417,6 +417,51 @@ export function prTitleMatchesWorkItem(
   return normPr === normTodo;
 }
 
+export type PrMetadataMatchMode =
+  | "lineage"
+  | "legacy-title"
+  | "legacy-empty"
+  | "missing-lineage"
+  | "id-mismatch"
+  | "mismatch";
+
+export function classifyPrMetadataMatch(
+  pr: {
+    title: string;
+    body?: string;
+    lineageToken?: string;
+    branchName?: string;
+  },
+  item: Pick<WorkItem, "id" | "title" | "lineageToken">,
+): { matches: boolean; mode: PrMetadataMatchMode } {
+  const reference = pr.body ? parseWorkItemReferenceBlock(pr.body) : undefined;
+  const prLineageToken = (pr.lineageToken ?? reference?.lineageToken)?.toLowerCase();
+  const prItemId = reference?.id;
+
+  if (prItemId && prItemId !== item.id) {
+    return { matches: false, mode: "id-mismatch" };
+  }
+
+  if (item.lineageToken) {
+    if (!prLineageToken) {
+      return { matches: false, mode: "missing-lineage" };
+    }
+    return {
+      matches: prLineageToken === item.lineageToken.toLowerCase(),
+      mode: prLineageToken === item.lineageToken.toLowerCase() ? "lineage" : "mismatch",
+    };
+  }
+
+  if (!prLineageToken && !pr.title) {
+    return { matches: true, mode: "legacy-empty" };
+  }
+
+  return {
+    matches: prTitleMatchesWorkItem(pr.title, item.title, pr.branchName),
+    mode: prTitleMatchesWorkItem(pr.title, item.title, pr.branchName) ? "legacy-title" : "mismatch",
+  };
+}
+
 /**
  * Compare PR metadata against a work item's durable identity.
  *
@@ -432,23 +477,7 @@ export function prMetadataMatchesWorkItem(
   },
   item: Pick<WorkItem, "id" | "title" | "lineageToken">,
 ): boolean {
-  const reference = pr.body ? parseWorkItemReferenceBlock(pr.body) : undefined;
-  const prLineageToken = (pr.lineageToken ?? reference?.lineageToken)?.toLowerCase();
-  const prItemId = reference?.id;
-
-  if (prItemId && prItemId !== item.id) {
-    return false;
-  }
-
-  if (item.lineageToken) {
-    return prLineageToken === item.lineageToken.toLowerCase();
-  }
-
-  if (!prLineageToken && !pr.title) {
-    return true;
-  }
-
-  return prTitleMatchesWorkItem(pr.title, item.title, pr.branchName);
+  return classifyPrMetadataMatch(pr, item).matches;
 }
 
 // ---------------------------------------------------------------------------

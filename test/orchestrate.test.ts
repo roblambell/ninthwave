@@ -42,6 +42,7 @@ import {
   createInteractiveChildEngineRunner,
   renderTuiPanelFrameFromStatusItems,
   resolveInteractiveStartupConfig,
+  pruneMergedStartupReplayItems,
   INTERACTIVE_WATCH_STAGE_WARN_MS,
   LOG_BUFFER_MAX,
   TEST_INTERACTIVE_ENGINE_STARTUP_FAIL_MESSAGE,
@@ -141,7 +142,77 @@ const defaultCtx: ExecutionContext = {
   aiTool: "claude",
 };
 
+const STARTUP_LINEAGE = "24af773b-90c0-4f16-a0fd-5be3c5c0fe89";
+
 // ── Tests ────────────────────────────────────────────────────────────
+
+describe("pruneMergedStartupReplayItems", () => {
+  it("prunes merged items with lingering work files before startup queuing", () => {
+    const staleItem = {
+      ...makeWorkItem("H-STALE-1"),
+      title: "new work",
+      lineageToken: STARTUP_LINEAGE,
+    };
+
+    const result = pruneMergedStartupReplayItems(
+      [staleItem],
+      "/tmp/test-project",
+      (id) => id === "H-STALE-1"
+        ? `H-STALE-1\t42\tmerged\t\t\told work\t${STARTUP_LINEAGE}`
+        : `${id}\t\tno-pr`,
+    );
+
+    expect(result.activeItems).toEqual([]);
+    expect(result.prunedItems).toEqual([
+      { id: "H-STALE-1", prNumber: 42, matchMode: "lineage" },
+    ]);
+  });
+
+  it("keeps reused IDs with different lineage tokens and open PRs", () => {
+    const reusedId = {
+      ...makeWorkItem("H-REUSE-1"),
+      title: "brand new work",
+      lineageToken: STARTUP_LINEAGE,
+    };
+    const openItem = makeWorkItem("H-OPEN-1");
+
+    const result = pruneMergedStartupReplayItems(
+      [reusedId, openItem],
+      "/tmp/test-project",
+      (id) => {
+        if (id === "H-REUSE-1") {
+          return "H-REUSE-1\t43\tmerged\t\t\told work\t7ef7e6d1-3c99-451c-b31a-0d617dbb63eb";
+        }
+        if (id === "H-OPEN-1") {
+          return "H-OPEN-1\t44\topen\tMERGEABLE\t2026-04-01T00:00:00Z";
+        }
+        return `${id}\t\tno-pr`;
+      },
+    );
+
+    expect(result.activeItems.map((item) => item.id)).toEqual(["H-REUSE-1", "H-OPEN-1"]);
+    expect(result.prunedItems).toEqual([]);
+  });
+
+  it("uses the legacy fallback path for token-less items", () => {
+    const legacyItem = {
+      ...makeWorkItem("H-LEGACY-1"),
+      title: "legacy work",
+      lineageToken: undefined,
+    };
+
+    const result = pruneMergedStartupReplayItems(
+      [legacyItem],
+      "/tmp/test-project",
+      () => "H-LEGACY-1\t45\tmerged",
+    );
+
+    expect(result.activeItems).toEqual([]);
+    expect(result.prunedItems).toEqual([
+      { id: "H-LEGACY-1", prNumber: 45, matchMode: "legacy-empty" },
+    ]);
+  });
+});
 
 describe("orchestrateLoop", () => {
   it("logs classified GitHub API warnings", async () => {

@@ -15,7 +15,7 @@ import {
   checkPrStatusDetailedAsync,
   type PrStatusPollResult,
 } from "./commands/pr-monitor.ts";
-import { prMetadataMatchesWorkItem } from "./work-item-files.ts";
+import { classifyPrMetadataMatch } from "./work-item-files.ts";
 import {
   getDefaultBranch as defaultGetDefaultBranch,
   getDefaultBranchAsync as defaultGetDefaultBranchAsync,
@@ -378,13 +378,14 @@ export function buildSnapshot(
           const mergedPrTitle = parts[5] ?? "";
           const mergedPrLineageToken = parts[6] ?? "";
           const alreadyTracked = orchItem.prNumber != null && snap.prNumber === orchItem.prNumber;
+          const prMatch = classifyPrMetadataMatch(
+            { title: mergedPrTitle, lineageToken: mergedPrLineageToken },
+            orchItem.workItem,
+          );
           if (
             isRepairPrCandidate(orchItem.id, candidateId)
             || alreadyTracked
-            || prMetadataMatchesWorkItem(
-              { title: mergedPrTitle, lineageToken: mergedPrLineageToken },
-              orchItem.workItem,
-            )
+            || prMatch.matches
           ) {
             snap.prState = "merged";
           }
@@ -606,13 +607,14 @@ export async function buildSnapshotAsync(
           const mergedPrTitle = parts[5] ?? "";
           const mergedPrLineageToken = parts[6] ?? "";
           const alreadyTracked = orchItem.prNumber != null && snap.prNumber === orchItem.prNumber;
+          const prMatch = classifyPrMetadataMatch(
+            { title: mergedPrTitle, lineageToken: mergedPrLineageToken },
+            orchItem.workItem,
+          );
           if (
             isRepairPrCandidate(orchItem.id, candidateId)
             || alreadyTracked
-            || prMetadataMatchesWorkItem(
-              { title: mergedPrTitle, lineageToken: mergedPrLineageToken },
-              orchItem.workItem,
-            )
+            || prMatch.matches
           ) {
             snap.prState = "merged";
           }

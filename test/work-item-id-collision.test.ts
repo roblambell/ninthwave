@@ -463,6 +463,27 @@ describe("reconstructState: item ID collision safety", () => {
     expect(item.prNumber).toBe(42);
   });
 
+  it("keeps tokenized reused IDs active when merged PR lineage differs", () => {
+    const orch = new Orchestrator();
+    orch.addItem({ ...makeWorkItem("H-FOO-1", "new work"), lineageToken: LINEAGE });
+
+    const tmpDir = makeTmpDir();
+    const wtDir = join(tmpDir, ".ninthwave", ".worktrees");
+    mkdirSync(join(wtDir, "ninthwave-H-FOO-1"), { recursive: true });
+
+    const mockCheckPr = (id: string) => {
+      if (id === "H-FOO-1") {
+        return "H-FOO-1\t42\tmerged\t\t\told work\t6b7f2ec1-9914-40c4-84f6-1fd7b9775733";
+      }
+      return null;
+    };
+
+    reconstructState(orch, tmpDir, wtDir, undefined, mockCheckPr);
+
+    const item = orch.getItem("H-FOO-1")!;
+    expect(item.state).toBe("implementing");
+  });
+
   it("falls back to merged when PR title is empty (no title data available)", () => {
     const orch = new Orchestrator();
     orch.addItem(makeWorkItem("H-FOO-1", "some work"));
@@ -644,5 +665,24 @@ describe("buildSnapshot: item ID collision safety", () => {
     const snap = snapshot.items.find((s) => s.id === "H-FOO-1");
     expect(snap).toBeDefined();
     expect(snap!.prState).toBe("merged");
+  });
+
+  it("ignores stale merged PRs when reused IDs have different lineage tokens", () => {
+    const orch = new Orchestrator();
+    orch.addItem({ ...makeWorkItem("H-FOO-1", "new work"), lineageToken: LINEAGE });
+    orch.hydrateState("H-FOO-1", "implementing");
+
+    const snapshot = buildSnapshot(
+      orch,
+      "/tmp/test",
+      "/tmp/test/.ninthwave/.worktrees",
+      makeNoopMux(),
+      () => null,
+      () => "H-FOO-1\t42\tmerged\t\t\told work\t6b7f2ec1-9914-40c4-84f6-1fd7b9775733",
+    );
+
+    const snap = snapshot.items.find((s) => s.id === "H-FOO-1");
+    expect(snap).toBeDefined();
+    expect(snap!.prState).toBeUndefined();
   });
 });

@@ -25,7 +25,7 @@ import {
 } from "../orchestrator.ts";
 import { parseWorkItems } from "../parser.ts";
 import { resolveRepo, bootstrapRepo } from "../cross-repo.ts";
-import { scanExternalPRs } from "./pr-monitor.ts";
+import { scanExternalPRs, checkPrStatusDetailed, type PrStatusPollResult } from "./pr-monitor.ts";
 import type { ConnectionAction } from "./crew.ts";
 import { launchSingleItem, launchReviewWorker, launchRebaserWorker, launchForwardFixerWorker } from "./launch.ts";
 import { cleanStaleBranchForReuse } from "../branch-cleanup.ts";
@@ -119,6 +119,7 @@ import {
   scheduleTriggerDir,
 } from "../schedule-runner.ts";
 import { listScheduledTasks as listScheduledTasksFromDir } from "../schedule-files.ts";
+import { classifyPrMetadataMatch, type PrMetadataMatchMode } from "../work-item-files.ts";
 // ── Extracted subsystems ─────────────────────────────────────────────
 import {
   buildSnapshot as _buildSnapshot,
@@ -178,6 +179,70 @@ export type { LogEntry } from "../types.ts";
 
 export function structuredLog(entry: LogEntry): void {
   console.log(JSON.stringify(entry));
+}
+
+export interface StartupReplayPrune {
+  id: string;
+  prNumber?: number;
+  matchMode: PrMetadataMatchMode;
+}
+
+export interface StartupReplayPruneResult {
+  activeItems: WorkItem[];
+  prunedItems: StartupReplayPrune[];
+}
+
+function normalizePrPollResult(result: string | null | PrStatusPollResult): PrStatusPollResult {
+  if (typeof result === "string" || result == null) {
+    return { statusLine: result ?? "" };
+  }
+  return result;
+}
+
+export function pruneMergedStartupReplayItems(
+  workItems: WorkItem[],
+  projectRoot: string,
+  checkPr: (id: string, projectRoot: string) => string | null | PrStatusPollResult = checkPrStatusDetailed,
+): StartupReplayPruneResult {
+  const activeItems: WorkItem[] = [];
+  const prunedItems: StartupReplayPrune[] = [];
+
+  for (const item of workItems) {
+    const statusLine = normalizePrPollResult(checkPr(item.id, projectRoot)).statusLine;
+    if (!statusLine) {
+      activeItems.push(item);
+      continue;
+    }
+
+    const parts = statusLine.split("\t");
+    const status = parts[2];
+    if (status !== "merged") {
+      activeItems.push(item);
+      continue;
+    }
+
+    const prNumber = parts[1] ? parseInt(parts[1]!, 10) : undefined;
+    const match = classifyPrMetadataMatch(
+      {
+        title: parts[5] ?? "",
+        lineageToken: parts[6] ?? "",
+      },
+      item,
+    );
+
+    if (!match.matches) {
+      activeItems.push(item);
+      continue;
+    }
+
+    prunedItems.push({
+      id: item.id,
+      ...(prNumber != null ? { prNumber } : {}),
+      matchMode: match.mode,
+    });
+  }
+
+  return { activeItems, prunedItems };
 }
 
 export interface TmuxStartupInfo {
@@ -3373,9 +3438,29 @@ export async function cmdOrchestrate(
   let wipLimit = wipLimitOverride ?? persistedUserCfg.wip_limit ?? computedWipLimit;
   let startupBackendMode = backendModeOverride ?? persistedUserCfg.backend_mode ?? "auto";
 
+  // Apply custom GitHub token before any startup PR polling so replay pruning,
+  // selection, and watch scans all see the same authenticated view.
+  applyGithubToken(projectRoot);
+
+  const loadRunnableWorkItems = (source: "startup" | "watch-scan" | "run-more"): WorkItem[] => {
+    const parsedItems = parseWorkItems(workDir, worktreeDir, projectRoot);
+    const { activeItems, prunedItems } = pruneMergedStartupReplayItems(parsedItems, projectRoot);
+    if (prunedItems.length > 0) {
+      log({
+        ts: new Date().toISOString(),
+        level: "info",
+        event: "startup_replay_pruned",
+        source,
+        count: prunedItems.length,
+        items: prunedItems,
+      });
+    }
+    return activeItems;
+  };
+
   // Parse work items (needed for both interactive and flag-based modes)
   // Pass projectRoot to filter to only items pushed to origin/main
-  const workItems = parseWorkItems(workDir, worktreeDir, projectRoot);
+  const workItems = loadRunnableWorkItems("startup");
   const preConfig = loadConfig(projectRoot);
   const interactiveStartupConfig = resolveInteractiveStartupConfig(preConfig, persistedUserCfg, toolOverride);
 
@@ -3442,9 +3527,6 @@ export async function cmdOrchestrate(
       "Usage: nw --items ID1 ID2 ... [--merge-strategy auto|manual] [--wip-limit N] [--poll-interval SECS] [--daemon] [--no-watch] [--watch-interval SECS]",
     );
   }
-
-  // Apply custom GitHub token so daemon and workers use the configured identity
-  applyGithubToken(projectRoot);
 
   const workItemMap = new Map<string, WorkItem>();
   for (const item of workItems) {
@@ -4146,7 +4228,7 @@ export async function cmdOrchestrate(
     ...(watchMode ? { scanWorkItems: () => {
       try { fetchOrigin(projectRoot, "main"); } catch { /* non-fatal */ }
       try { ffMerge(projectRoot, "main"); } catch { /* non-fatal -- dirty tree or diverged */ }
-      return parseWorkItems(workDir, worktreeDir, projectRoot);
+      return loadRunnableWorkItems("watch-scan");
     } } : {}),
     ...(crewBroker ? { crewBroker } : {}),
     ...(scheduleLoopDeps ? { scheduleDeps: scheduleLoopDeps } : {}),
@@ -4429,7 +4511,7 @@ export async function cmdOrchestrate(
 
         if (operatorResult.completionAction === "run-more") {
           cleanupKeyboard();
-          const freshItems = parseWorkItems(workDir, worktreeDir, projectRoot);
+          const freshItems = loadRunnableWorkItems("run-more");
           const interactiveResult = await runInteractiveFlow(freshItems, operatorLastSnapshot.runtime.wipLimit, {
             showConnectionStep: false,
             skipToolStep: true,
@@ -4515,7 +4597,7 @@ export async function cmdOrchestrate(
         // Re-parse work items and re-enter interactive selection
         // Widgets render in the same alt-screen buffer -- no screen switch needed
         // showConnectionStep: false because session is already established
-        const freshItems = parseWorkItems(workDir, worktreeDir, projectRoot);
+        const freshItems = loadRunnableWorkItems("run-more");
         const interactiveResult = await runInteractiveFlow(freshItems, wipLimit, {
           showConnectionStep: false,
           skipToolStep: true,
