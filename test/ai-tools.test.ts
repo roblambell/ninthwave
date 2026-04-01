@@ -46,6 +46,7 @@ function stubDeps(promptContent = "PROMPT_CONTENT"): LaunchDeps & {
 function stubOpts(overrides: Partial<LaunchOpts> = {}): LaunchOpts {
   return {
     wsName: "test-ws",
+    projectRoot: "/fake/project",
     agentName: "ninthwave-implementer",
     promptFile: "/fake/.ninthwave/.prompt",
     id: "H-TEST-1",

@@ -113,9 +113,10 @@ export function launchAiSession(
   }
 
   const profile = getToolProfile(tool);
-  const stateDir = userStateDir(options.projectRoot ?? worktreePath);
+  const projectRoot = options.projectRoot ?? worktreePath;
+  const stateDir = userStateDir(projectRoot);
   const buildCmd = mux.type === "headless" ? profile.buildHeadlessCmd : profile.buildLaunchCmd;
-  const { cmd } = buildCmd({ wsName, agentName, promptFile, id, stateDir }, deps);
+  const { cmd } = buildCmd({ wsName, projectRoot, agentName, promptFile, id, stateDir }, deps);
 
   const wsRef = mux.launchWorkspace(worktreePath, cmd, id);
   if (!wsRef) {

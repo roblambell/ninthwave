@@ -29,6 +29,8 @@ export interface LaunchDeps {
 export interface LaunchOpts {
   /** Workspace name shown in the multiplexer tab title. */
   wsName: string;
+  /** Absolute path to the repo root containing canonical ninthwave agents/. */
+  projectRoot: string;
   /** Logical agent name to load (e.g. "ninthwave-implementer"). */
   agentName: string;
   /** Absolute path to the .prompt file containing the system prompt. */
@@ -214,13 +216,40 @@ export function runtimeAgentNameForTool(toolId: AiToolId, agentName: string): st
   return runtimeAgentIdFromFilename(filename, copilotProfile.suffix);
 }
 
-function writePromptDataFile(opts: LaunchOpts, deps: LaunchDeps): string {
+function buildPromptDataContent(opts: LaunchOpts, deps: LaunchDeps): string {
+  const promptContent = deps.readFileSync(opts.promptFile, "utf-8");
+  return `${promptContent}\n\nStart implementing this work item now.`;
+}
+
+function readCanonicalAgentInstructions(opts: LaunchOpts, deps: LaunchDeps): string | null {
+  const source = STANDARD_AGENT_SOURCES_BY_NAME[opts.agentName];
+  if (!source) return null;
+
+  try {
+    const sourceContent = deps.readFileSync(join(opts.projectRoot, "agents", source), "utf-8");
+    return parseAgentSource(source, sourceContent).developerInstructions.trim();
+  } catch {
+    return null;
+  }
+}
+
+function buildCodexPromptDataContent(opts: LaunchOpts, deps: LaunchDeps): string {
+  const promptData = buildPromptDataContent(opts, deps);
+  const agentInstructions = readCanonicalAgentInstructions(opts, deps);
+  if (!agentInstructions) return promptData;
+  return `${agentInstructions}\n\n${promptData}`;
+}
+
+function writePromptDataFile(
+  opts: LaunchOpts,
+  deps: LaunchDeps,
+  promptContent: string = buildPromptDataContent(opts, deps),
+): string {
   const ts = Date.now();
   const tmpDir = join(opts.stateDir, "tmp");
   deps.mkdirSync(tmpDir, { recursive: true });
   const promptDataFile = join(tmpDir, `nw-prompt-${opts.id}-${ts}`);
-  const promptContent = deps.readFileSync(opts.promptFile, "utf-8");
-  deps.writeFileSync(promptDataFile, `${promptContent}\n\nStart implementing this work item now.`);
+  deps.writeFileSync(promptDataFile, promptContent);
   return promptDataFile;
 }
 
@@ -306,7 +335,7 @@ export const AI_TOOL_PROFILES: AiToolProfile[] = [
     projectIndicators: [".codex/agents"],
     processNames: ["codex"],
     buildLaunchCmd(opts, deps): LaunchCmdResult {
-      const promptDataFile = writePromptDataFile(opts, deps);
+      const promptDataFile = writePromptDataFile(opts, deps, buildCodexPromptDataContent(opts, deps));
       const cmd =
         `PROMPT=$(cat '${promptDataFile}')` +
         ` && rm -f '${promptDataFile}'` +
@@ -314,7 +343,7 @@ export const AI_TOOL_PROFILES: AiToolProfile[] = [
       return { cmd, initialPrompt: "" };
     },
     buildHeadlessCmd(opts, deps): LaunchCmdResult {
-      const promptDataFile = writePromptDataFile(opts, deps);
+      const promptDataFile = writePromptDataFile(opts, deps, buildCodexPromptDataContent(opts, deps));
       const cmd =
         `PROMPT=$(cat '${promptDataFile}')` +
         ` && rm -f '${promptDataFile}'` +

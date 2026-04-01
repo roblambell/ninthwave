@@ -74,6 +74,29 @@ function createMockLaunchDeps(): MockLaunchDeps {
   } as MockLaunchDeps;
 }
 
+function extractPromptDataFile(cmd: string): string {
+  const match = cmd.match(/PROMPT=\$\(cat '([^']+)'\)/);
+  expect(match?.[1]).toBeDefined();
+  return match![1]!;
+}
+
+function seedCanonicalAgent(repo: string, filename: string, instructions: string): void {
+  const agentsDir = join(repo, "agents");
+  mkdirSync(agentsDir, { recursive: true });
+  writeFileSync(
+    join(agentsDir, filename),
+    [
+      "---",
+      `name: ninthwave-${filename.replace(/\.md$/, "")}`,
+      'description: "test agent"',
+      "---",
+      "",
+      instructions,
+      "",
+    ].join("\n"),
+  );
+}
+
 /**
  * Set up a work items directory with individual work item files matching the valid.md fixture.
  * Returns the path to the work items directory.
@@ -238,6 +261,37 @@ describe("cmdStart", () => {
     expect(launchCall).toBeDefined();
     const cmd = launchCall[1] as string;
     expect(cmd).toContain("exec opencode");
+  });
+
+  it("uses --tool codex to launch with a composed inline prompt", async () => {
+    const mockMux = createMockMux();
+    const repo = setupTempRepo();
+    seedCanonicalAgent(repo, "implementer.md", "You are a focused implementation agent.");
+    const workDir = setupWorkItemsDir(repo);
+    const worktreeDir = join(repo, ".ninthwave", ".worktrees");
+
+    await captureOutput(() =>
+      cmdStart(["M-CI-1", "--tool", "codex"], workDir, worktreeDir, repo, mockMux),
+    );
+
+    const launchCall = mockMux.launchWorkspace.mock.calls[0]!;
+    expect(launchCall).toBeDefined();
+    const cmd = launchCall[1] as string;
+    expect(cmd).toContain('exec codex --full-auto "$PROMPT"');
+    expect(cmd).not.toContain("--agent");
+
+    const promptPath = join(worktreeDir, "ninthwave-M-CI-1", ".ninthwave", ".prompt");
+    const systemPrompt = readFileSync(promptPath, "utf-8");
+    expect(systemPrompt).toContain("YOUR_TODO_ID: M-CI-1");
+    expect(systemPrompt).toContain("Upgrade test CI runners from 2 to 4 vCPUs for faster execution.");
+    expect(systemPrompt).toContain("Acceptance: Test workflows use 4 vCPU runners. Deploy workflows remain on 2 vCPU.");
+
+    const promptData = readFileSync(extractPromptDataFile(cmd), "utf-8");
+    expect(promptData).toContain("You are a focused implementation agent.");
+    expect(promptData).toContain(systemPrompt);
+    expect(promptData.indexOf("You are a focused implementation agent.")).toBeLessThan(
+      promptData.indexOf("YOUR_TODO_ID: M-CI-1"),
+    );
   });
 
   it("dies early when mux is unavailable (before any git operations)", async () => {
@@ -1372,6 +1426,37 @@ describe("launchAiSession agentName", () => {
     expect(cmd).toContain("--allow-all-urls");
     expect(cmd).toContain("--no-ask-user");
     expect(cmd).not.toContain("-i ");
+  });
+
+  it("uses the supported headless codex command shape with reviewer instructions composed into the prompt", () => {
+    const mockMux = createMockMux("headless");
+    const repo = setupTempRepo();
+    seedCanonicalAgent(repo, "reviewer.md", "You are a focused code review agent.");
+    const promptFile = join(repo, "prompt.txt");
+    writeFileSync(promptFile, [
+      "YOUR_REVIEW_PR: 99",
+      "YOUR_REVIEW_ITEM_ID: H-RVW-2",
+      "AUTO_FIX_MODE: direct",
+    ].join("\n"));
+
+    launchAiSession("codex", repo, "T-1", "Test", promptFile, mockMux, {
+      agentName: "ninthwave-reviewer",
+      projectRoot: repo,
+    });
+
+    const launchCall = mockMux.launchWorkspace.mock.calls[0]!;
+    expect(launchCall).toBeDefined();
+    const cmd = launchCall[1] as string;
+    expect(cmd).toContain('exec codex exec --ask-for-approval never --sandbox workspace-write "$PROMPT"');
+    expect(cmd).not.toContain("--agent");
+
+    const promptData = readFileSync(extractPromptDataFile(cmd), "utf-8");
+    expect(promptData).toContain("You are a focused code review agent.");
+    expect(promptData).toContain("YOUR_REVIEW_PR: 99");
+    expect(promptData).toContain("AUTO_FIX_MODE: direct");
+    expect(promptData.indexOf("You are a focused code review agent.")).toBeLessThan(
+      promptData.indexOf("YOUR_REVIEW_PR: 99"),
+    );
   });
 
   it.each(["cmux", "tmux"] as const)(
