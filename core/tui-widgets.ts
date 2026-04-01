@@ -22,7 +22,7 @@ import {
   type PersistedBackendMode,
   type TuiSettingsDefaults,
 } from "./tui-settings.ts";
-import { stripAnsiForWidth } from "./status-render.ts";
+import { clampScrollOffset, stripAnsiForWidth } from "./status-render.ts";
 
 // ── ANSI escape helpers ─────────────────────────────────────────────
 
@@ -65,6 +65,38 @@ function truncateCheckboxLine(line: string, maxWidth: number): string {
   if (plain.length <= maxWidth) return line;
   if (maxWidth <= 3) return plain.slice(0, maxWidth);
   return `${plain.slice(0, maxWidth - 3)}...`;
+}
+
+function wrapPlainLine(line: string, maxWidth: number): string[] {
+  if (maxWidth <= 0) return [""];
+
+  const plain = stripAnsiForWidth(line);
+  if (!plain) return [""];
+
+  const wrapped: string[] = [];
+  let remaining = plain;
+
+  while (remaining.length > maxWidth) {
+    let breakIndex = remaining.lastIndexOf(" ", maxWidth);
+    if (breakIndex <= 0) breakIndex = maxWidth;
+
+    const segment = remaining.slice(0, breakIndex).trimEnd();
+    wrapped.push(segment);
+
+    remaining = remaining.slice(breakIndex);
+    if (breakIndex !== maxWidth) remaining = remaining.replace(/^\s+/, "");
+  }
+
+  wrapped.push(remaining);
+  return wrapped;
+}
+
+function buildConfirmInstructions(overflow: boolean, cols: number): string {
+  if (!overflow) return cols >= 27 ? "Enter confirm  n/Esc cancel" : "Enter/n/Esc";
+  if (cols >= 42) return "↑/↓/j/k scroll  Enter confirm  n/Esc cancel";
+  if (cols >= 26) return "↑/↓/j/k scroll  Enter/n/Esc";
+  if (cols >= 18) return "Scroll  Enter/n/Esc";
+  return "Enter/n/Esc";
 }
 
 function buildCheckboxRenderLines(
@@ -612,28 +644,63 @@ export function runConfirm(
   opts: { title?: string; lines?: string[] } = {},
 ): Promise<boolean> {
   return new Promise((resolve) => {
+    let scrollOffset = 0;
+
     const render = () => {
+      const rows = io.getRows();
+      const cols = io.getCols();
+      const titleGapLines = rows >= 6 ? 1 : 0;
+      const footerGapLines = rows >= 5 ? 1 : 0;
+      const reservedLines = 1 + titleGapLines + footerGapLines + 2;
+      const viewportHeight = Math.max(1, rows - reservedLines);
+      const bodyIndent = cols > 2 ? 2 : 0;
+      const bodyPrefix = " ".repeat(bodyIndent);
+      const bodyWidth = Math.max(1, cols - bodyIndent);
+      const wrappedLines = (opts.lines ?? []).flatMap((line) => wrapPlainLine(line, bodyWidth));
+      const bodyLines = wrappedLines.length > 0 ? wrappedLines : [""];
+      const overflow = bodyLines.length > viewportHeight;
+
+      scrollOffset = clampScrollOffset(scrollOffset, bodyLines.length, viewportHeight);
+      const visibleLines = bodyLines.slice(scrollOffset, scrollOffset + viewportHeight);
+
       let out = CURSOR_HOME;
 
       const title = opts.title ?? "Confirm";
-      out += `${BOLD}${title}${RESET}${CLEAR_LINE}\n`;
-      out += `${CLEAR_LINE}\n`;
+      out += `${truncateCheckboxLine(`${BOLD}${title}${RESET}`, cols)}${CLEAR_LINE}\n`;
+      if (titleGapLines > 0) out += `${CLEAR_LINE}\n`;
 
-      if (opts.lines) {
-        for (const line of opts.lines) {
-          out += `  ${line}${CLEAR_LINE}\n`;
-        }
+      for (const line of visibleLines) {
+        out += `${truncateCheckboxLine(`${bodyPrefix}${line}`, cols)}${CLEAR_LINE}\n`;
       }
 
-      out += `${CLEAR_LINE}\n`;
-      out += `${DIM}Enter confirm  n/Esc cancel${RESET}${CLEAR_LINE}\n`;
-      out += `${CLEAR_LINE}`;
+      for (let i = visibleLines.length; i < viewportHeight; i++) {
+        out += `${CLEAR_LINE}\n`;
+      }
+
+      if (footerGapLines > 0) out += `${CLEAR_LINE}\n`;
+
+      const lastVisibleLine = Math.min(scrollOffset + viewportHeight, bodyLines.length);
+      const scrollStatus = overflow
+        ? `${scrollOffset > 0 ? "▲" : " "} ${scrollOffset + 1}-${lastVisibleLine} of ${bodyLines.length} ${lastVisibleLine < bodyLines.length ? "▼" : " "}`
+        : "";
+      const instructions = buildConfirmInstructions(overflow, cols);
+
+      out += `${truncateCheckboxLine(scrollStatus ? `${DIM}${scrollStatus}${RESET}` : "", cols)}${CLEAR_LINE}\n`;
+      out += `${truncateCheckboxLine(`${DIM}${instructions}${RESET}`, cols)}${CLEAR_LINE}`;
 
       io.write(out);
     };
 
     const handler = (key: string) => {
       switch (key) {
+        case "\x1B[A": // Up arrow
+        case "k":
+          scrollOffset -= 1;
+          break;
+        case "\x1B[B": // Down arrow
+        case "j":
+          scrollOffset += 1;
+          break;
         case "\r": // Enter
         case "y":
         case "Y":
@@ -650,7 +717,11 @@ export function runConfirm(
           io.offKey(handler);
           resolve(false);
           return;
+        default:
+          return;
       }
+
+      render();
     };
 
     io.onKey(handler);

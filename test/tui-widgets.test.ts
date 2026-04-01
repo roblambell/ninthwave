@@ -823,6 +823,66 @@ describe("runConfirm", () => {
     expect(output).toContain("item A");
     expect(output).toContain("item B");
   });
+
+  it("wraps long summaries into a bounded body and keeps the footer visible", async () => {
+    const { io, sendKeys, getOutput } = createMockIO({ rows: 7, cols: 24 });
+
+    const resultPromise = runConfirm(io, {
+      title: "Ready?",
+      lines: [
+        "This is a very long summary line that should wrap inside the confirm dialog body.",
+        "A second long line keeps the body overflowing in a short terminal.",
+      ],
+    });
+
+    const lines = getPlainFrameLines(getOutput());
+    expect(lines.length).toBeLessThanOrEqual(7);
+    expect(lines.some((line) => line.includes("Enter"))).toBe(true);
+    for (const line of lines) {
+      expect(line.length).toBeLessThanOrEqual(24);
+    }
+
+    sendKeys(["\r"]);
+    expect(await resultPromise).toBe(true);
+  });
+
+  it("scrolls overflowing content with down arrow and j while preserving confirm", async () => {
+    const { io, sendKeys, getOutput } = createMockIO({ rows: 7, cols: 28 });
+
+    const resultPromise = runConfirm(io, {
+      title: "Proceed?",
+      lines: ["Item 1", "Item 2", "Item 3", "Item 4", "Item 5", "Item 6"],
+    });
+
+    sendKeys(["\x1B[B", "j"]);
+
+    const frame = getPlainFrameLines(getOutput()).join("\n");
+    expect(frame).toContain("Item 3");
+    expect(frame).toContain("Item 4");
+    expect(frame).not.toContain("Item 1");
+
+    sendKeys(["\r"]);
+    expect(await resultPromise).toBe(true);
+  });
+
+  it("scrolls overflowing content with k and up arrow while preserving cancel", async () => {
+    const { io, sendKeys, getOutput } = createMockIO({ rows: 7, cols: 28 });
+
+    const resultPromise = runConfirm(io, {
+      title: "Proceed?",
+      lines: ["Item 1", "Item 2", "Item 3", "Item 4", "Item 5", "Item 6"],
+    });
+
+    sendKeys(["\x1B[B", "j", "k", "\x1B[A"]);
+
+    const frame = getPlainFrameLines(getOutput()).join("\n");
+    expect(frame).toContain("Item 1");
+    expect(frame).toContain("Item 2");
+    expect(frame).not.toContain("Item 4");
+
+    sendKeys(["\x1B"]);
+    expect(await resultPromise).toBe(false);
+  });
 });
 
 // ── sortWorkItems ───────────────────────────────────────────────────
