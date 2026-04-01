@@ -1285,7 +1285,7 @@ describe("launchAiSession agentName", () => {
 
   it("custom/unknown tool falls back to raw command launch with post-launch send", () => {
     const mockMux = createMockMux();
-    // Return processing indicators so sendWithReadyWait succeeds immediately
+    // Return stable multi-line screen content so ready-wait succeeds immediately
     mockMux.readScreen = vi.fn(() => "⠋ Thinking...\nLine2\nLine3\nLine4");
     const repo = setupTempRepo();
     const promptFile = join(repo, "prompt.txt");

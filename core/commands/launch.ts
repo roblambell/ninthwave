@@ -15,7 +15,6 @@ import {
   findWorktreeForBranch as defaultFindWorktreeForBranch,
 } from "../git.ts";
 import { type Multiplexer, getMux } from "../mux.ts";
-import { sendWithReadyWait } from "../worker-health.ts";
 import { allocatePartition, getPartitionFor, releasePartition } from "../partitions.ts";
 import { resolveRepo, writeCrossRepoIndex, removeCrossRepoIndex, ensureWorktreeExcluded } from "../cross-repo.ts";
 import { readWorkItem } from "../work-item-files.ts";
@@ -146,29 +145,13 @@ export function launchAiSession(
   // Skip send when the prompt was already embedded in the launch command (e.g. copilot -i).
   if (!initialPrompt) return wsRef;
 
-  // Wait for the AI tool's input prompt, send the initial message, and
-  // verify the worker started processing. Uses prompt-specific detection
-  // (❯, "Enter a prompt", etc.) instead of generic content stability to
-  // avoid the race where Claude Code's loading screen looks stable but
-  // the input handler isn't ready yet.
-  const sleep: (ms: number) => void =
-    process.env.NODE_ENV === "test" ? () => {} : (ms) => Bun.sleepSync(ms);
-  const delivered = sendWithReadyWait(mux, wsRef, initialPrompt + "\n", sleep);
-  if (!delivered) {
-    // Fallback: try the legacy approach -- generic waitForReady + raw sendMessage.
-    // This handles edge cases where the AI tool's prompt doesn't match our
-    // indicator list (e.g., a new tool version changed the UI).
+  if (!waitForStableScreen(mux, wsRef)) {
     warn(
-      `Prompt-aware delivery failed for ${id} (${wsRef}) -- falling back to legacy send`,
+      `Workspace ${wsRef} did not become ready within timeout for ${id} -- sending prompt anyway`,
     );
-    if (!waitForStableScreen(mux, wsRef)) {
-      warn(
-        `Workspace ${wsRef} did not become ready within timeout for ${id} -- sending prompt anyway`,
-      );
-    }
-    if (typeof mux.sendMessage !== "function" || !mux.sendMessage(wsRef, initialPrompt + "\n")) {
-      warn(`Failed to send initial prompt to ${wsRef} for ${id}`);
-    }
+  }
+  if (typeof mux.sendMessage !== "function" || !mux.sendMessage(wsRef, initialPrompt + "\n")) {
+    warn(`Failed to send initial prompt to ${wsRef} for ${id}`);
   }
 
   return wsRef;

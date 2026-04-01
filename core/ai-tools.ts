@@ -97,11 +97,6 @@ export interface AiToolProfile {
    */
   processNames: string[];
   /**
-   * Screen text indicators that this tool's input prompt is visible and ready.
-   * Combined with tool-agnostic defaults in worker-health.ts.
-   */
-  promptIndicators?: string[];
-  /**
    * Build the multiplexer launch command and initial prompt for this tool.
    * Receives injectable deps so Copilot's temp-file creation is testable.
    */
@@ -126,13 +121,6 @@ export const AI_TOOL_PROFILES: AiToolProfile[] = [
       { varName: "CLAUDE_SESSION_ID" },
     ],
     processNames: ["claude"],
-    promptIndicators: [
-      "❯",                  // Claude Code prompt character
-      "Enter a prompt",     // Claude Code initial prompt state
-      "bypass permissions", // Claude Code permission mode indicator
-      "What can I help",    // Claude Code greeting
-      "How can I help",     // Claude Code greeting variant
-    ],
     buildLaunchCmd(opts, _deps): LaunchCmdResult {
       // Prompt is embedded as a positional arg via --append-system-prompt; no post-launch send.
       const cmd =
@@ -181,12 +169,6 @@ export const AI_TOOL_PROFILES: AiToolProfile[] = [
     suffix: ".agent.md",
     projectIndicators: [".github/copilot-instructions.md", ".github/agents"],
     processNames: ["copilot"],
-    promptIndicators: [
-      "❯",                  // Copilot CLI prompt character
-      "Enter a prompt",     // Copilot CLI initial prompt state
-      "What can I help",    // Copilot CLI greeting
-      "How can I help",     // Copilot CLI greeting variant
-    ],
     buildLaunchCmd(opts, deps): LaunchCmdResult {
       // Inline command pattern: write prompt to a plain-text data file, then
       // construct a shell command that reads it, cleans up, and execs the tool.
