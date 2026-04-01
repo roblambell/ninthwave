@@ -33,7 +33,8 @@ import { writeInbox } from "./inbox.ts";
 import { prMerge, prComment, checkPrMergeable, getRepoOwner, applyGithubToken, fetchTrustedPrCommentsAsync, upsertOrchestratorComment, setCommitStatus as ghSetCommitStatus, prHeadSha, getMergeCommitSha as ghGetMergeCommitSha, checkCommitCI as ghCheckCommitCI, checkCommitCIAsync as ghCheckCommitCIAsync, getDefaultBranch as ghGetDefaultBranch, ensureDomainLabels, listPrComments, updatePrComment, ghFailureKindLabel } from "../gh.ts";
 import { fetchOrigin, ffMerge, gitAdd, gitCommit, gitPush, daemonRebase } from "../git.ts";
 import { run } from "../shell.ts";
-import { type Multiplexer, getMux } from "../mux.ts";
+import { type Multiplexer, createMux, resolveBackend } from "../mux.ts";
+import { resolveCmuxBinary } from "../cmux-resolve.ts";
 import { resolveSessionName } from "../tmux.ts";
 import { reconcile } from "./reconcile.ts";
 import { die, warn, info, ALT_SCREEN_ON, ALT_SCREEN_OFF, BOLD, RED, RESET } from "../output.ts";
@@ -3072,6 +3073,7 @@ export async function cmdOrchestrate(
     mergeStrategy,
   } = parsed;
   const {
+    backendModeOverride,
     wipLimitOverride, pollIntervalOverride, frictionDir,
     daemonMode, isDaemonChild, isInteractiveEngineChild, clickupListId, remoteFlag,
     reviewAutoFix, reviewExternal: parsedReviewExternal, reviewWipLimit,
@@ -3207,6 +3209,7 @@ export async function cmdOrchestrate(
   const persistedUserCfg = loadUserConfig();
   const wipLimitFromCli = wipLimitOverride !== undefined;
   let wipLimit = wipLimitOverride ?? persistedUserCfg.wip_limit ?? computedWipLimit;
+  let startupBackendMode = backendModeOverride ?? persistedUserCfg.backend_mode ?? "auto";
 
   // Parse work items (needed for both interactive and flag-based modes)
   // Pass projectRoot to filter to only items pushed to origin/main
@@ -3236,10 +3239,12 @@ export async function cmdOrchestrate(
     futureOnlyStartup = futureOnlyStartup || result.futureOnly === true;
     mergeStrategy = result.mergeStrategy;
     wipLimit = result.wipLimit;
+    startupBackendMode = result.backendMode ?? startupBackendMode;
     interactiveReviewMode = result.reviewMode;
     interactiveSkipReview = result.reviewMode === "off";
     try {
       saveUserConfig({
+        backend_mode: startupBackendMode,
         merge_strategy: result.mergeStrategy === "auto" ? "auto" : "manual",
         review_mode: result.reviewMode,
         wip_limit: result.wipLimit,
@@ -3346,7 +3351,31 @@ export async function cmdOrchestrate(
 
   // Real action dependencies -- create mux before state reconstruction so
   // workspace refs can be recovered from live workspaces.
-  const mux = getMux();
+  const resolvedBackend = resolveBackend({
+    env: process.env,
+    checkBinary: (name: string): boolean => {
+      if (name === "cmux") return resolveCmuxBinary() !== null;
+      return Bun.which(name) !== null;
+    },
+    savedBackendMode: startupBackendMode,
+  });
+  const mux = createMux(resolvedBackend.effective, projectRoot);
+
+  if (resolvedBackend.fallback && resolvedBackend.requested !== "auto" && resolvedBackend.requested !== "headless") {
+    log({
+      ts: new Date().toISOString(),
+      level: "info",
+      event: "startup_backend_fallback",
+      requested: resolvedBackend.requested,
+      effective: resolvedBackend.effective,
+      source: resolvedBackend.source,
+      reason: resolvedBackend.fallback.reason,
+      message: resolvedBackend.fallback.reason,
+    });
+    if (!jsonFlag) {
+      info(`Tip: ${resolvedBackend.fallback.reason}`);
+    }
+  }
 
   // Pre-flight: fail fast if the mux backend is not usable (binary missing
   // or no active session). Without this, workers launch and immediately fail

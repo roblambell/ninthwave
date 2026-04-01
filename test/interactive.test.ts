@@ -373,6 +373,7 @@ describe("runInteractiveFlow", () => {
 
     expect(result).not.toBeNull();
     expect(result!.itemIds).toEqual(["A-1", "B-2"]);
+    expect(result!.backendMode).toBe("auto");
     expect(result!.mergeStrategy).toBe("manual");
     expect(result!.wipLimit).toBe(3);
     expect(result!.reviewMode).toBe("off");
@@ -469,6 +470,7 @@ describe("runInteractiveFlow", () => {
     expect(result!.itemIds).toEqual([]);
     expect(result!.allSelected).toBe(false);
     expect(result!.futureOnly).toBe(true);
+    expect(result!.backendMode).toBe("auto");
     expect(result!.mergeStrategy).toBe("manual");
     expect(result!.wipLimit).toBe(3);
   });
@@ -479,6 +481,7 @@ describe("runInteractiveFlow", () => {
     const resultPromise = runInteractiveFlow(items, 6, {
       widgetIO: io,
       defaultSettings: {
+        backendMode: "cmux",
         mergeStrategy: "auto",
         reviewMode: "mine",
         collaborationMode: "share",
@@ -488,10 +491,34 @@ describe("runInteractiveFlow", () => {
 
     const result = await resultPromise;
     expect(result).not.toBeNull();
+    expect(result!.backendMode).toBe("cmux");
     expect(result!.mergeStrategy).toBe("auto");
     expect(result!.reviewMode).toBe("mine");
     expect(result!.connectionAction).toEqual({ type: "connect" });
     expect(result!.wipLimit).toBe(6);
+  });
+
+  it("returns the selected backend mode from the TUI startup settings", async () => {
+    const { io, sendKeyBatches } = createMockIO();
+
+    const resultPromise = runInteractiveFlow(items, 4, { widgetIO: io });
+    sendKeyBatches(
+      ["\r"],
+      [
+        "\x1B[B",
+        "\x1B[B",
+        "\x1B[B",
+        "\x1B[B",
+        "\x1B[C",
+        "\x1B[C",
+        "\x1B[C",
+        "\r",
+      ],
+    );
+
+    const result = await resultPromise;
+    expect(result).not.toBeNull();
+    expect(result!.backendMode).toBe("headless");
   });
 
   it("returns null when the empty-queue TUI path is cancelled", async () => {

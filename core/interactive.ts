@@ -16,6 +16,7 @@ import {
   STARTUP_COLLABORATION_MODE_OPTIONS,
   STARTUP_MERGE_STRATEGY_OPTIONS,
   STARTUP_REVIEW_MODE_OPTIONS,
+  type PersistedBackendMode,
   type StartupReviewMode as ReviewMode,
   type TuiSettingsDefaults,
 } from "./tui-settings.ts";
@@ -32,6 +33,7 @@ export type PromptFn = (question: string) => Promise<string>;
 
 export interface InteractiveResult {
   itemIds: string[];
+  backendMode?: PersistedBackendMode;
   mergeStrategy: MergeStrategy;
   wipLimit: number;
   allSelected: boolean;
@@ -414,6 +416,9 @@ export async function confirmSummary(
     }
   }
   console.log(`  ${BOLD}Merge strategy:${RESET}  ${result.mergeStrategy}`);
+  if (result.backendMode) {
+    console.log(`  ${BOLD}Backend:${RESET}         ${result.backendMode}`);
+  }
   console.log(`  ${BOLD}WIP limit:${RESET}       ${result.wipLimit}`);
   console.log(`  ${BOLD}AI reviews:${RESET}      ${result.reviewMode}`);
   if (result.connectionAction) {
@@ -471,10 +476,11 @@ export async function runTuiSelectionFlow(
     });
     if (!result || result.cancelled) return null;
 
-    return {
-      itemIds: result.itemIds,
-      mergeStrategy: result.mergeStrategy,
-      wipLimit: result.wipLimit,
+      return {
+        itemIds: result.itemIds,
+        backendMode: result.backendMode,
+        mergeStrategy: result.mergeStrategy,
+        wipLimit: result.wipLimit,
       allSelected: result.allSelected,
       futureOnly: result.futureOnly,
       reviewMode: result.reviewMode,
@@ -533,6 +539,7 @@ async function runReadlineFlow(
 
   // Local-first defaults -- no prompts for these
   const mergeStrategy: MergeStrategy = "manual";
+  const backendMode: PersistedBackendMode = deps.defaultSettings?.backendMode ?? "auto";
   const wipLimit = defaultWipLimit;
   const reviewMode: ReviewMode = "off";
   let connectionAction: ConnectionAction | null = null;
@@ -604,6 +611,7 @@ async function runReadlineFlow(
   // Step 3: Summary + confirmation
   const result: InteractiveResult = {
     itemIds: itemResult.ids,
+    backendMode,
     mergeStrategy,
     wipLimit,
     allSelected: itemResult.allSelected,

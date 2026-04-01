@@ -14,10 +14,12 @@ import {
 } from "./commands/crew.ts";
 import type { AiToolProfile } from "./ai-tools.ts";
 import {
+  BACKEND_MODE_OPTIONS,
   COLLABORATION_MODE_OPTIONS,
   REVIEW_MODE_OPTIONS,
   STARTUP_MERGE_STRATEGY_OPTIONS,
   TUI_SETTINGS_DEFAULTS,
+  type PersistedBackendMode,
   type TuiSettingsDefaults,
 } from "./tui-settings.ts";
 
@@ -82,6 +84,7 @@ export interface TextInputResult {
 }
 
 interface StartupSettingsScreenResult {
+  backendMode: PersistedBackendMode;
   mergeStrategy: Extract<MergeStrategy, "auto" | "manual">;
   reviewMode: "all" | "mine" | "off";
   collaborationMode: "local" | "share" | "join";
@@ -95,6 +98,7 @@ export interface SelectionScreenResult {
   allSelected: boolean;
   /** True when starting with no current items and watching future work only. */
   futureOnly?: boolean;
+  backendMode?: PersistedBackendMode;
   mergeStrategy: MergeStrategy;
   wipLimit: number;
   reviewMode: "all" | "mine" | "off";
@@ -646,7 +650,12 @@ export function runStartupSettingsScreen(
       COLLABORATION_MODE_OPTIONS.findIndex((option) => option.persistedValue === defaults.collaborationMode),
     );
     let wipLimit = Math.max(1, Math.min(10, opts.defaultWipLimit));
+    let backendIndex = Math.max(
+      0,
+      BACKEND_MODE_OPTIONS.findIndex((option) => option.persistedValue === defaults.backendMode),
+    );
 
+    const currentBackendOption = () => BACKEND_MODE_OPTIONS[backendIndex]!;
     const currentMergeOption = () => STARTUP_MERGE_STRATEGY_OPTIONS[mergeIndex]!;
     const currentReviewOption = () => REVIEW_MODE_OPTIONS[reviewIndex]!;
     const currentCollaborationOption = () => COLLABORATION_MODE_OPTIONS[collaborationIndex]!;
@@ -680,6 +689,11 @@ export function runStartupSettingsScreen(
         ? `${GREEN}${BOLD}[${value}]${RESET}`
         : `${DIM}${value}${RESET}`,
     );
+    const backendValues = () => BACKEND_MODE_OPTIONS.map((option, index) =>
+      index === backendIndex
+        ? `${GREEN}${BOLD}[${option.startupLabel}]${RESET}`
+        : `${DIM}${option.startupLabel}${RESET}`,
+    );
 
     const activeDescription = () => {
       switch (activeRow) {
@@ -689,8 +703,10 @@ export function runStartupSettingsScreen(
           return currentReviewOption().startupDescription;
         case 2:
           return currentCollaborationOption().startupDescription;
-        default:
+        case 3:
           return "Maximum work items allowed to run in parallel";
+        default:
+          return currentBackendOption().startupDescription;
       }
     };
 
@@ -710,6 +726,7 @@ export function runStartupSettingsScreen(
       out += `${renderChoiceRow("Reviews", reviewValues(), activeRow === 1).slice(0, cols + 80)}${CLEAR_LINE}\n`;
       out += `${renderChoiceRow("Collaboration", collaborationValues(), activeRow === 2).slice(0, cols + 80)}${CLEAR_LINE}\n`;
       out += `${renderChoiceRow("WIP limit", wipValues(), activeRow === 3).slice(0, cols + 80)}${CLEAR_LINE}\n`;
+      out += `${renderChoiceRow("Backend", backendValues(), activeRow === 4).slice(0, cols + 80)}${CLEAR_LINE}\n`;
       out += `${CLEAR_LINE}\n`;
       out += `${DIM}${activeDescription()}${RESET}${CLEAR_LINE}\n`;
       out += `${CLEAR_LINE}\n`;
@@ -723,11 +740,11 @@ export function runStartupSettingsScreen(
       switch (key) {
         case "\x1B[A":
         case "k":
-          activeRow = (activeRow - 1 + 4) % 4;
+          activeRow = (activeRow - 1 + 5) % 5;
           break;
         case "\x1B[B":
         case "j":
-          activeRow = (activeRow + 1) % 4;
+          activeRow = (activeRow + 1) % 5;
           break;
         case "\x1B[D":
         case "h":
@@ -737,8 +754,10 @@ export function runStartupSettingsScreen(
             reviewIndex = (reviewIndex - 1 + REVIEW_MODE_OPTIONS.length) % REVIEW_MODE_OPTIONS.length;
           } else if (activeRow === 2) {
             collaborationIndex = (collaborationIndex - 1 + COLLABORATION_MODE_OPTIONS.length) % COLLABORATION_MODE_OPTIONS.length;
-          } else {
+          } else if (activeRow === 3) {
             wipLimit = Math.max(1, wipLimit - 1);
+          } else {
+            backendIndex = (backendIndex - 1 + BACKEND_MODE_OPTIONS.length) % BACKEND_MODE_OPTIONS.length;
           }
           break;
         case "\x1B[C":
@@ -749,13 +768,16 @@ export function runStartupSettingsScreen(
             reviewIndex = (reviewIndex + 1) % REVIEW_MODE_OPTIONS.length;
           } else if (activeRow === 2) {
             collaborationIndex = (collaborationIndex + 1) % COLLABORATION_MODE_OPTIONS.length;
-          } else {
+          } else if (activeRow === 3) {
             wipLimit = Math.min(10, wipLimit + 1);
+          } else {
+            backendIndex = (backendIndex + 1) % BACKEND_MODE_OPTIONS.length;
           }
           break;
         case "\r":
           io.offKey(handler);
           resolve({
+            backendMode: currentBackendOption().persistedValue,
             mergeStrategy: currentMergeOption().runtimeValue as Extract<MergeStrategy, "auto" | "manual">,
             reviewMode: currentReviewOption().persistedValue,
             collaborationMode: currentCollaborationOption().persistedValue,
@@ -767,6 +789,7 @@ export function runStartupSettingsScreen(
         case "\x03":
           io.offKey(handler);
           resolve({
+            backendMode: currentBackendOption().persistedValue,
             mergeStrategy: currentMergeOption().runtimeValue as Extract<MergeStrategy, "auto" | "manual">,
             reviewMode: currentReviewOption().persistedValue,
             collaborationMode: currentCollaborationOption().persistedValue,
@@ -854,6 +877,7 @@ export async function runSelectionScreen(
   } = {},
 ): Promise<SelectionScreenResult | null> {
   const resolvedDefaults: TuiSettingsDefaults = {
+    backendMode: opts.defaultSettings?.backendMode ?? TUI_SETTINGS_DEFAULTS.backendMode,
     mergeStrategy: opts.defaultSettings?.mergeStrategy ?? TUI_SETTINGS_DEFAULTS.mergeStrategy,
     reviewMode: opts.defaultSettings?.reviewMode ?? opts.defaultReviewMode ?? TUI_SETTINGS_DEFAULTS.reviewMode,
     collaborationMode: opts.defaultSettings?.collaborationMode ?? TUI_SETTINGS_DEFAULTS.collaborationMode,
@@ -996,6 +1020,7 @@ export async function runSelectionScreen(
   let wipLimit = defaultWip;
   let reviewMode: "all" | "mine" | "off" = defaultReviewMode;
   let connectionAction: ConnectionAction | null = defaultConnectionAction;
+  let backendMode: PersistedBackendMode = resolvedDefaults.backendMode;
 
   if (opts.showConnectionStep === false) {
     io.write(CLEAR_SCREEN);
@@ -1027,6 +1052,7 @@ export async function runSelectionScreen(
     mergeStrategy = settingsResult.mergeStrategy;
     wipLimit = settingsResult.wipLimit;
     reviewMode = settingsResult.reviewMode;
+    backendMode = settingsResult.backendMode;
     if (settingsResult.collaborationMode === "share") {
       connectionAction = { type: "connect" };
     } else if (settingsResult.collaborationMode === "join") {
@@ -1055,6 +1081,7 @@ export async function runSelectionScreen(
     itemIds: selectedItemIds,
     allSelected: itemResult.allSelected,
     futureOnly,
+    backendMode,
     mergeStrategy,
     wipLimit,
     reviewMode,

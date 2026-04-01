@@ -325,6 +325,7 @@ export async function cmdNoArgs(
   const checkDaemon = deps.isDaemonRunning ?? isDaemonRunning;
   const doEnsureMux = deps.ensureMux ?? ensureMuxInteractiveOrDie;
   const helpFn = deps.printHelp ?? printHelp;
+  const doSaveUserConfig = deps.saveUserConfig ?? saveUserConfig;
 
   // Non-TTY: always print grouped help text
   if (!isTTY) {
@@ -394,9 +395,18 @@ export async function cmdNoArgs(
   });
   if (!result) return; // User cancelled
 
+  if (result.backendMode) {
+    try {
+      doSaveUserConfig({ backend_mode: result.backendMode });
+    } catch {
+      // best-effort persistence only
+    }
+  }
+
   // Build watch args from interactive result
   const watchArgs = [
     "--merge-strategy", result.mergeStrategy,
+    "--backend-mode", result.backendMode ?? defaultSettings.backendMode,
     "--wip-limit", String(result.wipLimit),
   ];
 

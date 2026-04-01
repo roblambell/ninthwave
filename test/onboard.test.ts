@@ -465,6 +465,7 @@ describe("cmdNoArgs", () => {
 
     const interactiveResult: InteractiveResult = {
       itemIds: ["H-FOO-1", "H-FOO-2"],
+      backendMode: "cmux",
       mergeStrategy: "auto" as MergeStrategy,
       wipLimit: 3,
       allSelected: false,
@@ -494,6 +495,8 @@ describe("cmdNoArgs", () => {
     expect(watchArgs).toContain("H-FOO-2");
     expect(watchArgs).toContain("--merge-strategy");
     expect(watchArgs).toContain("auto");
+    expect(watchArgs).toContain("--backend-mode");
+    expect(watchArgs).toContain("cmux");
     expect(watchArgs).toContain("--wip-limit");
     expect(watchArgs).toContain("3");
     // Should NOT have --watch when not all selected
@@ -714,6 +717,7 @@ describe("cmdNoArgs", () => {
         interactiveCalled = true;
         return {
           itemIds: ["H-1"],
+          backendMode: "auto",
           mergeStrategy: "auto" as MergeStrategy,
           wipLimit: 4,
           allSelected: false,
@@ -743,8 +747,10 @@ describe("cmdNoArgs", () => {
         // Verify that the deps include the correct defaultReviewMode
         expect(deps?.defaultReviewMode).toBe("all");
         expect(deps?.defaultSettings?.reviewMode).toBe("all");
+        expect(deps?.defaultSettings?.backendMode).toBe("auto");
         return {
           itemIds: ["H-1"],
+          backendMode: "auto",
           mergeStrategy: "auto" as MergeStrategy,
           wipLimit: 4,
           allSelected: false,
@@ -771,6 +777,7 @@ describe("cmdNoArgs", () => {
       runInteractiveFlow: async (_todos, _wip, deps) => {
         expect(deps?.defaultReviewMode).toBe("all");
         expect(deps?.defaultSettings).toEqual({
+          backendMode: "auto",
           mergeStrategy: "auto",
           reviewMode: "all",
           collaborationMode: "share",
@@ -782,5 +789,32 @@ describe("cmdNoArgs", () => {
         throw new Error("runWatch should not be called when interactive flow cancels");
       },
     });
+  });
+
+  it("persists confirmed backend mode before launching watch", async () => {
+    const projectDir = setupTempRepo();
+    mkdirSync(join(projectDir, ".ninthwave", "work"), { recursive: true });
+
+    const savedUpdates: Array<Record<string, unknown>> = [];
+
+    await cmdNoArgs(projectDir, {
+      isTTY: true,
+      parseWorkItems: () => [fakeWorkItem("H-1", "Task")],
+      isDaemonRunning: () => null,
+      loadConfig: () => ({ review_external: false, schedule_enabled: false }),
+      saveUserConfig: (updates) => savedUpdates.push(updates as Record<string, unknown>),
+      runInteractiveFlow: async () => ({
+        itemIds: ["H-1"],
+        backendMode: "headless",
+        mergeStrategy: "auto" as MergeStrategy,
+        wipLimit: 4,
+        allSelected: false,
+        reviewMode: "mine" as const,
+        connectionAction: null,
+      }),
+      runWatch: async () => {},
+    });
+
+    expect(savedUpdates).toContainEqual({ backend_mode: "headless" });
   });
 });

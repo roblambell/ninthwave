@@ -816,6 +816,7 @@ describe("runStartupSettingsScreen", () => {
       summaryLines: ["Items: A-1"],
       defaultWipLimit: 4,
       defaultSettings: {
+        backendMode: "auto",
         mergeStrategy: "manual",
         reviewMode: "off",
         collaborationMode: "local",
@@ -835,10 +836,38 @@ describe("runStartupSettingsScreen", () => {
 
     const result = await resultPromise;
     expect(result.cancelled).toBe(false);
+    expect(result.backendMode).toBe("auto");
     expect(result.mergeStrategy).toBe("auto");
     expect(result.reviewMode).toBe("mine");
     expect(result.collaborationMode).toBe("share");
     expect(result.wipLimit).toBe(5);
+  });
+
+  it("renders all backend options and preselects the saved default", async () => {
+    const { io, sendKeys, getOutput } = createMockIO();
+
+    const resultPromise = runStartupSettingsScreen(io, {
+      summaryLines: ["Items: A-1"],
+      defaultWipLimit: 4,
+      defaultSettings: {
+        backendMode: "cmux",
+        mergeStrategy: "manual",
+        reviewMode: "off",
+        collaborationMode: "local",
+      },
+    });
+
+    expect(getOutput()).toContain("Auto");
+    expect(getOutput()).toContain("tmux");
+    expect(getOutput()).toContain("cmux");
+    expect(getOutput()).toContain("headless");
+    expect(getOutput()).toContain("[cmux]");
+
+    sendKeys(["\r"]);
+
+    const result = await resultPromise;
+    expect(result.cancelled).toBe(false);
+    expect(result.backendMode).toBe("cmux");
   });
 
   it("confirms defaults on Enter", async () => {
@@ -853,6 +882,7 @@ describe("runStartupSettingsScreen", () => {
 
     const result = await resultPromise;
     expect(result.cancelled).toBe(false);
+    expect(result.backendMode).toBe("auto");
     expect(result.mergeStrategy).toBe("manual");
     expect(result.reviewMode).toBe("off");
     expect(result.collaborationMode).toBe("local");
@@ -1256,6 +1286,7 @@ describe("runSelectionScreen -- startup defaults", () => {
 
     const resultPromise = runSelectionScreen(io, items, 7, {
       defaultSettings: {
+        backendMode: "cmux",
         mergeStrategy: "auto",
         reviewMode: "mine",
         collaborationMode: "share",
@@ -1265,6 +1296,7 @@ describe("runSelectionScreen -- startup defaults", () => {
 
     const result = await resultPromise;
     expect(result).not.toBeNull();
+    expect(result!.backendMode).toBe("cmux");
     expect(result!.mergeStrategy).toBe("auto");
     expect(result!.reviewMode).toBe("mine");
     expect(result!.connectionAction).toEqual({ type: "connect" });
@@ -1292,6 +1324,7 @@ describe("runSelectionScreen -- startup defaults", () => {
 
     const result = await resultPromise;
     expect(result).not.toBeNull();
+    expect(result!.backendMode).toBe("auto");
     expect(result!.mergeStrategy).toBe("auto");
     expect(result!.reviewMode).toBe("mine");
     expect(result!.connectionAction).toEqual({ type: "connect" });

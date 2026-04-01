@@ -22,6 +22,7 @@ const PERSISTED_BACKEND_MODES: readonly PersistedBackendMode[] = [
 ] as const;
 
 export interface TuiSettingsDefaults {
+  backendMode: PersistedBackendMode;
   mergeStrategy: PersistedMergeStrategy;
   reviewMode: PersistedReviewMode;
   collaborationMode: PersistedCollaborationMode;
@@ -41,10 +42,46 @@ export type TuiSettingsRow = (typeof TUI_SETTINGS_ROWS)[number];
 export type TuiSettingsChoiceRow = Extract<TuiSettingsRow, { kind: "choice" }>;
 
 export const TUI_SETTINGS_DEFAULTS: TuiSettingsDefaults = {
+  backendMode: "auto",
   mergeStrategy: "manual",
   reviewMode: "off",
   collaborationMode: "local",
 };
+
+export const BACKEND_MODE_OPTIONS: readonly ChoiceSettingOption<PersistedBackendMode, PersistedBackendMode>[] = [
+  {
+    persistedValue: "auto",
+    runtimeValue: "auto",
+    startupLabel: "Auto",
+    startupDescription: "Prefer your current or available mux backend, else headless",
+    runtimeLabel: "Auto",
+    persistable: true,
+  },
+  {
+    persistedValue: "tmux",
+    runtimeValue: "tmux",
+    startupLabel: "tmux",
+    startupDescription: "Use tmux explicitly, or fall back to headless if unavailable",
+    runtimeLabel: "tmux",
+    persistable: true,
+  },
+  {
+    persistedValue: "cmux",
+    runtimeValue: "cmux",
+    startupLabel: "cmux",
+    startupDescription: "Use cmux explicitly, or fall back to headless if unavailable",
+    runtimeLabel: "cmux",
+    persistable: true,
+  },
+  {
+    persistedValue: "headless",
+    runtimeValue: "headless",
+    startupLabel: "headless",
+    startupDescription: "Skip multiplexers and run headless directly in this terminal",
+    runtimeLabel: "Headless",
+    persistable: true,
+  },
+] as const;
 
 export const COLLABORATION_MODE_OPTIONS: readonly ChoiceSettingOption<PersistedCollaborationMode, CollaborationMode>[] = [
   {
@@ -287,11 +324,15 @@ export function collaborationLabel(mode: CollaborationMode): string {
 }
 
 export function resolveTuiSettingsDefaults(userConfig: {
+  backend_mode?: unknown;
   merge_strategy?: unknown;
   review_mode?: unknown;
   collaboration_mode?: unknown;
 }): TuiSettingsDefaults {
   return {
+    backendMode: isPersistedBackendMode(userConfig.backend_mode)
+      ? userConfig.backend_mode
+      : TUI_SETTINGS_DEFAULTS.backendMode,
     mergeStrategy: isPersistedMergeStrategy(userConfig.merge_strategy)
       ? userConfig.merge_strategy
       : TUI_SETTINGS_DEFAULTS.mergeStrategy,
