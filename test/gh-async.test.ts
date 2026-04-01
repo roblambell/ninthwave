@@ -20,14 +20,14 @@ function fail(stderr = "error") {
 
 describe("prListAsync", () => {
   it("parses JSON response with PR list", async () => {
-    runAsyncSpy.mockReturnValue(ok(JSON.stringify([{ number: 42, title: "Fix bug" }])));
+    runAsyncSpy.mockReturnValue(ok(JSON.stringify([{ number: 42, title: "Fix bug", body: "" }])));
 
     const result = await prListAsync("/repo", "ninthwave/T-1-1", "open");
 
-    expect(result).toEqual({ ok: true, data: [{ number: 42, title: "Fix bug" }] });
+    expect(result).toEqual({ ok: true, data: [{ number: 42, title: "Fix bug", body: "" }] });
     expect(runAsyncSpy).toHaveBeenCalledWith(
       "gh",
-      ["pr", "list", "--head", "ninthwave/T-1-1", "--state", "open", "--json", "number,title", "--limit", "100"],
+      ["pr", "list", "--head", "ninthwave/T-1-1", "--state", "open", "--json", "number,title,body", "--limit", "100"],
       { cwd: "/repo" },
     );
   });

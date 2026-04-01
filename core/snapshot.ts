@@ -15,7 +15,7 @@ import {
   checkPrStatusDetailedAsync,
   type PrStatusPollResult,
 } from "./commands/pr-monitor.ts";
-import { prTitleMatchesWorkItem } from "./work-item-files.ts";
+import { prMetadataMatchesWorkItem } from "./work-item-files.ts";
 import {
   getDefaultBranch as defaultGetDefaultBranch,
   getDefaultBranchAsync as defaultGetDefaultBranchAsync,
@@ -376,9 +376,16 @@ export function buildSnapshot(
           // assigned a PR number to this item (during this session), trust it.
           // Otherwise, compare the merged PR's title against the work item title.
           const mergedPrTitle = parts[5] ?? "";
-          const itemTitle = orchItem.workItem.title;
+          const mergedPrLineageToken = parts[6] ?? "";
           const alreadyTracked = orchItem.prNumber != null && snap.prNumber === orchItem.prNumber;
-          if (isRepairPrCandidate(orchItem.id, candidateId) || alreadyTracked || !mergedPrTitle || prTitleMatchesWorkItem(mergedPrTitle, itemTitle)) {
+          if (
+            isRepairPrCandidate(orchItem.id, candidateId)
+            || alreadyTracked
+            || prMetadataMatchesWorkItem(
+              { title: mergedPrTitle, lineageToken: mergedPrLineageToken },
+              orchItem.workItem,
+            )
+          ) {
             snap.prState = "merged";
           }
           // else: title mismatch -- stale merged PR from a previous cycle, ignore it
@@ -597,9 +604,16 @@ export async function buildSnapshotAsync(
       switch (status) {
         case "merged": {
           const mergedPrTitle = parts[5] ?? "";
-          const itemTitle = orchItem.workItem.title;
+          const mergedPrLineageToken = parts[6] ?? "";
           const alreadyTracked = orchItem.prNumber != null && snap.prNumber === orchItem.prNumber;
-          if (isRepairPrCandidate(orchItem.id, candidateId) || alreadyTracked || !mergedPrTitle || prTitleMatchesWorkItem(mergedPrTitle, itemTitle)) {
+          if (
+            isRepairPrCandidate(orchItem.id, candidateId)
+            || alreadyTracked
+            || prMetadataMatchesWorkItem(
+              { title: mergedPrTitle, lineageToken: mergedPrLineageToken },
+              orchItem.workItem,
+            )
+          ) {
             snap.prState = "merged";
           }
           break;

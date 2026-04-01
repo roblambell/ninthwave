@@ -18,6 +18,7 @@ export interface WorkItem {
   priority: Priority;
   title: string;
   domain: string; // normalized domain slug
+  lineageToken?: string; // stable identity token for distinguishing reused IDs across logical work items
   dependencies: string[]; // list of dependency IDs
   bundleWith: string[]; // list of bundle IDs
   status: Status;
@@ -86,6 +87,14 @@ export const ID_IN_FILENAME = /--([A-Z]-[A-Za-z0-9]+-[0-9]+[a-z]*)\.md$/;
 
 // Source string for building composite regexes (keeps the pattern in one place)
 export const ID_PATTERN_SOURCE = "[A-Z]-[A-Za-z0-9]+-[0-9]+[a-z]*";
+
+// Work item lineage token wire format: RFC 4122 UUID v4.
+export const LINEAGE_TOKEN_PATTERN_SOURCE =
+  "[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}";
+export const LINEAGE_TOKEN_PATTERN = new RegExp(
+  `^${LINEAGE_TOKEN_PATTERN_SOURCE}$`,
+  "i",
+);
 
 // Wildcard dependency pattern: matches patterns like "MUX-*", "H-MUX-*", "DF-*"
 // Captures an uppercase start, optional hyphen-separated segments, ending with -*

@@ -10,7 +10,11 @@ import { listCrossRepoEntries } from "../cross-repo.ts";
 import { cmdMarkDone } from "./mark-done.ts";
 import { cleanSingleWorktree, closeWorkspacesForIds } from "./clean.ts";
 import { getMux } from "../mux.ts";
-import { readWorkItem, prTitleMatchesWorkItem } from "../work-item-files.ts";
+import {
+  parseWorkItemReferenceBlock,
+  prMetadataMatchesWorkItem,
+  readWorkItem,
+} from "../work-item-files.ts";
 import { ID_IN_FILENAME } from "../types.ts";
 
 /**
@@ -21,7 +25,11 @@ export interface ReconcileDeps {
   pullRebase(projectRoot: string): { ok: boolean; conflict: boolean; error?: string };
 
   /** Get IDs and PR titles of merged ninthwave/* PRs from GitHub. Queries hub repo and any cross-repo targets. */
-  getMergedTodoIds(projectRoot: string, worktreeDir: string): Array<{ id: string; prTitle: string }>;
+  getMergedTodoIds(projectRoot: string, worktreeDir: string): Array<{
+    id: string;
+    prTitle: string;
+    lineageToken?: string;
+  }>;
 
   /** Get IDs of open work items from the work directory. */
   getOpenItemIds(workDir: string): string[];
@@ -68,22 +76,35 @@ function defaultPullRebase(projectRoot: string): { ok: boolean; conflict: boolea
   return { ok: false, conflict: false, error: result.stderr };
 }
 
-function getMergedTodoIdsFromRepo(repoRoot: string): Array<{ id: string; prTitle: string }> {
+function getMergedTodoIdsFromRepo(repoRoot: string): Array<{
+  id: string;
+  prTitle: string;
+  lineageToken?: string;
+}> {
   const result = run("gh", [
     "pr", "list",
     "--state", "merged",
-    "--json", "headRefName,title",
+    "--json", "headRefName,title,body",
     "--limit", "200",
   ], { cwd: repoRoot });
 
   if (result.exitCode !== 0 || !result.stdout) return [];
 
   try {
-    const prs = JSON.parse(result.stdout) as Array<{ headRefName: string; title: string }>;
-    const items: Array<{ id: string; prTitle: string }> = [];
+    const prs = JSON.parse(result.stdout) as Array<{
+      headRefName: string;
+      title: string;
+      body?: string;
+    }>;
+    const items: Array<{ id: string; prTitle: string; lineageToken?: string }> = [];
     for (const pr of prs) {
       if (pr.headRefName.startsWith("ninthwave/")) {
-        items.push({ id: pr.headRefName.slice(10), prTitle: pr.title ?? "" }); // strip "ninthwave/"
+        const lineageToken = parseWorkItemReferenceBlock(pr.body ?? "")?.lineageToken;
+        items.push({
+          id: pr.headRefName.slice(10),
+          prTitle: pr.title ?? "",
+          lineageToken,
+        }); // strip "ninthwave/"
       }
     }
     return items;
@@ -92,9 +113,13 @@ function getMergedTodoIdsFromRepo(repoRoot: string): Array<{ id: string; prTitle
   }
 }
 
-function defaultGetMergedTodoIds(projectRoot: string, worktreeDir: string): Array<{ id: string; prTitle: string }> {
+function defaultGetMergedTodoIds(projectRoot: string, worktreeDir: string): Array<{
+  id: string;
+  prTitle: string;
+  lineageToken?: string;
+}> {
   // Query hub repo for merged ninthwave/* PRs
-  const byId = new Map<string, { id: string; prTitle: string }>();
+  const byId = new Map<string, { id: string; prTitle: string; lineageToken?: string }>();
   for (const item of getMergedTodoIdsFromRepo(projectRoot)) {
     byId.set(item.id, item);
   }
@@ -259,7 +284,6 @@ export function reconcile(
   // title. If they don't match, the merged PR belongs to a previous cycle that reused
   // the same ID -- skip it to avoid falsely deleting the new work item.
   const openIds = new Set(deps.getOpenItemIds(workDir));
-  const mergedPrTitleById = new Map(mergedItems.map((m) => [m.id, m.prTitle]));
   const toMarkDone: string[] = [];
   const skippedCollisions: string[] = [];
 
@@ -267,12 +291,16 @@ export function reconcile(
     if (!openIds.has(merged.id)) continue;
 
     // Title-match check: read the work item file's title and compare with the merged PR's title
-    if (merged.prTitle) {
-      const workItem = readWorkItem(workDir, merged.id);
-      if (workItem?.title && !prTitleMatchesWorkItem(merged.prTitle, workItem.title)) {
-        skippedCollisions.push(merged.id);
-        continue;
-      }
+    const workItem = readWorkItem(workDir, merged.id);
+    if (
+      workItem
+      && !prMetadataMatchesWorkItem(
+        { title: merged.prTitle, lineageToken: merged.lineageToken },
+        workItem,
+      )
+    ) {
+      skippedCollisions.push(merged.id);
+      continue;
     }
 
     toMarkDone.push(merged.id);
@@ -316,7 +344,6 @@ export function reconcile(
   // Also clean cross-repo worktrees for done items
   const crossRepoIndex = join(worktreeDir, ".cross-repo-index");
   const crossRepoEntries = listCrossRepoEntries(crossRepoIndex);
-  const crossRepoMap = new Map(crossRepoEntries.map((e) => [e.todoId, e]));
   const crossRepoCleaned = new Set<string>();
 
   for (const entry of crossRepoEntries) {

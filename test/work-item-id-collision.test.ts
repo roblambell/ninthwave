@@ -9,6 +9,7 @@ import { join } from "path";
 import { tmpdir } from "os";
 import {
   normalizeTitleForComparison,
+  prMetadataMatchesWorkItem,
   prTitleMatchesWorkItem,
 } from "../core/work-item-files.ts";
 import { reconcile, type ReconcileDeps } from "../core/commands/reconcile.ts";
@@ -24,6 +25,7 @@ import type { WorkItem } from "../core/types.ts";
 // ── Test helpers ──────────────────────────────────────────────────────
 
 let tmpDirs: string[] = [];
+const LINEAGE = "8d641d84-5065-4e72-8b72-c087812ef2cb";
 
 function makeTmpDir(): string {
   const dir = join(
@@ -107,6 +109,23 @@ function makeDeps(overrides: Partial<ReconcileDeps> = {}): ReconcileDeps {
     worktreeHasCommits: () => true,
     branchHasOpenPR: () => false,
     ...overrides,
+  };
+}
+
+function makeNoopMux() {
+  return {
+    type: "cmux" as const,
+    isAvailable: () => true,
+    diagnoseUnavailable: () => "not available",
+    launchWorkspace: () => null,
+    splitPane: () => null,
+    sendMessage: () => true,
+    writeInbox: () => {},
+    readScreen: () => "",
+    listWorkspaces: () => "",
+    closeWorkspace: () => true,
+    setStatus: () => true,
+    setProgress: () => true,
   };
 }
 
@@ -218,6 +237,26 @@ describe("prTitleMatchesWorkItem", () => {
   });
 });
 
+describe("prMetadataMatchesWorkItem", () => {
+  it("matches tokenized items by lineage even when titles differ", () => {
+    expect(
+      prMetadataMatchesWorkItem(
+        { title: "old work", lineageToken: LINEAGE },
+        { id: "H-MUX-1", title: "brand new work", lineageToken: LINEAGE },
+      ),
+    ).toBe(true);
+  });
+
+  it("rejects tokenized items when lineage metadata is missing", () => {
+    expect(
+      prMetadataMatchesWorkItem(
+        { title: "brand new work" },
+        { id: "H-MUX-1", title: "brand new work", lineageToken: LINEAGE },
+      ),
+    ).toBe(false);
+  });
+});
+
 // ── Reconcile collision tests ────────────────────────────────────────
 
 describe("reconcile: item ID collision safety", () => {
@@ -297,6 +336,40 @@ describe("reconcile: item ID collision safety", () => {
     expect(markedIds).toEqual(["H-FOO-1"]);
   });
 
+  it("marks tokenized items done when lineage matches even if title changed", () => {
+    const { workDir, worktreeDir, projectRoot } = setupWorkItemsDir({
+      "2-test--H-FOO-1.md": `# New work (H-FOO-1)\n\n**Priority:** High\n**Domain:** test\n**Lineage:** ${LINEAGE}\n`,
+    });
+    let markedIds: string[] = [];
+
+    const deps = makeDeps({
+      getMergedTodoIds: () => [{ id: "H-FOO-1", prTitle: "different title", lineageToken: LINEAGE }],
+      markDone: (ids) => {
+        markedIds = ids;
+      },
+    });
+
+    reconcile(workDir, worktreeDir, projectRoot, deps);
+    expect(markedIds).toEqual(["H-FOO-1"]);
+  });
+
+  it("skips tokenized items when merged PR lineage is missing", () => {
+    const { workDir, worktreeDir, projectRoot } = setupWorkItemsDir({
+      "2-test--H-FOO-1.md": `# New work (H-FOO-1)\n\n**Priority:** High\n**Domain:** test\n**Lineage:** ${LINEAGE}\n`,
+    });
+    let markedIds: string[] = [];
+
+    const deps = makeDeps({
+      getMergedTodoIds: () => [{ id: "H-FOO-1", prTitle: "New work" }],
+      markDone: (ids) => {
+        markedIds = ids;
+      },
+    });
+
+    captureOutput(() => reconcile(workDir, worktreeDir, projectRoot, deps));
+    expect(markedIds).toEqual([]);
+  });
+
   it("does not clean worktrees for collision-skipped items", () => {
     const { workDir, worktreeDir, projectRoot } = setupWorkItemsDir({
       "2-test--H-FOO-1.md": `# New work (H-FOO-1)\n\n**Priority:** High\n**Domain:** test\n`,
@@ -368,6 +441,28 @@ describe("reconstructState: item ID collision safety", () => {
     expect(item.prNumber).toBe(42);
   });
 
+  it("fast-tracks tokenized items when lineage matches even if title differs", () => {
+    const orch = new Orchestrator();
+    orch.addItem({ ...makeWorkItem("H-FOO-1", "new work"), lineageToken: LINEAGE });
+
+    const tmpDir = makeTmpDir();
+    const wtDir = join(tmpDir, ".ninthwave", ".worktrees");
+    mkdirSync(join(wtDir, "ninthwave-H-FOO-1"), { recursive: true });
+
+    const mockCheckPr = (id: string) => {
+      if (id === "H-FOO-1") {
+        return `H-FOO-1\t42\tmerged\t\t\told work\t${LINEAGE}`;
+      }
+      return null;
+    };
+
+    reconstructState(orch, tmpDir, wtDir, undefined, mockCheckPr);
+
+    const item = orch.getItem("H-FOO-1")!;
+    expect(item.state).toBe("merged");
+    expect(item.prNumber).toBe(42);
+  });
+
   it("falls back to merged when PR title is empty (no title data available)", () => {
     const orch = new Orchestrator();
     orch.addItem(makeWorkItem("H-FOO-1", "some work"));
@@ -409,18 +504,7 @@ describe("buildSnapshot: item ID collision safety", () => {
       return null;
     };
 
-    const noopMux = {
-      type: "cmux" as const,
-      isAvailable: () => true,
-      diagnoseUnavailable: () => "not available",
-      launchWorkspace: () => null,
-      splitPane: () => null,
-      sendMessage: () => true,
-      writeInbox: () => {},
-      readScreen: () => "",
-      listWorkspaces: () => "",
-      closeWorkspace: () => true,
-    };
+    const noopMux = makeNoopMux();
 
     const snapshot = buildSnapshot(
       orch,
@@ -457,18 +541,7 @@ describe("buildSnapshot: item ID collision safety", () => {
       return null;
     };
 
-    const noopMux = {
-      type: "cmux" as const,
-      isAvailable: () => true,
-      diagnoseUnavailable: () => "not available",
-      launchWorkspace: () => null,
-      splitPane: () => null,
-      sendMessage: () => true,
-      writeInbox: () => {},
-      readScreen: () => "",
-      listWorkspaces: () => "",
-      closeWorkspace: () => true,
-    };
+    const noopMux = makeNoopMux();
 
     const snapshot = buildSnapshot(
       orch,
@@ -502,18 +575,7 @@ describe("buildSnapshot: item ID collision safety", () => {
       return null;
     };
 
-    const noopMux = {
-      type: "cmux" as const,
-      isAvailable: () => true,
-      diagnoseUnavailable: () => "not available",
-      launchWorkspace: () => null,
-      splitPane: () => null,
-      sendMessage: () => true,
-      writeInbox: () => {},
-      readScreen: () => "",
-      listWorkspaces: () => "",
-      closeWorkspace: () => true,
-    };
+    const noopMux = makeNoopMux();
 
     const snapshot = buildSnapshot(
       orch,
@@ -542,24 +604,39 @@ describe("buildSnapshot: item ID collision safety", () => {
       return null;
     };
 
-    const noopMux = {
-      type: "cmux" as const,
-      isAvailable: () => true,
-      diagnoseUnavailable: () => "not available",
-      launchWorkspace: () => null,
-      splitPane: () => null,
-      sendMessage: () => true,
-      writeInbox: () => {},
-      readScreen: () => "",
-      listWorkspaces: () => "",
-      closeWorkspace: () => true,
-    };
+    const noopMux = makeNoopMux();
 
     const snapshot = buildSnapshot(
       orch,
       "/tmp/test",
       "/tmp/test/.ninthwave/.worktrees",
       noopMux,
+      () => null,
+      mockCheckPr,
+    );
+
+    const snap = snapshot.items.find((s) => s.id === "H-FOO-1");
+    expect(snap).toBeDefined();
+    expect(snap!.prState).toBe("merged");
+  });
+
+  it("reports merged for tokenized items when lineage matches even if title differs", () => {
+    const orch = new Orchestrator();
+    orch.addItem({ ...makeWorkItem("H-FOO-1", "new work"), lineageToken: LINEAGE });
+    orch.hydrateState("H-FOO-1", "implementing");
+
+    const mockCheckPr = (id: string) => {
+      if (id === "H-FOO-1") {
+        return `H-FOO-1\t42\tmerged\t\t\told work\t${LINEAGE}`;
+      }
+      return null;
+    };
+
+    const snapshot = buildSnapshot(
+      orch,
+      "/tmp/test",
+      "/tmp/test/.ninthwave/.worktrees",
+      makeNoopMux(),
       () => null,
       mockCheckPr,
     );

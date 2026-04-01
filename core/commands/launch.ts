@@ -271,7 +271,7 @@ export function launchSingleItem(
   const branchName = `ninthwave/${item.id}`;
 
   // Stale branch cleanup (safety net for direct `ninthwave start` callers)
-  cleanStaleBranchForReuse(item.id, item.title, targetRepo);
+  cleanStaleBranchForReuse(item.id, item.title, targetRepo, undefined, item.lineageToken);
 
   // Ensure worktree directory exists
   mkdirSync(worktreeDir, { recursive: true });

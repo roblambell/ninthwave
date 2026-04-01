@@ -6,12 +6,12 @@ import {
   deleteRemoteBranch as defaultDeleteRemoteBranch,
 } from "./git.ts";
 import { prList as defaultPrList } from "./gh.ts";
-import { prTitleMatchesWorkItem } from "./work-item-files.ts";
+import { prMetadataMatchesWorkItem } from "./work-item-files.ts";
 import { warn as defaultWarn, info as defaultInfo } from "./output.ts";
 
 /** Dependencies for stale branch cleanup, injectable for testing. */
 export interface StaleBranchCleanupDeps {
-  prList: (repoRoot: string, branch: string, state: string) => import("./gh.ts").GhResult<Array<{ number: number; title: string }>>;
+  prList: (repoRoot: string, branch: string, state: string) => import("./gh.ts").GhResult<Array<{ number: number; title: string; body?: string }>>;
   branchExists: (repoRoot: string, branch: string) => boolean;
   deleteBranch: (repoRoot: string, branch: string) => void;
   deleteRemoteBranch: (repoRoot: string, branch: string) => void;
@@ -46,6 +46,7 @@ export function cleanStaleBranchForReuse(
   itemTitle: string,
   targetRepo: string,
   deps: StaleBranchCleanupDeps = defaultStaleBranchDeps,
+  lineageToken?: string,
 ): boolean {
   const branchName = `ninthwave/${itemId}`;
 
@@ -56,9 +57,12 @@ export function cleanStaleBranchForReuse(
   }
   const mergedPrs = mergedResult.data;
 
-  // Check if any merged PR title matches the current work item title
+  // Check if any merged PR still matches the current work item identity.
   const hasMatchingTitle = mergedPrs.some((pr) =>
-    prTitleMatchesWorkItem(pr.title, itemTitle),
+    prMetadataMatchesWorkItem(
+      { title: pr.title, body: pr.body },
+      { id: itemId, title: itemTitle, lineageToken },
+    ),
   );
   if (hasMatchingTitle) {
     return false; // Title matches -- same work, normal flow

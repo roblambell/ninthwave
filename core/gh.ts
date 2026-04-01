@@ -118,12 +118,12 @@ export function isAvailable(): boolean {
   return result.exitCode === 0;
 }
 
-/** List PRs for a branch with a given state. Returns GhResult with array of {number, title}. */
+/** List PRs for a branch with a given state. Returns GhResult with array of {number, title, body?}. */
 export function prList(
   repoRoot: string,
   branch: string,
   state: string,
-): GhResult<Array<{ number: number; title: string }>> {
+): GhResult<Array<{ number: number; title: string; body?: string }>> {
   const result = ghInRepo(repoRoot, [
     "pr",
     "list",
@@ -132,14 +132,21 @@ export function prList(
     "--state",
     state,
     "--json",
-    "number,title",
+    "number,title,body",
     "--limit",
     "100",
   ]);
   if (result.exitCode !== 0) return ghFailure(result.stderr || `gh pr list exited with code ${result.exitCode}`);
   if (!result.stdout) return { ok: true, data: [] };
   try {
-    return { ok: true, data: JSON.parse(result.stdout) as Array<{ number: number; title: string }> };
+    return {
+      ok: true,
+      data: JSON.parse(result.stdout) as Array<{
+        number: number;
+        title: string;
+        body?: string;
+      }>,
+    };
   } catch {
     return ghParseFailure("Failed to parse gh pr list output");
   }
@@ -217,7 +224,7 @@ export async function prListAsync(
   repoRoot: string,
   branch: string,
   state: string,
-): Promise<GhResult<Array<{ number: number; title: string }>>> {
+): Promise<GhResult<Array<{ number: number; title: string; body?: string }>>> {
   const result = await ghInRepoAsync(repoRoot, [
     "pr",
     "list",
@@ -226,14 +233,21 @@ export async function prListAsync(
     "--state",
     state,
     "--json",
-    "number,title",
+    "number,title,body",
     "--limit",
     "100",
   ]);
   if (result.exitCode !== 0) return ghFailure(result.stderr || `gh pr list exited with code ${result.exitCode}`);
   if (!result.stdout) return { ok: true, data: [] };
   try {
-    return { ok: true, data: JSON.parse(result.stdout) as Array<{ number: number; title: string }> };
+    return {
+      ok: true,
+      data: JSON.parse(result.stdout) as Array<{
+        number: number;
+        title: string;
+        body?: string;
+      }>,
+    };
   } catch {
     return ghParseFailure("Failed to parse gh pr list output");
   }

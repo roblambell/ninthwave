@@ -53,6 +53,7 @@ Each work item file is a standalone markdown document:
 **Source:** <origin description>
 **Depends on:** <ID(s) comma-separated, or "None">
 **Domain:** <domain slug>
+**Lineage:** <opaque token from `nw lineage-token`>
 
 <Description -- 2-4 sentences explaining what to build/fix and key decisions.>
 
@@ -76,8 +77,11 @@ Key files: `path/to/file.ex`, `path/to/component.tsx:42`
 | Source | Metadata line | Free text describing origin |
 | Depends on | Metadata line | Comma-separated IDs or `None` |
 | Domain | Metadata line | Domain slug (lowercase, hyphens, max 40 chars) |
+| Lineage | Metadata line | RFC 4122 UUID v4 from `nw lineage-token` |
 | Description | Body | 2-4 sentences explaining what to build and key decisions |
 | Acceptance | Body | Concrete, verifiable conditions for "done" |
+
+`**Lineage:**` is required for newly created work items. During rollout, legacy pre-lineage files may omit it and still parse via the explicit legacy fallback path.
 
 ## Optional Fields
 
@@ -87,6 +91,16 @@ Key files: `path/to/file.ex`, `path/to/component.tsx:42`
 | Repo | Metadata line | `**Repo:** <alias>` -- target repo for cross-repo items |
 | Test plan | Body | `**Test plan:**` followed by bullet points |
 | Key files | Body | Backtick-quoted paths, `file:line` references |
+
+### Lineage Tokens
+
+Generate lineage tokens with `nw lineage-token` exactly once when creating a new work item.
+
+- Do not derive the token from title, ID, timestamp, branch name, or hashes of those values
+- Do not use `Math.random()` or model-generated strings
+- Preserve the same token when the file is re-read or rewritten
+
+Legacy work items created before this field existed may omit `**Lineage:**`; tooling falls back explicitly for those older files during rollout.
 
 ### Writing Good Test Plans
 
@@ -167,6 +181,7 @@ Each work item should target one human-reviewable PR:
 - **Priority**: from `**Priority:**` line, converted to lowercase
 - **Depends on**: from `**Depends on:**` line, comma/space-separated IDs
 - **Domain**: from `**Domain:**` line (defaults to `"uncategorized"` if missing)
+- **Lineage**: from `**Lineage:**` line (required for new items, optional only for legacy pre-rollout files)
 - **Bundle with**: from `**Bundle with:**` line (optional)
 - **Repo**: from `**Repo:**` line (optional, defaults to hub repo)
 - **Test plan**: from `**Test plan:**` line and subsequent bullet lines (optional)
@@ -191,6 +206,7 @@ File: `.ninthwave/work/2-cloud-infrastructure--M-CI-1.md`
 **Source:** Manual request 2026-03-22
 **Depends on:** None
 **Domain:** cloud-infrastructure
+**Lineage:** 8d641d84-5065-4e72-8b72-c087812ef2cb
 
 All test workflow runners currently use 2 vCPU Blacksmith instances. Upgrade to 4 vCPU for faster test execution. Keep deploy workflows on 2 vCPU. Each workflow stays on its current platform (ARM or x86).
 

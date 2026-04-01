@@ -15,9 +15,11 @@ import {
   ID_IN_PARENS,
   ID_PATTERN_GLOBAL,
   ID_PATTERN_SOURCE,
+  LINEAGE_TOKEN_PATTERN,
   WILDCARD_DEP_PATTERN,
   CODE_EXTENSIONS,
 } from "./types.ts";
+import { generateLineageToken } from "./commands/lineage-token.ts";
 
 /** Type guard: checks whether a string is a valid Priority. */
 export function isPriority(s: string): s is Priority {
@@ -258,6 +260,7 @@ const METADATA_PREFIXES = [
   "**Source:**",
   "**Depends on:**",
   "**Domain:**",
+  "**Lineage:**",
   "**Bundle with:**",
   "**Repo:**",
   "**Bootstrap:**",
@@ -265,7 +268,7 @@ const METADATA_PREFIXES = [
 
 /**
  * Extract the body text from a todo file's rawText, stripping the # header
- * and metadata lines (Priority, Source, Depends on, Domain, Bundle with, Repo).
+ * and metadata lines (Priority, Source, Depends on, Domain, Lineage, Bundle with, Repo).
  * Trims trailing empty lines.
  */
 export function extractBody(rawText: string): string[] {
@@ -326,6 +329,66 @@ export function normalizeTitleForComparison(title: string): string {
     .trim();
 }
 
+export interface WorkItemReferenceBlock {
+  id?: string;
+  priority?: string;
+  source?: string;
+  lineageToken?: string;
+}
+
+/**
+ * Parse the machine-readable "Work Item Reference" block from a PR body.
+ */
+export function parseWorkItemReferenceBlock(
+  markdown: string,
+): WorkItemReferenceBlock | undefined {
+  const lines = markdown.split("\n");
+  let inBlock = false;
+  const reference: WorkItemReferenceBlock = {};
+
+  for (const line of lines) {
+    const trimmed = line.trim();
+
+    if (!inBlock) {
+      if (trimmed === "## Work Item Reference") {
+        inBlock = true;
+      }
+      continue;
+    }
+
+    if (!trimmed) {
+      if (Object.keys(reference).length > 0) break;
+      continue;
+    }
+
+    if (trimmed.startsWith("## ")) break;
+
+    const match = trimmed.match(/^([A-Za-z][A-Za-z ]+):\s+(.+)$/);
+    if (!match) continue;
+
+    const key = match[1]!.trim().toLowerCase();
+    const value = match[2]!.trim();
+    switch (key) {
+      case "id":
+        reference.id = value;
+        break;
+      case "priority":
+        reference.priority = value;
+        break;
+      case "source":
+        reference.source = value;
+        break;
+      case "lineage":
+        if (LINEAGE_TOKEN_PATTERN.test(value)) {
+          reference.lineageToken = value.toLowerCase();
+        }
+        break;
+    }
+  }
+
+  return Object.keys(reference).length > 0 ? reference : undefined;
+}
+
 /**
  * Check if a PR matches a work item.
  *
@@ -352,6 +415,40 @@ export function prTitleMatchesWorkItem(
   const normTodo = normalizeTitleForComparison(todoTitle);
   if (!normPr || !normTodo) return false;
   return normPr === normTodo;
+}
+
+/**
+ * Compare PR metadata against a work item's durable identity.
+ *
+ * New tokenized items require a matching lineage token. Legacy token-less items
+ * keep the previous title-based fallback path during rollout.
+ */
+export function prMetadataMatchesWorkItem(
+  pr: {
+    title: string;
+    body?: string;
+    lineageToken?: string;
+    branchName?: string;
+  },
+  item: Pick<WorkItem, "id" | "title" | "lineageToken">,
+): boolean {
+  const reference = pr.body ? parseWorkItemReferenceBlock(pr.body) : undefined;
+  const prLineageToken = (pr.lineageToken ?? reference?.lineageToken)?.toLowerCase();
+  const prItemId = reference?.id;
+
+  if (prItemId && prItemId !== item.id) {
+    return false;
+  }
+
+  if (item.lineageToken) {
+    return prLineageToken === item.lineageToken.toLowerCase();
+  }
+
+  if (!prLineageToken && !pr.title) {
+    return true;
+  }
+
+  return prTitleMatchesWorkItem(pr.title, item.title, pr.branchName);
 }
 
 // ---------------------------------------------------------------------------
@@ -414,6 +511,7 @@ export function parseWorkItemFile(filePath: string): WorkItem | null {
   let depends = "";
   let bundle = "";
   let domain = "";
+  let lineageToken: string | undefined;
   let repoAlias = "";
   let bootstrap = false;
 
@@ -440,6 +538,15 @@ export function parseWorkItemFile(filePath: string): WorkItem | null {
     const domainMatch = line.match(/^\*\*Domain:\*\*\s+(.+)/);
     if (domainMatch) {
       domain = domainMatch[1]!.trim();
+    }
+
+    const lineageMatch = line.match(/^\*\*Lineage:\*\*\s+(.+)/);
+    if (lineageMatch) {
+      const candidate = lineageMatch[1]!.trim().toLowerCase();
+      if (!LINEAGE_TOKEN_PATTERN.test(candidate)) {
+        return null;
+      }
+      lineageToken = candidate;
     }
 
     const repoMatch = line.match(/^\*\*Repo:\*\*\s+(.+)/);
@@ -480,6 +587,7 @@ export function parseWorkItemFile(filePath: string): WorkItem | null {
     priority,
     title,
     domain: domain || "uncategorized",
+    lineageToken,
     dependencies,
     bundleWith,
     status: "open",
@@ -595,9 +703,20 @@ export function readWorkItem(
  * Write a WorkItem to its canonical file in the todos directory.
  * Generates the markdown content and sets item.filePath.
  */
-export function writeWorkItemFile(workDir: string, item: WorkItem): void {
+export function writeWorkItemFile(
+  workDir: string,
+  item: WorkItem,
+  tokenGenerator: () => string = generateLineageToken,
+): void {
   const filename = workItemFilename(item);
   const fp = join(workDir, filename);
+  const lineageToken = (item.lineageToken ?? tokenGenerator()).toLowerCase();
+
+  if (!LINEAGE_TOKEN_PATTERN.test(lineageToken)) {
+    throw new Error(`Invalid lineage token for ${item.id}: ${lineageToken}`);
+  }
+
+  item.lineageToken = lineageToken;
 
   const lines: string[] = [];
 
@@ -621,6 +740,9 @@ export function writeWorkItemFile(workDir: string, item: WorkItem): void {
 
   // Domain
   lines.push(`**Domain:** ${item.domain}`);
+
+  // Lineage
+  lines.push(`**Lineage:** ${lineageToken}`);
 
   // Bundle
   if (item.bundleWith.length > 0) {

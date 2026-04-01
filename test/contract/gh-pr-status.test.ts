@@ -40,14 +40,26 @@ afterAll(() => {
 // These mirror the JSON shapes returned by `gh pr list`, `gh pr view`,
 // and `gh pr checks` after parsing in core/gh.ts.
 
-/** gh pr list --json number,title --state merged */
+const MERGED_LINEAGE = "8d641d84-5065-4e72-8b72-c087812ef2cb";
+
+/** gh pr list --json number,title,body --state merged */
 const MERGED_PR = { ok: true as const, data: [
-  { number: 42, title: "fix: resolve race condition in worker health (H-RC-1)" },
+  {
+    number: 42,
+    title: "fix: resolve race condition in worker health (H-RC-1)",
+    body: [
+      "## Work Item Reference",
+      "ID: H-RC-1",
+      `Lineage: ${MERGED_LINEAGE}`,
+      "Priority: High",
+      "Source: Test",
+    ].join("\n"),
+  },
 ] };
 
-/** gh pr list --json number,title --state open */
+/** gh pr list --json number,title,body --state open */
 const OPEN_PR = { ok: true as const, data: [
-  { number: 123, title: "feat: add retry logic for failed CI (H-CI-2)" },
+  { number: 123, title: "feat: add retry logic for failed CI (H-CI-2)", body: "" },
 ] };
 
 /** gh pr view --json reviewDecision,mergeable,updatedAt -- pending review */
@@ -119,6 +131,7 @@ function parseFields(output: string) {
     mergeable: f[3],
     eventTime: f[4],
     prTitle: f[5],
+    lineageToken: f[6],
     fieldCount: f.length,
   };
 }
@@ -175,10 +188,10 @@ describe("checkPrStatus format contract", () => {
       );
     });
 
-    it("produces exactly 6 tab-separated fields", () => {
+    it("produces exactly 7 tab-separated fields", () => {
       const parsed = parseFields(checkPrStatus("H-RC-1", "/repo"));
 
-      expect(parsed.fieldCount).toBe(6);
+      expect(parsed.fieldCount).toBe(7);
       expect(parsed.id).toBe("H-RC-1");
       expect(parsed.prNumber).toBe("42");
       expect(parsed.status).toBe("merged");
@@ -186,14 +199,15 @@ describe("checkPrStatus format contract", () => {
       expect(parsed.eventTime).toBe("");
     });
 
-    it("includes PR title as 6th field for collision detection", () => {
+    it("includes PR title and lineage token for collision recovery", () => {
       const parsed = parseFields(checkPrStatus("H-RC-1", "/repo"));
       expect(parsed.prTitle).toBe(MERGED_PR.data[0]!.title);
+      expect(parsed.lineageToken).toBe(MERGED_LINEAGE);
     });
 
-    it("exact format: ID\\tNUMBER\\tmerged\\t\\t\\tTITLE", () => {
+    it("exact format: ID\\tNUMBER\\tmerged\\t\\t\\tTITLE\\tLINEAGE", () => {
       expect(checkPrStatus("H-RC-1", "/repo")).toBe(
-        "H-RC-1\t42\tmerged\t\t\tfix: resolve race condition in worker health (H-RC-1)",
+        `H-RC-1\t42\tmerged\t\t\tfix: resolve race condition in worker health (H-RC-1)\t${MERGED_LINEAGE}`,
       );
     });
   });
@@ -412,7 +426,7 @@ describe("checkPrStatus format contract", () => {
 
   describe("API error: hold state instead of misinterpreting", () => {
     it("returns empty string when prList('open') fails (API error)", () => {
-      prListSpy.mockReturnValue({ ok: false, error: "API timeout" });
+      prListSpy.mockReturnValue({ ok: false, error: "API timeout", kind: "network" });
 
       const result = checkPrStatus("T-ERR-1", "/repo");
       expect(result).toBe("");
@@ -422,7 +436,7 @@ describe("checkPrStatus format contract", () => {
       prListSpy.mockImplementation(
         (_root: string, _branch: string, state: string) => {
           if (state === "open") return { ok: true, data: [] };
-          return { ok: false, error: "rate limited" };
+          return { ok: false, error: "rate limited", kind: "network" };
         },
       );
 
@@ -437,7 +451,7 @@ describe("checkPrStatus format contract", () => {
           return { ok: true, data: [] };
         },
       );
-      prViewSpy.mockReturnValue({ ok: false, error: "server error" });
+      prViewSpy.mockReturnValue({ ok: false, error: "server error", kind: "unknown" });
 
       const parsed = parseFields(checkPrStatus("T-ERR-3", "/repo"));
       expect(parsed.fieldCount).toBe(5);
@@ -455,7 +469,7 @@ describe("checkPrStatus format contract", () => {
         },
       );
       prViewSpy.mockReturnValue(VIEW_PENDING);
-      prChecksSpy.mockReturnValue({ ok: false, error: "network error" });
+      prChecksSpy.mockReturnValue({ ok: false, error: "network error", kind: "network" });
 
       const parsed = parseFields(checkPrStatus("T-ERR-4", "/repo"));
       expect(parsed.fieldCount).toBe(5);

@@ -240,13 +240,13 @@ describe("checkPrStatus", () => {
     deps.prList.mockImplementation(
       (_root: string, _branch: string, state: string) => {
         if (state === "open") return { ok: true, data: [] };
-        if (state === "merged") return { ok: true, data: [{ number: 99, title: "fix: some work (H-1-1)" }] };
+        if (state === "merged") return { ok: true, data: [{ number: 99, title: "fix: some work (H-1-1)", body: "" }] };
         return { ok: true, data: [] };
       },
     );
 
     const result = checkPrStatus("H-1-1", "/fake/repo", deps);
-    expect(result).toBe("H-1-1\t99\tmerged\t\t\tfix: some work (H-1-1)");
+    expect(result).toBe("H-1-1\t99\tmerged\t\t\tfix: some work (H-1-1)\t");
   });
 
   it("returns no-pr when no PR exists", () => {

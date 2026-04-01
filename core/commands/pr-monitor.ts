@@ -16,6 +16,7 @@ import {
   ghInRepo,
   type GhFailureKind,
 } from "../gh.ts";
+import { parseWorkItemReferenceBlock } from "../work-item-files.ts";
 import * as ghModule from "../gh.ts";
 import type { WatchResult, Transition } from "../types.ts";
 
@@ -163,7 +164,7 @@ export const TRUSTED_ASSOC = '(.author_association == "OWNER" or .author_associa
 
 /**
  * Check each worktree's PR status (merged/ready/pending/failing/no-pr).
- * Returns tab-separated lines: ID\tPR_NUMBER\tSTATUS
+ * Returns tab-separated lines: ID\tPR_NUMBER\tSTATUS...
  *
  * @param print - When true (default, CLI usage), writes results to console.
  *   Pass false to get the result string without side effects.
@@ -318,8 +319,10 @@ export function checkPrStatusDetailed(
     if (!mergedResult.ok) return pollFailure("prList-merged", mergedResult.kind, mergedResult.error);
     const mergedPrs = mergedResult.data;
     if (mergedPrs.length > 0) {
-      const prTitle = mergedPrs[0]!.title ?? "";
-      return { statusLine: `${id}\t${mergedPrs[0]!.number}\tmerged\t\t\t${prTitle}` };
+      const pr = mergedPrs[0]!;
+      const prTitle = pr.title ?? "";
+      const lineageToken = parseWorkItemReferenceBlock(pr.body ?? "")?.lineageToken ?? "";
+      return { statusLine: `${id}\t${pr.number}\tmerged\t\t\t${prTitle}\t${lineageToken}` };
     }
     return { statusLine: `${id}\t\tno-pr` };
   }
@@ -384,8 +387,10 @@ export async function checkPrStatusDetailedAsync(
     if (!mergedResult.ok) return pollFailure("prList-merged", mergedResult.kind, mergedResult.error);
     const mergedPrs = mergedResult.data;
     if (mergedPrs.length > 0) {
-      const prTitle = mergedPrs[0]!.title ?? "";
-      return { statusLine: `${id}\t${mergedPrs[0]!.number}\tmerged\t\t\t${prTitle}` };
+      const pr = mergedPrs[0]!;
+      const prTitle = pr.title ?? "";
+      const lineageToken = parseWorkItemReferenceBlock(pr.body ?? "")?.lineageToken ?? "";
+      return { statusLine: `${id}\t${pr.number}\tmerged\t\t\t${prTitle}\t${lineageToken}` };
     }
     return { statusLine: `${id}\t\tno-pr` };
   }

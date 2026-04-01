@@ -7,6 +7,8 @@ import { tmpdir } from "os";
 import {
   workItemFilename,
   parseWorkItemFile,
+  parseWorkItemReferenceBlock,
+  prMetadataMatchesWorkItem,
   writeWorkItemFile,
   listWorkItems,
   readWorkItem,
@@ -20,6 +22,7 @@ import type { WorkItem, Priority } from "../core/types.ts";
 
 // Track temp dirs for cleanup
 const tempDirs: string[] = [];
+const FIXTURE_LINEAGE = "8d641d84-5065-4e72-8b72-c087812ef2cb";
 
 function makeTempDir(): string {
   const tmp = mkdtempSync(join(tmpdir(), "nw-todofiles-"));
@@ -62,6 +65,7 @@ function writeWellFormedFile(dir: string, filename: string): string {
 **Source:** local
 **Depends on:** None
 **Domain:** worker-reliability
+**Lineage:** ${FIXTURE_LINEAGE}
 
 Description of the work to do.
 
@@ -130,6 +134,7 @@ describe("parseWorkItemFile", () => {
     expect(item!.priority).toBe("medium");
     expect(item!.title).toBe("Improve worker reliability");
     expect(item!.domain).toBe("worker-reliability");
+    expect(item!.lineageToken).toBe(FIXTURE_LINEAGE);
     expect(item!.dependencies).toEqual([]);
     expect(item!.bundleWith).toEqual([]);
     expect(item!.status).toBe("open");
@@ -212,9 +217,26 @@ Just a description.
     expect(item).not.toBeNull();
     expect(item!.id).toBe("L-MIN-1");
     expect(item!.priority).toBe("low");
+    expect(item!.lineageToken).toBeUndefined();
     expect(item!.testPlan).toBe("");
     expect(item!.filePaths).toEqual([]);
     expect(item!.bundleWith).toEqual([]);
+  });
+
+  it("returns null for invalid lineage token", () => {
+    const dir = makeTempDir();
+    const content = `# Invalid lineage (H-LIN-1)
+
+**Priority:** High
+**Source:** local
+**Depends on:** None
+**Domain:** test
+**Lineage:** not-a-token
+`;
+    const fp = join(dir, "1-test--H-LIN-1.md");
+    writeFileSync(fp, content);
+
+    expect(parseWorkItemFile(fp)).toBeNull();
   });
 
   it("returns null for file with no ID", () => {
@@ -324,6 +346,60 @@ describe("extractDescriptionSnippet", () => {
   });
 });
 
+describe("parseWorkItemReferenceBlock", () => {
+  it("extracts ID and lineage token from PR metadata", () => {
+    const body = [
+      "## Summary",
+      "Test PR",
+      "",
+      "## Work Item Reference",
+      "ID: H-LIN-1",
+      `Lineage: ${FIXTURE_LINEAGE}`,
+      "Priority: High",
+      "Source: Manual request",
+    ].join("\n");
+
+    expect(parseWorkItemReferenceBlock(body)).toEqual({
+      id: "H-LIN-1",
+      lineageToken: FIXTURE_LINEAGE,
+      priority: "High",
+      source: "Manual request",
+    });
+  });
+});
+
+describe("prMetadataMatchesWorkItem", () => {
+  it("matches tokenized items by lineage token instead of title", () => {
+    const item = makeWorkItem({ id: "H-LIN-1", title: "New title", lineageToken: FIXTURE_LINEAGE });
+    expect(
+      prMetadataMatchesWorkItem(
+        { title: "old title", lineageToken: FIXTURE_LINEAGE },
+        item,
+      ),
+    ).toBe(true);
+  });
+
+  it("rejects tokenized items when merged PR metadata lacks the lineage token", () => {
+    const item = makeWorkItem({ id: "H-LIN-1", title: "New title", lineageToken: FIXTURE_LINEAGE });
+    expect(
+      prMetadataMatchesWorkItem(
+        { title: "New title" },
+        item,
+      ),
+    ).toBe(false);
+  });
+
+  it("keeps legacy fallback for token-less items", () => {
+    const item = makeWorkItem({ id: "H-LEG-1", title: "Legacy title" });
+    expect(
+      prMetadataMatchesWorkItem(
+        { title: "fix: legacy title (H-LEG-1)" },
+        item,
+      ),
+    ).toBe(true);
+  });
+});
+
 // --- writeWorkItemFile + parseWorkItemFile round-trip ---
 
 describe("writeWorkItemFile + parseWorkItemFile round-trip", () => {
@@ -333,6 +409,7 @@ describe("writeWorkItemFile + parseWorkItemFile round-trip", () => {
     mkdirSync(workDir);
 
     const original = makeWorkItem({
+      lineageToken: FIXTURE_LINEAGE,
       rawText: `# Improve worker reliability (M-WRK-8)
 
 **Priority:** Medium
@@ -368,11 +445,12 @@ Key files: \`core/worker.ts\`
     expect(parsed!.priority).toBe("medium");
     expect(parsed!.title).toBe("Improve worker reliability");
     expect(parsed!.domain).toBe("worker-reliability");
+    expect(parsed!.lineageToken).toBe(FIXTURE_LINEAGE);
     expect(parsed!.dependencies).toEqual(["H-DEP-1"]);
     expect(parsed!.bundleWith).toEqual(["M-BND-2"]);
   });
 
-  it("round-trips an item with no optional fields", () => {
+  it("stamps a lineage token for newly created items and preserves it on read", () => {
     const dir = makeTempDir();
     const workDir = join(dir, "work");
     mkdirSync(workDir);
@@ -392,12 +470,14 @@ Just do the thing.
 `,
     });
 
-    writeWorkItemFile(workDir, original);
+    writeWorkItemFile(workDir, original, () => FIXTURE_LINEAGE);
     const parsed = parseWorkItemFile(original.filePath);
     expect(parsed).not.toBeNull();
     expect(parsed!.id).toBe("L-SIM-1");
     expect(parsed!.priority).toBe("low");
     expect(parsed!.domain).toBe("simple");
+    expect(parsed!.lineageToken).toBe(FIXTURE_LINEAGE);
+    expect(original.lineageToken).toBe(FIXTURE_LINEAGE);
     expect(parsed!.testPlan).toBe("");
     expect(parsed!.filePaths).toEqual([]);
   });
@@ -662,7 +742,7 @@ describe("isPriority", () => {
 // --- extractBody ---
 
 describe("extractBody", () => {
-  it("strips metadata prefixes including Bootstrap", () => {
+  it("strips metadata prefixes including Lineage and Bootstrap", () => {
     const raw = [
       "# Title (H-T-1)",
       "",
@@ -670,6 +750,7 @@ describe("extractBody", () => {
       "**Source:** local",
       "**Depends on:** None",
       "**Domain:** test",
+      `**Lineage:** ${FIXTURE_LINEAGE}`,
       "**Bootstrap:** true",
       "",
       "Body text here.",
@@ -686,6 +767,7 @@ describe("extractBody", () => {
       "**Source:** local",
       "**Depends on:** None",
       "**Domain:** test",
+      `**Lineage:** ${FIXTURE_LINEAGE}`,
       "**Repo:** my-repo",
       "**Bootstrap:** true",
       "",

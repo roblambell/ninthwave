@@ -7,7 +7,7 @@ import type { Orchestrator, OrchestratorItem, OrchestratorItemState } from "./or
 import type { DaemonState } from "./daemon.ts";
 import { getWorktreeInfo } from "./cross-repo.ts";
 import { checkPrStatus } from "./commands/pr-monitor.ts";
-import { prTitleMatchesWorkItem } from "./work-item-files.ts";
+import { prMetadataMatchesWorkItem } from "./work-item-files.ts";
 import type { Multiplexer } from "./mux.ts";
 
 // ── State reconstruction (crash recovery) ──────────────────────────
@@ -100,9 +100,17 @@ function restoreRepairPrTrackingState(
   switch (status) {
     case "merged": {
       const mergedPrTitle = parts[5] ?? "";
+      const mergedPrLineageToken = parts[6] ?? "";
       const mergedPrNum = prNumStr ? parseInt(prNumStr, 10) : undefined;
       const alreadyTracked = mergedPrNum != null && previousPrNumber === mergedPrNum;
-      if (isRepairPrCandidate(item.id, candidateId) || alreadyTracked || !mergedPrTitle || prTitleMatchesWorkItem(mergedPrTitle, item.workItem.title)) {
+      if (
+        isRepairPrCandidate(item.id, candidateId)
+        || alreadyTracked
+        || prMetadataMatchesWorkItem(
+          { title: mergedPrTitle, lineageToken: mergedPrLineageToken },
+          item.workItem,
+        )
+      ) {
         orch.hydrateState(item.id, "merged");
       } else {
         orch.hydrateState(item.id, savedState);
@@ -283,8 +291,15 @@ export function reconstructState(
           orch.hydrateState(item.id, "merged");
         } else {
           const mergedPrTitle = parts[5] ?? "";
-          const itemTitle = orch.getItem(item.id)?.workItem.title ?? "";
-          if (mergedPrTitle && itemTitle && !prTitleMatchesWorkItem(mergedPrTitle, itemTitle)) {
+          const mergedPrLineageToken = parts[6] ?? "";
+          const workItem = orch.getItem(item.id)?.workItem;
+          if (
+            workItem
+            && !prMetadataMatchesWorkItem(
+              { title: mergedPrTitle, lineageToken: mergedPrLineageToken },
+              workItem,
+            )
+          ) {
             orch.hydrateState(item.id, "implementing");
             recoverWorkspaceRef(orch, item.id, workspaceList);
           } else {
@@ -343,8 +358,16 @@ function restoreMergedWaitingState(
 
   if (status === "merged") {
     const mergedPrTitle = parts[5] ?? "";
+    const mergedPrLineageToken = parts[6] ?? "";
     const trackedPrMatches = prNumStr ? previousPrNumber === parseInt(prNumStr, 10) : false;
-    if (isRepairPrCandidate(item.id, candidateId) || trackedPrMatches || !mergedPrTitle || prTitleMatchesWorkItem(mergedPrTitle, item.workItem.title)) {
+    if (
+      isRepairPrCandidate(item.id, candidateId)
+      || trackedPrMatches
+      || prMetadataMatchesWorkItem(
+        { title: mergedPrTitle, lineageToken: mergedPrLineageToken },
+        item.workItem,
+      )
+    ) {
       orch.hydrateState(item.id, "merged");
       return true;
     }

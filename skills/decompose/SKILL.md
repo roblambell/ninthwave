@@ -175,7 +175,8 @@ Show totals and ask for approval. Options: looks good, adjust, re-decompose.
 
 1. Ensure the directory exists: `mkdir -p .ninthwave/work`
 2. Read the format guide: `cat "$(cat .ninthwave/dir)/core/docs/work-item-format.md"`
-3. Write each work item as a separate file. The filename convention is:
+3. For each new work item, run `nw lineage-token` exactly once and store the result in that item's `**Lineage:**` field. Never invent, derive, or freeform-generate the token.
+4. Write each work item as a separate file. The filename convention is:
 
    ```
    {priority_num}-{domain_slug}--{ID}.md
@@ -195,6 +196,7 @@ Show totals and ask for approval. Options: looks good, adjust, re-decompose.
 **Source:** <origin>
 **Depends on:** <IDs or None>
 **Domain:** <domain name>
+**Lineage:** <token from `nw lineage-token`>
 
 <Description -- 2-4 sentences.>
 
@@ -210,7 +212,7 @@ Key files: `path/to/file.ts`, `path/to/other.ex`
 
    Note: The heading uses `# ` (not `### `). The `**Domain:**` field is required and must be explicit in each file.
 
-5. Verify every item has a `**Test plan:**` section (non-optional for decomposed items)
+5. Verify every item has both a `**Lineage:**` field and a `**Test plan:**` section
 6. Verify parseable: `ls .ninthwave/work/` to confirm files were written, then `ninthwave list | grep <feature_code>`
 7. Commit and push the new work files so they are available to workers (which clone from remote):
 

@@ -36,6 +36,7 @@ import { cmdDoctor } from "./commands/doctor.ts";
 import { cmdHeartbeat } from "./commands/heartbeat.ts";
 import { cmdInbox } from "./commands/inbox.ts";
 import { cmdLogs } from "./commands/logs.ts";
+import { cmdLineageToken } from "./commands/lineage-token.ts";
 import { cmdSchedule } from "./commands/schedule.ts";
 
 // ── Types ───────────────────────────────────────────────────────────
@@ -433,6 +434,19 @@ export const COMMAND_REGISTRY: ReadonlyArray<CommandEntry> = [
       'nw heartbeat --progress 0.5 --label "Writing tests"',
       'nw heartbeat --progress 1.0 --label "PR created" --pr 42',
     ],
+  },
+  {
+    name: "lineage-token",
+    usage: "lineage-token",
+    description: "Generate a durable work-item lineage token",
+    group: "advanced",
+    needsRoot: false,
+    needsWork: false,
+    handler: (ctx) => {
+      cmdLineageToken(ctx.args);
+    },
+    flags: {},
+    examples: ["nw lineage-token"],
   },
   {
     name: "inbox",

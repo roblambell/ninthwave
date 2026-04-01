@@ -3613,7 +3613,7 @@ export async function cmdOrchestrate(
       } catch {
         return; // Can't resolve repo -- launchSingleItem will handle the error
       }
-      cleanStaleBranchForReuse(item.id, item.title, targetRepo);
+      cleanStaleBranchForReuse(item.id, item.title, targetRepo, undefined, item.lineageToken);
     },
     cleanSingleWorktree,
     prMerge: (repoRoot, prNumber, options) => prMerge(repoRoot, prNumber, options),
