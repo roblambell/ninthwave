@@ -1493,18 +1493,20 @@ describe("orchestratorItemsToStatusItems", () => {
     expect(result).toEqual([]);
   });
 
-  it("overrides state to implementing for remote items", () => {
+  it("preserves review-derived state for remote items", () => {
     const items = [
-      makeOrchestratorItem("R-1", "queued"),
-      makeOrchestratorItem("R-2", "ready"),
+      makeOrchestratorItem("R-1", "ci-passed"),
+      makeOrchestratorItem("R-2", "review-pending"),
       makeOrchestratorItem("R-3", "implementing"),
     ];
     const remoteIds = new Set(["R-1", "R-2"]);
     const result = orchestratorItemsToStatusItems(items, remoteIds);
-    expect(result[0]!.state).toBe("implementing");
+
+    expect(result[0]!.state).toBe("review");
     expect(result[0]!.remote).toBe(true);
-    expect(result[1]!.state).toBe("implementing");
+    expect(result[1]!.state).toBe("review");
     expect(result[1]!.remote).toBe(true);
+
     // Non-remote item keeps its own state
     expect(result[2]!.state).toBe("implementing");
     expect(result[2]!.remote).toBe(false);

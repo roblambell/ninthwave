@@ -30,7 +30,7 @@ import { cleanStaleBranchForReuse } from "../branch-cleanup.ts";
 import { selectAiTools, detectInstalledAITools } from "../tool-select.ts";
 import { cleanSingleWorktree } from "./clean.ts";
 import { writeInbox } from "./inbox.ts";
-import { prMerge, prComment, checkPrMergeable, getRepoOwner, applyGithubToken, fetchTrustedPrCommentsAsync, upsertOrchestratorComment, setCommitStatus as ghSetCommitStatus, prHeadSha, getMergeCommitSha as ghGetMergeCommitSha, checkCommitCI as ghCheckCommitCI, checkCommitCIAsync as ghCheckCommitCIAsync, ensureDomainLabels } from "../gh.ts";
+import { prMerge, prComment, checkPrMergeable, getRepoOwner, applyGithubToken, fetchTrustedPrCommentsAsync, upsertOrchestratorComment, setCommitStatus as ghSetCommitStatus, prHeadSha, getMergeCommitSha as ghGetMergeCommitSha, checkCommitCI as ghCheckCommitCI, checkCommitCIAsync as ghCheckCommitCIAsync, ensureDomainLabels, listPrComments, updatePrComment } from "../gh.ts";
 import { fetchOrigin, ffMerge, gitAdd, gitCommit, gitPush, daemonRebase } from "../git.ts";
 import { run } from "../shell.ts";
 import { type Multiplexer, getMux } from "../mux.ts";
@@ -124,6 +124,7 @@ import {
 } from "../tui-keyboard.ts";
 import { processExternalReviews, type ExternalReviewDeps } from "../external-review.ts";
 import { processScheduledTasks, type ScheduleLoopDeps } from "../schedule-processing.ts";
+import { syncStackComments as syncStackCommentsForRepo } from "../stack-comments.ts";
 // ── Re-exports for backward compatibility ────────────────────────────
 // These keep existing importers (tests, other modules) working without changes.
 export { buildSnapshotAsync, isWorkerAlive, isWorkerAliveWithCache, getWorktreeLastCommitTime, getWorktreeLastCommitTimeAsync } from "../snapshot.ts";
@@ -214,7 +215,7 @@ export function orchestratorItemsToStatusItems(
     ...(item.workItem.descriptionSnippet
       ? { descriptionSnippet: item.workItem.descriptionSnippet }
       : {}),
-    state: remoteItemIds?.has(item.id) ? "implementing" : mapDaemonItemState(item.state),
+    state: mapDaemonItemState(item.state, { rebaseRequested: item.rebaseRequested }),
     prNumber: item.prNumber ?? null,
     ageMs: now - new Date(item.lastTransition).getTime(),
     timeoutRemainingMs: item.timeoutDeadline
@@ -2360,6 +2361,13 @@ export async function cmdOrchestrate(
     cleanSingleWorktree,
     prMerge: (repoRoot, prNumber, options) => prMerge(repoRoot, prNumber, options),
     prComment: (repoRoot, prNumber, body) => prComment(repoRoot, prNumber, body),
+    syncStackComments: (baseBranch, stack) => {
+      syncStackCommentsForRepo(baseBranch, stack, {
+        listComments: (prNumber) => listPrComments(projectRoot, prNumber),
+        createComment: (prNumber, body) => prComment(projectRoot, prNumber, body),
+        updateComment: (commentId, body) => updatePrComment(projectRoot, commentId, body),
+      });
+    },
     upsertOrchestratorComment: (repoRoot, prNumber, itemId, eventLine) =>
       upsertOrchestratorComment(repoRoot, prNumber, itemId, eventLine),
     sendMessage: (ref, msg) => mux.sendMessage(ref, msg),

@@ -4211,6 +4211,35 @@ describe("review round counter", () => {
 // ── Timeout grace period (H-TG-2) ──────────────────────────────────
 
 describe("timeout grace period", () => {
+  it("does not start timeout grace while waiting in review-pending", () => {
+    const orch = new Orchestrator({
+      activityTimeoutMs: 1000,
+      maxRetries: 0,
+      gracePeriodMs: 5 * 60 * 1000,
+      mergeStrategy: "manual",
+    });
+    orch.addItem(makeWorkItem("H-1-1"));
+    orch.getItem("H-1-1")!.reviewCompleted = true;
+    orch.hydrateState("H-1-1", "review-pending");
+    orch.getItem("H-1-1")!.prNumber = 42;
+
+    const actions = orch.processTransitions(
+      snapshotWith([{
+        id: "H-1-1",
+        prNumber: 42,
+        prState: "open",
+        ciStatus: "pass",
+        reviewDecision: "",
+        workerAlive: false,
+      }]),
+      new Date("2026-01-15T12:00:00Z"),
+    );
+
+    expect(orch.getItem("H-1-1")!.state).toBe("review-pending");
+    expect(orch.getItem("H-1-1")!.timeoutDeadline).toBeUndefined();
+    expect(actions.some((action) => action.type === "workspace-close")).toBe(false);
+  });
+
   it("timeout detected -> grace period starts -> processTransitions returns [] (deferred)", () => {
     const orch = new Orchestrator({
       activityTimeoutMs: 1000,

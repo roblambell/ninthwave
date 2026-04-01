@@ -251,4 +251,76 @@ describe("scenario: stacking", () => {
     // syncStackComments should have been called when B's stacked PR opened
     expect(syncStackComments).toHaveBeenCalled();
   });
+
+  it("manual mode syncs the full stack onto earlier PRs as new stacked PRs open", async () => {
+    const fakeGh = new FakeGitHub();
+    const fakeMux = new FakeMux();
+
+    const orch = new Orchestrator({
+      wipLimit: 5,
+      mergeStrategy: "manual",
+      bypassEnabled: false,
+      enableStacking: true,
+      fixForward: false,
+    });
+
+    orch.addItem(makeWorkItem("A-1"));
+    orch.addItem(makeWorkItem("B-1", ["A-1"]));
+    orch.addItem(makeWorkItem("C-1", ["B-1"]));
+
+    // Simulate AI review already complete so manual mode parks items in review-pending.
+    orch.getItem("A-1")!.reviewCompleted = true;
+    orch.getItem("B-1")!.reviewCompleted = true;
+
+    const syncStackComments = vi.fn();
+    const actionDeps = buildActionDeps(fakeGh, fakeMux, { syncStackComments });
+    const loopDeps = buildLoopDeps(fakeGh, fakeMux, actionDeps);
+
+    let cycle = 0;
+    loopDeps.sleep = async () => {
+      cycle++;
+
+      if (cycle === 2) {
+        fakeGh.createPR("ninthwave/A-1", "Item A-1");
+        fakeGh.setCIStatus("ninthwave/A-1", "pass");
+        fakeGh.setMergeable("ninthwave/A-1", "MERGEABLE");
+      }
+
+      if (cycle === 4) {
+        fakeGh.createPR("ninthwave/B-1", "Item B-1");
+        fakeGh.setCIStatus("ninthwave/B-1", "pass");
+        fakeGh.setMergeable("ninthwave/B-1", "MERGEABLE");
+      }
+
+      if (cycle === 6) {
+        fakeGh.createPR("ninthwave/C-1", "Item C-1");
+        fakeGh.setCIStatus("ninthwave/C-1", "pass");
+        fakeGh.setMergeable("ninthwave/C-1", "MERGEABLE");
+      }
+    };
+
+    await orchestrateLoop(orch, defaultCtx, loopDeps, { maxIterations: 18 });
+
+    expect(syncStackComments).toHaveBeenCalledTimes(2);
+    expect(syncStackComments).toHaveBeenNthCalledWith(
+      1,
+      "main",
+      [
+        { id: "A-1", prNumber: 1, title: "Item A-1" },
+        { id: "B-1", prNumber: 2, title: "Item B-1" },
+      ],
+    );
+    expect(syncStackComments).toHaveBeenNthCalledWith(
+      2,
+      "main",
+      [
+        { id: "A-1", prNumber: 1, title: "Item A-1" },
+        { id: "B-1", prNumber: 2, title: "Item B-1" },
+        { id: "C-1", prNumber: 3, title: "Item C-1" },
+      ],
+    );
+
+    expect(orch.getItem("A-1")!.state).toBe("review-pending");
+    expect(orch.getItem("B-1")!.state).toBe("review-pending");
+  });
 });

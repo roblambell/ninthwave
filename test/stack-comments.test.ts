@@ -198,4 +198,53 @@ describe("syncStackComments", () => {
     expect(client.updateComment).toHaveBeenCalledTimes(2);
     expect(client.createComment).toHaveBeenCalledTimes(0);
   });
+
+  it("updates earlier PR comments when the stack grows", () => {
+    const existingComments = new Map<number, Array<{ id: number; body: string }>>();
+    let nextCommentId = 100;
+
+    client = {
+      listComments: vi.fn((prNumber: number) => existingComments.get(prNumber) ?? []),
+      createComment: vi.fn((prNumber: number, body: string) => {
+        existingComments.set(prNumber, [{ id: nextCommentId++, body }]);
+        return true;
+      }),
+      updateComment: vi.fn((commentId: number, body: string) => {
+        for (const comments of existingComments.values()) {
+          const existing = comments.find((comment) => comment.id === commentId);
+          if (existing) {
+            existing.body = body;
+            return true;
+          }
+        }
+        return false;
+      }),
+    };
+
+    const twoItemStack: StackEntry[] = [
+      { prNumber: 42, title: "feat: implement parser (H-PAR-1)" },
+      { prNumber: 43, title: "feat: implement transformer (H-TFM-1)" },
+    ];
+    syncStackComments("main", twoItemStack, client);
+
+    const threeItemStack: StackEntry[] = [
+      ...twoItemStack,
+      { prNumber: 44, title: "feat: implement renderer (H-RND-1)" },
+    ];
+    syncStackComments("main", threeItemStack, client);
+
+    expect(client.createComment).toHaveBeenCalledTimes(3);
+    expect(client.updateComment).toHaveBeenCalledTimes(2);
+
+    const pr42Body = existingComments.get(42)?.[0]?.body;
+    const pr43Body = existingComments.get(43)?.[0]?.body;
+    const pr44Body = existingComments.get(44)?.[0]?.body;
+
+    expect(pr42Body).toContain("#44 feat: implement renderer (H-RND-1)");
+    expect(pr43Body).toContain("#44 feat: implement renderer (H-RND-1)");
+    expect(pr44Body).toContain("**#44 feat: implement renderer (H-RND-1)** ← this PR");
+    expect(existingComments.get(42)).toHaveLength(1);
+    expect(existingComments.get(43)).toHaveLength(1);
+    expect(existingComments.get(44)).toHaveLength(1);
+  });
 });
