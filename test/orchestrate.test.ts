@@ -2407,7 +2407,7 @@ describe("setupKeyboardShortcuts", () => {
     expect(changedStrategies).toEqual([]);
     expect(logs.some((l: any) => l.event === "strategy_cycle" && l.oldStrategy === "auto" && l.newStrategy === "manual")).toBe(true);
 
-    vi.advanceTimersByTime(5000);
+    vi.advanceTimersByTime(5001);
     expect(tuiState.mergeStrategy).toBe("manual");
     expect(tuiState.pendingStrategy).toBeUndefined();
     expect(changedStrategies).toEqual(["manual"]);
@@ -2432,7 +2432,7 @@ describe("setupKeyboardShortcuts", () => {
     (stdin as any)._emit("data", "\x1B[Z");
 
     expect(tuiState.pendingStrategy).toBe("auto");
-    vi.advanceTimersByTime(5000);
+    vi.advanceTimersByTime(5001);
     expect(tuiState.mergeStrategy).toBe("auto");
     vi.useRealTimers();
   });
@@ -2455,17 +2455,17 @@ describe("setupKeyboardShortcuts", () => {
 
     (stdin as any)._emit("data", "\x1B[Z"); // auto → manual
     expect(tuiState.pendingStrategy).toBe("manual");
-    vi.advanceTimersByTime(5000);
+    vi.advanceTimersByTime(5001);
     expect(tuiState.mergeStrategy).toBe("manual");
 
     (stdin as any)._emit("data", "\x1B[Z"); // manual → bypass
     expect(tuiState.pendingStrategy).toBe("bypass");
-    vi.advanceTimersByTime(5000);
+    vi.advanceTimersByTime(5001);
     expect(tuiState.mergeStrategy).toBe("bypass");
 
     (stdin as any)._emit("data", "\x1B[Z"); // bypass → auto (wrap)
     expect(tuiState.pendingStrategy).toBe("auto");
-    vi.advanceTimersByTime(5000);
+    vi.advanceTimersByTime(5001);
     expect(tuiState.mergeStrategy).toBe("auto");
 
     cleanup();
@@ -2492,7 +2492,7 @@ describe("setupKeyboardShortcuts", () => {
     const visited: string[] = [];
     for (let i = 0; i < 4; i++) {
       (stdin as any)._emit("data", "\x1B[Z");
-      vi.advanceTimersByTime(5000);
+      vi.advanceTimersByTime(5001);
       visited.push(tuiState.mergeStrategy);
     }
     expect(visited).toEqual(["manual", "auto", "manual", "auto"]);
@@ -5888,7 +5888,7 @@ describe("waitForArmingKey", () => {
       currentTime = 4000;
       vi.advanceTimersByTime(1000);
 
-      expect(ticks).toEqual([3, 2, 1]);
+      expect(ticks).toEqual([3, 2, 1, 0]);
       expect(await promise).toBe("local");
     } finally {
       vi.useRealTimers();

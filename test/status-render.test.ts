@@ -2476,11 +2476,25 @@ describe("buildStatusLayout", () => {
     const layout = buildStatusLayout(items, 80, undefined, false, {
       mergeStrategy: "auto",
       pendingStrategy: "manual",
+      pendingStrategyCountdownSeconds: 5,
     });
     const footerText = layout.footerLines.map(stripAnsi).join("\n");
-    expect(footerText).toContain("› auto -> ‖ manual (5s...)");
+    expect(footerText).toContain("‖ manual (5s)");
+    expect(footerText).not.toContain("› auto ->");
     expect(footerText).toContain("(shift+tab to cycle)");
     expect(footerText).toContain("c controls");
+  });
+
+  it("renders 0s for the pending strategy countdown before apply", () => {
+    const items = [makeStatusItem({ id: "A-1" })];
+    const layout = buildStatusLayout(items, 80, undefined, false, {
+      mergeStrategy: "auto",
+      pendingStrategy: "manual",
+      pendingStrategyCountdownSeconds: 0,
+    });
+    const footerText = layout.footerLines.map(stripAnsi).join("\n");
+    expect(footerText).toContain("‖ manual (0s)");
+    expect(footerText).not.toContain("› auto ->");
   });
 
   it("renders Ctrl+C confirmation footer when ctrlCPending is true", () => {

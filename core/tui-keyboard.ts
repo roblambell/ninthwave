@@ -92,8 +92,12 @@ export interface TuiState {
   mergeStrategy: MergeStrategy;
   /** Pending merge strategy selection waiting for debounce to settle. */
   pendingStrategy?: MergeStrategy;
+  /** Absolute deadline for the pending strategy debounce window. */
+  pendingStrategyDeadlineMs?: number;
   /** Timer for the pending merge strategy debounce window. */
   pendingStrategyTimer?: ReturnType<typeof setTimeout>;
+  /** Once-per-second ticker for the pending strategy countdown. */
+  pendingStrategyCountdownTimer?: ReturnType<typeof setInterval>;
   /** Whether bypass is available in the cycle (from --dangerously-bypass). */
   bypassEnabled: boolean;
   /** First Ctrl+C pressed -- waiting for confirmation. */
@@ -183,6 +187,8 @@ export function setupKeyboardShortcuts(
   // Timer for Ctrl+C double-tap timeout (clear ctrlCPending after ~2s)
   let ctrlCTimer: ReturnType<typeof setTimeout> | null = null;
 
+  const pendingStrategyCountdownSeconds = (deadlineMs: number) => Math.max(0, Math.ceil((deadlineMs - Date.now()) / 1000));
+
   const clearPendingStrategyTimer = () => {
     if (tuiState?.pendingStrategyTimer) {
       clearTimeout(tuiState.pendingStrategyTimer);
@@ -190,11 +196,21 @@ export function setupKeyboardShortcuts(
     }
   };
 
+  const clearPendingStrategyCountdownTimer = () => {
+    if (tuiState?.pendingStrategyCountdownTimer) {
+      clearInterval(tuiState.pendingStrategyCountdownTimer);
+      tuiState.pendingStrategyCountdownTimer = undefined;
+    }
+  };
+
   const clearPendingStrategy = () => {
     clearPendingStrategyTimer();
+    clearPendingStrategyCountdownTimer();
     if (tuiState) {
       tuiState.pendingStrategy = undefined;
+      tuiState.pendingStrategyDeadlineMs = undefined;
       tuiState.viewOptions.pendingStrategy = undefined;
+      tuiState.viewOptions.pendingStrategyCountdownSeconds = undefined;
     }
   };
 
@@ -207,19 +223,38 @@ export function setupKeyboardShortcuts(
     }
 
     clearPendingStrategyTimer();
+    clearPendingStrategyCountdownTimer();
+    const deadlineMs = Date.now() + STRATEGY_DEBOUNCE_MS;
     tuiState.pendingStrategy = newStrategy;
+    tuiState.pendingStrategyDeadlineMs = deadlineMs;
     tuiState.viewOptions.pendingStrategy = newStrategy;
-    tuiState.pendingStrategyTimer = setTimeout(() => {
-      const pendingStrategy = tuiState.pendingStrategy;
-      clearPendingStrategy();
-      if (!pendingStrategy || pendingStrategy === tuiState.mergeStrategy) {
+    tuiState.viewOptions.pendingStrategyCountdownSeconds = pendingStrategyCountdownSeconds(deadlineMs);
+    tuiState.pendingStrategyCountdownTimer = setInterval(() => {
+      if (!tuiState.pendingStrategy || tuiState.pendingStrategyDeadlineMs === undefined) return;
+      const nextCountdownSeconds = pendingStrategyCountdownSeconds(tuiState.pendingStrategyDeadlineMs);
+      if (nextCountdownSeconds !== tuiState.viewOptions.pendingStrategyCountdownSeconds) {
+        tuiState.viewOptions.pendingStrategyCountdownSeconds = nextCountdownSeconds;
         tuiState.onUpdate?.();
-        return;
       }
-      tuiState.mergeStrategy = pendingStrategy;
-      tuiState.viewOptions.mergeStrategy = pendingStrategy;
-      tuiState.onStrategyChange?.(pendingStrategy);
+    }, 1000);
+    tuiState.pendingStrategyTimer = setTimeout(() => {
+      clearPendingStrategyTimer();
+      clearPendingStrategyCountdownTimer();
+      tuiState.pendingStrategyDeadlineMs = undefined;
+      tuiState.viewOptions.pendingStrategyCountdownSeconds = 0;
       tuiState.onUpdate?.();
+      tuiState.pendingStrategyTimer = setTimeout(() => {
+        const pendingStrategy = tuiState.pendingStrategy;
+        clearPendingStrategy();
+        if (!pendingStrategy || pendingStrategy === tuiState.mergeStrategy) {
+          tuiState.onUpdate?.();
+          return;
+        }
+        tuiState.mergeStrategy = pendingStrategy;
+        tuiState.viewOptions.mergeStrategy = pendingStrategy;
+        tuiState.onStrategyChange?.(pendingStrategy);
+        tuiState.onUpdate?.();
+      }, 1);
     }, STRATEGY_DEBOUNCE_MS);
   };
 
