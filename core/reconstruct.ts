@@ -292,7 +292,11 @@ export function reconstructState(
         break;
       }
     }
-    if (!wtPath) continue;
+    if (!wtPath) {
+      item.worktreePath = undefined;
+      item.workspaceRef = undefined;
+      continue;
+    }
     item.worktreePath = wtPath;
 
     // Item has a worktree -- check PR status in the correct repo

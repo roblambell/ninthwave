@@ -2422,6 +2422,8 @@ describe("executeMerge conflict-aware rebase", () => {
     const item = orch.getItem("H-1-1")!;
     item.prNumber = 42;
     item.workspaceRef = "workspace:1";
+    item.worktreePath = "/tmp/test/ninthwave-H-1-1";
+    item.worktreePath = "/tmp/test/ninthwave-H-1-1";
 
     const inboxMessages: string[] = [];
     const deps = makeMinimalDeps({
@@ -2450,6 +2452,7 @@ describe("executeMerge conflict-aware rebase", () => {
     const item = orch.getItem("H-1-1")!;
     item.prNumber = 42;
     item.workspaceRef = "workspace:1";
+    item.worktreePath = "/tmp/test/ninthwave-H-1-1";
 
     const inboxMessages: string[] = [];
     const deps = makeMinimalDeps({
@@ -3561,6 +3564,7 @@ describe("rebaser worker state transitions", () => {
     const item = orch.getItem("H-1-1")!;
     item.prNumber = 42;
     item.workspaceRef = "workspace:1";
+    item.worktreePath = "/tmp/test/ninthwave-H-1-1";
 
     const inboxMessages: string[] = [];
     const deps = makeMinimalDeps({
@@ -3626,7 +3630,7 @@ describe("rebase circuit breaker and worker message priority", () => {
     expect(launchRebaserCalled.value).toBe(false); // rebaser NOT launched
   });
 
-  it("prefers inbox delivery over rebaser when workspaceRef exists", () => {
+  it("prefers inbox delivery over rebaser when worktree inbox target exists", () => {
     const orch = new Orchestrator({ wipLimit: 1 });
     orch.addItem(makeWorkItem("H-1-1"));
     orch.getItem("H-1-1")!.reviewCompleted = true;
@@ -3634,6 +3638,7 @@ describe("rebase circuit breaker and worker message priority", () => {
     const item = orch.getItem("H-1-1")!;
     item.prNumber = 42;
     item.workspaceRef = "workspace:1";
+    item.worktreePath = "/tmp/test/ninthwave-H-1-1";
 
     const launchRebaserCalled = { value: false };
     const inboxMessages: string[] = [];
@@ -3658,6 +3663,7 @@ describe("rebase circuit breaker and worker message priority", () => {
     const item = orch.getItem("H-1-1")!;
     item.prNumber = 42;
     item.workspaceRef = "workspace:1";
+    item.worktreePath = "/tmp/test/ninthwave-H-1-1";
 
     const deps = makeMinimalDeps({
       daemonRebase: () => false,

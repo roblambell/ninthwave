@@ -1622,13 +1622,42 @@ describe("Orchestrator", () => {
       expect(deps.sendMessage).not.toHaveBeenCalled();
     });
 
-    it("notify-ci-failure: transitions to ready with needsCiFix when no workspace ref (H-WR-1)", () => {
+    it("notify-ci-failure: uses known worktreePath even without workspace ref", () => {
       const deps = mockDeps();
       orch.addItem(makeWorkItem("H-1-1"));
       orch.getItem("H-1-1")!.reviewCompleted = true;
       orch.hydrateState("H-1-1", "ci-failed");
       orch.getItem("H-1-1")!.reviewCompleted = true;
       orch.getItem("H-1-1")!.prNumber = 42;
+      orch.getItem("H-1-1")!.worktreePath = "/tmp/test/ninthwave-H-1-1";
+
+      const result = orch.executeAction(
+        { type: "notify-ci-failure", itemId: "H-1-1", message: "CI failed on job build" },
+        defaultCtx,
+        deps,
+      );
+
+      expect(result.success).toBe(true);
+      expect(deps.writeInbox).toHaveBeenCalledWith(
+        "/tmp/test/ninthwave-H-1-1",
+        "H-1-1",
+        "CI failed on job build",
+      );
+      expect(deps.prComment).toHaveBeenCalledWith(
+        defaultCtx.projectRoot,
+        42,
+        expect.stringContaining("CI failure detected"),
+      );
+    });
+
+    it("notify-ci-failure: transitions to ready with needsCiFix when no safe inbox target exists (H-WR-1)", () => {
+      const deps = mockDeps();
+      orch.addItem(makeWorkItem("H-1-1"));
+      orch.getItem("H-1-1")!.reviewCompleted = true;
+      orch.hydrateState("H-1-1", "ci-failed");
+      orch.getItem("H-1-1")!.reviewCompleted = true;
+      orch.getItem("H-1-1")!.prNumber = 42;
+      orch.getItem("H-1-1")!.workspaceRef = "workspace:stale";
 
       const result = orch.executeAction(
         { type: "notify-ci-failure", itemId: "H-1-1" },
@@ -1641,6 +1670,8 @@ describe("Orchestrator", () => {
       const item = orch.getItem("H-1-1")!;
       expect(item.state).toBe("ready");
       expect(item.needsCiFix).toBe(true);
+      expect(item.workspaceRef).toBeUndefined();
+      expect(deps.writeInbox).not.toHaveBeenCalled();
       expect(deps.sendMessage).not.toHaveBeenCalled();
       expect(deps.prComment).not.toHaveBeenCalled();
     });
@@ -1898,16 +1929,39 @@ describe("Orchestrator", () => {
       expect(deps.sendMessage).not.toHaveBeenCalled();
     });
 
-    it("rebase: succeeds via inbox even without workspace ref", () => {
+    it("rebase: uses known worktreePath even without workspace ref", () => {
       const deps = mockDeps();
       orch.addItem(makeWorkItem("H-1-1"));
       orch.getItem("H-1-1")!.reviewCompleted = true;
       orch.hydrateState("H-1-1", "implementing");
+      orch.getItem("H-1-1")!.worktreePath = "/tmp/test/ninthwave-H-1-1";
+
+      const result = orch.executeAction(
+        { type: "rebase", itemId: "H-1-1", message: "Rebase onto main now." },
+        defaultCtx,
+        deps,
+      );
+
+      expect(result.success).toBe(true);
+      expect(deps.writeInbox).toHaveBeenCalledWith(
+        "/tmp/test/ninthwave-H-1-1",
+        "H-1-1",
+        "Rebase onto main now.",
+      );
+    });
+
+    it("rebase: does not claim success with stale workspace metadata alone", () => {
+      const deps = mockDeps();
+      orch.addItem(makeWorkItem("H-1-1"));
+      orch.getItem("H-1-1")!.reviewCompleted = true;
+      orch.hydrateState("H-1-1", "implementing");
+      orch.getItem("H-1-1")!.workspaceRef = "workspace:stale";
 
       const result = orch.executeAction({ type: "rebase", itemId: "H-1-1" }, defaultCtx, deps);
 
-      expect(result.success).toBe(true);
-      expect(deps.writeInbox).toHaveBeenCalled();
+      expect(result.success).toBe(false);
+      expect(result.error).toContain("No safe worker inbox target");
+      expect(deps.writeInbox).not.toHaveBeenCalled();
       expect(deps.sendMessage).not.toHaveBeenCalled();
     });
 
@@ -2041,6 +2095,27 @@ describe("Orchestrator", () => {
       );
 
       expect(result.success).toBe(false);
+      expect(warn).toHaveBeenCalledWith(expect.stringContaining("Manual rebase needed"));
+    });
+
+    it("daemon-rebase: stale workspaceRef alone does not count as worker fallback", () => {
+      const daemonRebase = vi.fn(() => false);
+      const warn = vi.fn();
+      const deps = mockDeps({ daemonRebase, warn });
+      orch.addItem(makeWorkItem("H-1-1"));
+      orch.getItem("H-1-1")!.reviewCompleted = true;
+      orch.hydrateState("H-1-1", "ci-failed");
+      orch.getItem("H-1-1")!.reviewCompleted = true;
+      orch.getItem("H-1-1")!.workspaceRef = "workspace:stale";
+
+      const result = orch.executeAction(
+        { type: "daemon-rebase", itemId: "H-1-1", message: "Rebase needed." },
+        defaultCtx,
+        deps,
+      );
+
+      expect(result.success).toBe(false);
+      expect(deps.writeInbox).not.toHaveBeenCalled();
       expect(warn).toHaveBeenCalledWith(expect.stringContaining("Manual rebase needed"));
     });
 
@@ -6119,6 +6194,7 @@ describe("Orchestrator", () => {
       item.prNumber = 48;
       item.resolvedRepoRoot = "/path/to/target-repo";
       item.workspaceRef = "workspace:8";
+      item.worktreePath = "/path/to/target-repo/.ninthwave/.worktrees/ninthwave-X-1-8";
 
       orch.executeAction(
         { type: "notify-ci-failure", itemId: "X-1-8", message: "CI failed" },

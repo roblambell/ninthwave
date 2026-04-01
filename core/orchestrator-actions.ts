@@ -21,8 +21,20 @@ import {
   getNextTool,
 } from "./orchestrator-types.ts";
 
-function inboxProjectRoot(item: OrchestratorItem, ctx: ExecutionContext): string {
-  return item.worktreePath ?? item.resolvedRepoRoot ?? ctx.projectRoot;
+function inboxProjectRoot(
+  item: OrchestratorItem,
+  ctx: ExecutionContext,
+  cachedEntries?: ReturnType<typeof listCrossRepoEntries>,
+): string | null {
+  const indexPath = join(ctx.worktreeDir, ".cross-repo-index");
+  const wtInfo = getWorktreeInfo(item.id, indexPath, ctx.worktreeDir, cachedEntries);
+  if (wtInfo?.worktreePath && existsSync(wtInfo.worktreePath)) {
+    return wtInfo.worktreePath;
+  }
+  if (item.worktreePath) {
+    return item.worktreePath;
+  }
+  return null;
 }
 
 function resolveDefaultBranch(
@@ -234,12 +246,18 @@ export function executeMerge(
         }
       }
       // Daemon rebase unavailable or failed -- send worker a rebase message
-      if (item.workspaceRef) {
+      const inboxRoot = inboxProjectRoot(item, ctx);
+      if (inboxRoot) {
         const rebaseMsg = `[ORCHESTRATOR] Rebase Required: merge failed due to conflicts with ${defaultBranch}. Please rebase onto latest ${defaultBranch} and push.`;
-        deps.writeInbox(inboxProjectRoot(item, ctx), item.id, rebaseMsg);
+        deps.writeInbox(inboxRoot, item.id, rebaseMsg);
       }
       orch.transition(item, "ci-pending");
-      return { success: false, error: `Merge failed for PR #${prNum} due to conflicts, rebase requested` };
+      return {
+        success: false,
+        error: inboxRoot
+          ? `Merge failed for PR #${prNum} due to conflicts, rebase requested`
+          : `Merge failed for PR #${prNum} due to conflicts, but no safe worker inbox target was available`,
+      };
     }
 
     // Non-conflict merge failure -- normal retry behavior
@@ -335,6 +353,7 @@ export function executeMerge(
 
     const otherWtInfo = getWorktreeInfo(other.id, crossRepoIndex, ctx.worktreeDir, cachedEntries);
     const otherRepoRoot = otherWtInfo?.repoRoot ?? other.resolvedRepoRoot ?? ctx.projectRoot;
+    const otherInboxRoot = inboxProjectRoot(other, ctx, cachedEntries);
     const otherWorktreePath = other.worktreePath
       ?? otherWtInfo?.worktreePath
       ?? join(otherRepoRoot, ".ninthwave", ".worktrees", `ninthwave-${other.id}`);
@@ -342,9 +361,9 @@ export function executeMerge(
 
     if (!deps.rebaseOnto || !deps.forcePush) {
       // rebaseOnto or forcePush not available -- send worker manual rebase instructions
-      if (other.workspaceRef) {
+      if (otherInboxRoot) {
         const restackMsg = `[ORCHESTRATOR] Restack Required: dependency ${item.id} was squash-merged. Run: git rebase --onto ${defaultBranch} ${depBranch} ${otherBranch} && git push --force-with-lease`;
-        deps.writeInbox(otherWorktreePath, other.id, restackMsg);
+        deps.writeInbox(otherInboxRoot, other.id, restackMsg);
       }
       continue;
     }
@@ -357,16 +376,16 @@ export function executeMerge(
         successfulRestacks.add(other.id);
       } else {
         // Conflict -- send worker manual rebase instructions
-        if (other.workspaceRef) {
+        if (otherInboxRoot) {
           const conflictMsg = `[ORCHESTRATOR] Restack Conflict: dependency ${item.id} was squash-merged but rebase --onto had conflicts. Run manually: git rebase --onto ${defaultBranch} ${depBranch} ${otherBranch}`;
-          deps.writeInbox(otherWorktreePath, other.id, conflictMsg);
+          deps.writeInbox(otherInboxRoot, other.id, conflictMsg);
         }
       }
     } catch {
       // Unexpected error -- fall back to worker message
-      if (other.workspaceRef) {
+      if (otherInboxRoot) {
         const restackMsg2 = `[ORCHESTRATOR] Restack Required: dependency ${item.id} was squash-merged. Run: git rebase --onto ${defaultBranch} ${depBranch} ${otherBranch} && git push --force-with-lease`;
-        deps.writeInbox(otherWorktreePath, other.id, restackMsg2);
+        deps.writeInbox(otherInboxRoot, other.id, restackMsg2);
       }
     }
   }
@@ -378,11 +397,10 @@ export function executeMerge(
     if (!other.workItem.dependencies.includes(item.id)) continue;
     if (!WIP_STATES.has(other.state)) continue;
     if (restackedIds.has(other.id)) continue;
-    if (other.workspaceRef) {
-      const otherWorktreePath = other.worktreePath
-        ?? join(other.resolvedRepoRoot ?? ctx.projectRoot, ".ninthwave", ".worktrees", `ninthwave-${other.id}`);
+    const otherInboxRoot = inboxProjectRoot(other, ctx, cachedEntries);
+    if (otherInboxRoot) {
       const rebaseMsg2 = `Dependency ${item.id} merged. Please rebase onto latest ${defaultBranch}.`;
-      deps.writeInbox(otherWorktreePath, other.id, rebaseMsg2);
+      deps.writeInbox(otherInboxRoot, other.id, rebaseMsg2);
     }
   }
 
@@ -403,6 +421,7 @@ export function executeMerge(
 
     const otherBranch = `ninthwave/${other.id}`;
     const otherWtInfo2 = getWorktreeInfo(other.id, crossRepoIndex, ctx.worktreeDir, cachedEntries);
+    const otherInboxRoot = inboxProjectRoot(other, ctx, cachedEntries);
     const otherWorktreePath = other.worktreePath
       ?? otherWtInfo2?.worktreePath
       ?? join(otherRepoRoot2, ".ninthwave", ".worktrees", `ninthwave-${other.id}`);
@@ -424,9 +443,9 @@ export function executeMerge(
       const mergeable = deps.checkPrMergeable(otherRepoRoot2, other.prNumber);
       if (!mergeable) {
         // Actually conflicting -- send worker rebase message as fallback
-        if (other.workspaceRef) {
+        if (otherInboxRoot) {
           const siblingMsg = `Sibling PR #${other.prNumber} has merge conflicts after ${item.id} was merged. Please rebase onto latest ${defaultBranch}.`;
-          deps.writeInbox(otherWorktreePath, other.id, siblingMsg);
+          deps.writeInbox(otherInboxRoot, other.id, siblingMsg);
         } else {
           deps.warn?.(
             `[Orchestrator] PR #${other.prNumber} (${other.id}) has merge conflicts but daemon rebase failed and worker has no workspace reference. Manual rebase needed.`,
@@ -463,17 +482,18 @@ export function executeNotifyCiFailure(
   deps: OrchestratorDeps,
 ): ActionResult {
   const message = action.message || "CI failed -- please investigate and fix.";
+  const inboxRoot = inboxProjectRoot(item, ctx);
 
-  if (!item.workspaceRef) {
-    // No live worker (e.g., daemon restarted). Re-launch with a fresh worker
-    // to fix CI. The needsCiFix flag tells executeLaunch to force-launch a
-    // worker even when an existing PR is found (H-WR-1).
+  if (!inboxRoot) {
+    // No safe worker inbox target (e.g., reconstructed state only had stale
+    // workspace metadata). Re-launch with a fresh worker to fix CI.
     item.needsCiFix = true;
+    item.workspaceRef = undefined;
     orch.transition(item, "ready");
     return { success: true };
   }
 
-  deps.writeInbox(inboxProjectRoot(item, ctx), item.id, message);
+  deps.writeInbox(inboxRoot, item.id, message);
 
   if (item.prNumber) {
     const repoRoot = item.resolvedRepoRoot ?? ctx.projectRoot;
@@ -495,8 +515,9 @@ export function executeNotifyReview(
   deps: OrchestratorDeps,
 ): ActionResult {
   const message = action.message || "Review feedback received -- please address.";
+  const inboxRoot = inboxProjectRoot(item, ctx) ?? item.resolvedRepoRoot ?? ctx.projectRoot;
 
-  deps.writeInbox(inboxProjectRoot(item, ctx), item.id, message);
+  deps.writeInbox(inboxRoot, item.id, message);
 
   return { success: true };
 }
@@ -593,8 +614,9 @@ export function executeSendMessage(
   deps: OrchestratorDeps,
 ): ActionResult {
   const message = action.message || "Are you still making progress?";
+  const inboxRoot = inboxProjectRoot(item, ctx) ?? item.resolvedRepoRoot ?? ctx.projectRoot;
 
-  deps.writeInbox(inboxProjectRoot(item, ctx), item.id, message);
+  deps.writeInbox(inboxRoot, item.id, message);
 
   return { success: true };
 }
@@ -633,8 +655,13 @@ export function executeRebase(
   deps: OrchestratorDeps,
 ): ActionResult {
   const message = action.message || "Please rebase onto latest main.";
+  const inboxRoot = inboxProjectRoot(item, ctx);
 
-  deps.writeInbox(inboxProjectRoot(item, ctx), item.id, message);
+  if (!inboxRoot) {
+    return { success: false, error: `No safe worker inbox target available for ${item.id}` };
+  }
+
+  deps.writeInbox(inboxRoot, item.id, message);
 
   return { success: true };
 }
@@ -652,6 +679,7 @@ export function executeDaemonRebase(
 ): ActionResult {
   const branch = `ninthwave/${item.id}`;
   const escalateToRebaser = action.escalateToRebaser === true;
+  const inboxRoot = inboxProjectRoot(item, ctx);
 
   // Try daemon-side rebase if the dep is available
   if (deps.daemonRebase) {
@@ -675,8 +703,8 @@ export function executeDaemonRebase(
   if (!escalateToRebaser) {
     // Daemon rebase failed -- prefer sending message to the live worker first.
     // The original worker knows the code best and can resolve conflicts properly.
-    deps.writeInbox(inboxProjectRoot(item, ctx), item.id, message);
-    if (item.workspaceRef) {
+    if (inboxRoot) {
+      deps.writeInbox(inboxRoot, item.id, message);
       return { success: true };
     }
   }
@@ -710,8 +738,8 @@ export function executeDaemonRebase(
     }
   }
 
-  if (escalateToRebaser && item.workspaceRef) {
-    deps.writeInbox(inboxProjectRoot(item, ctx), item.id, message);
+  if (escalateToRebaser && inboxRoot) {
+    deps.writeInbox(inboxRoot, item.id, message);
     return { success: true };
   }
 

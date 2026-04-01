@@ -3534,9 +3534,11 @@ describe("orchestrateLoop post-merge conflict detection", () => {
     orch.hydrateState("T-1-2", "ci-pending");
     orch.getItem("T-1-2")!.prNumber = 11;
     orch.getItem("T-1-2")!.workspaceRef = "workspace:2";
+    orch.getItem("T-1-2")!.worktreePath = `${defaultCtx.worktreeDir}/ninthwave-T-1-2`;
     orch.hydrateState("T-1-3", "ci-pending");
     orch.getItem("T-1-3")!.prNumber = 12;
     orch.getItem("T-1-3")!.workspaceRef = "workspace:3";
+    orch.getItem("T-1-3")!.worktreePath = `${defaultCtx.worktreeDir}/ninthwave-T-1-3`;
 
     const buildSnapshot = (o: Orchestrator): PollSnapshot => {
       const items: ItemSnapshot[] = [];

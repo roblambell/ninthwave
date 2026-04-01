@@ -5,6 +5,9 @@
 // flows that unit tests cannot cover.
 
 import { describe, it, expect, vi, beforeEach } from "vitest";
+import { mkdtempSync, mkdirSync, rmSync } from "fs";
+import { tmpdir } from "os";
+import { join } from "path";
 import {
   Orchestrator,
   type OrchestratorDeps,
@@ -24,6 +27,7 @@ import {
   cleanStateFile,
   type DaemonIO,
 } from "../core/daemon.ts";
+import { reconstructState } from "../core/reconstruct.ts";
 import type { WorkItem, Priority } from "../core/types.ts";
 
 // ── Helpers ──────────────────────────────────────────────────────────
@@ -292,6 +296,125 @@ describe("Daemon lifecycle: single-item flow", () => {
     );
     expect(orch.getItem("CIFAIL-1")!.state).toBe("merging");
     expect(actions.some((a) => a.type === "merge")).toBe(true);
+  });
+});
+
+describe("Daemon lifecycle: reconstructed worker inbox targeting", () => {
+  it("reconstructed ci-failed item notifies via worktree inbox when worktreePath is known", () => {
+    const projectRoot = mkdtempSync(join(tmpdir(), "nw-reconstruct-"));
+    const worktreeDir = join(projectRoot, ".ninthwave", ".worktrees");
+    const itemWorktree = join(worktreeDir, "ninthwave-REC-1");
+    mkdirSync(itemWorktree, { recursive: true });
+
+    try {
+      const orch = new Orchestrator({ wipLimit: 4 });
+      orch.addItem(makeWorkItem("REC-1"));
+      orch.getItem("REC-1")!.reviewCompleted = true;
+
+      reconstructState(
+        orch,
+        projectRoot,
+        worktreeDir,
+        undefined,
+        () => "REC-1\t42\tfailing",
+        {
+          pid: 1,
+          startedAt: new Date().toISOString(),
+          updatedAt: new Date().toISOString(),
+          items: [{
+            id: "REC-1",
+            title: "Item REC-1",
+            state: "ci-failed",
+            ciFailCount: 1,
+            retryCount: 0,
+            prNumber: 42,
+            lastTransition: new Date().toISOString(),
+            worktreePath: itemWorktree,
+          }],
+        },
+      );
+
+      const deps = mockDeps();
+      const ctx: ExecutionContext = {
+        ...defaultCtx,
+        projectRoot,
+        worktreeDir,
+        workDir: join(projectRoot, ".ninthwave", "work"),
+      };
+
+      const result = orch.executeAction(
+        { type: "notify-ci-failure", itemId: "REC-1", message: "CI failed" },
+        ctx,
+        deps,
+      );
+
+      expect(result.success).toBe(true);
+      expect(deps.writeInbox).toHaveBeenCalledWith(itemWorktree, "REC-1", "CI failed");
+      expect(deps.prComment).toHaveBeenCalledWith(projectRoot, 42, expect.stringContaining("Worker notified"));
+    } finally {
+      rmSync(projectRoot, { recursive: true, force: true });
+    }
+  });
+
+  it("reconstructed ci-failed item with only stale workspaceRef relaunches instead of claiming delivery", () => {
+    const projectRoot = mkdtempSync(join(tmpdir(), "nw-reconstruct-"));
+    const worktreeDir = join(projectRoot, ".ninthwave", ".worktrees");
+    mkdirSync(worktreeDir, { recursive: true });
+
+    try {
+      const orch = new Orchestrator({ wipLimit: 4 });
+      orch.addItem(makeWorkItem("REC-2"));
+      orch.getItem("REC-2")!.reviewCompleted = true;
+
+      reconstructState(
+        orch,
+        projectRoot,
+        worktreeDir,
+        undefined,
+        () => "REC-2\t42\tfailing",
+        {
+          pid: 1,
+          startedAt: new Date().toISOString(),
+          updatedAt: new Date().toISOString(),
+          items: [{
+            id: "REC-2",
+            title: "Item REC-2",
+            state: "ci-failed",
+            ciFailCount: 1,
+            retryCount: 0,
+            prNumber: 42,
+            workspaceRef: "workspace:stale",
+            lastTransition: new Date().toISOString(),
+            worktreePath: join(worktreeDir, "ninthwave-REC-2"),
+          }],
+        },
+      );
+
+      const deps = mockDeps();
+      const ctx: ExecutionContext = {
+        ...defaultCtx,
+        projectRoot,
+        worktreeDir,
+        workDir: join(projectRoot, ".ninthwave", "work"),
+      };
+
+      const result = orch.executeAction(
+        { type: "notify-ci-failure", itemId: "REC-2", message: "CI failed" },
+        ctx,
+        deps,
+      );
+
+      const item = orch.getItem("REC-2")!;
+      expect(result.success).toBe(true);
+      expect(item.state).toBe("ready");
+      expect(item.needsCiFix).toBe(true);
+      expect(item.workspaceRef).toBeUndefined();
+      expect(item.worktreePath).toBeUndefined();
+      expect(deps.writeInbox).not.toHaveBeenCalled();
+      expect(deps.prComment).not.toHaveBeenCalled();
+    } finally {
+      rmSync(projectRoot, { recursive: true, force: true });
+    }
   });
 });
 
