@@ -530,13 +530,13 @@ export function statusDisplayForState(state: OrchestratorItemState, flags?: { re
     case "merging":
       return { text: "Merging", icon: "arrow.triangle.merge", color: "#22c55e" };
     case "forward-fix-pending":
-      return { text: "Fix Pending", icon: "clock.fill", color: "#06b6d4" };
+      return { text: "Verifying", icon: "clock.fill", color: "#06b6d4" };
     case "fix-forward-failed":
       return { text: "Fix Failed", icon: "xmark.circle", color: "#ef4444" };
     case "fixing-forward":
-      return { text: "Fixing Forward", icon: "wrench.fill", color: "#f59e0b" };
-    case "done":
     case "merged":
+      return { text: "Verifying", icon: "clock.fill", color: "#06b6d4" };
+    case "done":
       return { text: "Done", icon: "checkmark.seal.fill", color: "#22c55e" };
     case "stuck":
       return { text: "Stuck", icon: "exclamationmark.triangle", color: "#ef4444" };

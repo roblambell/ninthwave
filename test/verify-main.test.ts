@@ -458,9 +458,14 @@ describe("checkCommitCI ignores Ninthwave / Review check", () => {
 // ── statusDisplayForState for new states ─────────────────────────────
 
 describe("statusDisplayForState for fix-forward states", () => {
-  it("returns Fix Pending for forward-fix-pending state", () => {
+  it("returns Verifying for merged state", () => {
+    const display = statusDisplayForState("merged");
+    expect(display.text).toBe("Verifying");
+  });
+
+  it("returns Verifying for forward-fix-pending state", () => {
     const display = statusDisplayForState("forward-fix-pending");
-    expect(display.text).toBe("Fix Pending");
+    expect(display.text).toBe("Verifying");
   });
 
   it("returns Fix Failed for fix-forward-failed state", () => {
@@ -468,9 +473,14 @@ describe("statusDisplayForState for fix-forward states", () => {
     expect(display.text).toBe("Fix Failed");
   });
 
-  it("returns Fixing Forward for fixing-forward state", () => {
+  it("returns Verifying for fixing-forward state", () => {
     const display = statusDisplayForState("fixing-forward");
-    expect(display.text).toBe("Fixing Forward");
+    expect(display.text).toBe("Verifying");
+  });
+
+  it("returns Done for done state", () => {
+    const display = statusDisplayForState("done");
+    expect(display.text).toBe("Done");
   });
 });
 

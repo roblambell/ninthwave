@@ -2949,11 +2949,11 @@ describe("statusDisplayForState", () => {
     expect(d.color).toBe("#b45309");
   });
 
-  it("returns correct display for merged (maps to done)", () => {
+  it("returns correct display for merged (maps to verifying)", () => {
     const d = statusDisplayForState("merged");
-    expect(d.text).toBe("Done");
-    expect(d.icon).toBe("checkmark.seal.fill");
-    expect(d.color).toBe("#22c55e");
+    expect(d.text).toBe("Verifying");
+    expect(d.icon).toBe("clock.fill");
+    expect(d.color).toBe("#06b6d4");
   });
 
   it("returns Rebasing display when rebaseRequested is true and state is ci-pending", () => {

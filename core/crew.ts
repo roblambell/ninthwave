@@ -165,6 +165,8 @@ export interface ReconnectState {
 
 export type CrewRemoteItemState =
   | "merged"
+  | "verifying"
+  | "done"
   | "bootstrapping"
   | "implementing"
   | "rebasing"
@@ -198,6 +200,8 @@ export interface CrewStatus {
 
 const CREW_REMOTE_ITEM_STATES: ReadonlySet<CrewRemoteItemState> = new Set([
   "merged",
+  "verifying",
+  "done",
   "bootstrapping",
   "implementing",
   "rebasing",

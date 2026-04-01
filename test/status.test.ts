@@ -30,6 +30,7 @@ import {
   type ViewOptions,
 } from "../core/commands/status.ts";
 import { stateFilePath, userStateDir, type DaemonState } from "../core/daemon.ts";
+import { parseCrewStatusUpdate } from "../core/crew.ts";
 import { mkdtempSync, mkdirSync, writeFileSync, rmSync } from "fs";
 import { dirname, join } from "path";
 import { tmpdir } from "os";
@@ -888,6 +889,54 @@ describe("daemonStateToStatusItems", () => {
       items: [],
     };
     expect(daemonStateToStatusItems(state)).toEqual([]);
+  });
+});
+
+describe("parseCrewStatusUpdate", () => {
+  it("accepts verifying and done remote snapshot states", () => {
+    const status = parseCrewStatusUpdate({
+      crewCode: "ABCD-EFGH",
+      daemonCount: 2,
+      availableCount: 1,
+      claimedCount: 1,
+      completedCount: 1,
+      daemonNames: ["local", "remote"],
+      remoteItems: [
+        {
+          id: "H-VERIFY-1",
+          state: "verifying",
+          owner: { daemonId: "daemon-remote", name: "remote" },
+          title: "Post-merge checks",
+          prNumber: 21,
+        },
+        {
+          id: "H-DONE-1",
+          state: "done",
+          owner: null,
+          title: "Verified item",
+          prNumber: 22,
+        },
+      ],
+    }, "daemon-local");
+
+    expect(status.remoteItems).toEqual([
+      {
+        id: "H-VERIFY-1",
+        state: "verifying",
+        ownerDaemonId: "daemon-remote",
+        ownerName: "remote",
+        title: "Post-merge checks",
+        prNumber: 21,
+      },
+      {
+        id: "H-DONE-1",
+        state: "done",
+        ownerDaemonId: null,
+        ownerName: null,
+        title: "Verified item",
+        prNumber: 22,
+      },
+    ]);
   });
 });
 
