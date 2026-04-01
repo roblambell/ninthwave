@@ -16,6 +16,8 @@ export interface ItemMetric {
   retryCount: number;
   tool: string;
   prNumber?: number;
+  /** All known PR numbers for this item, oldest first, including the current active PR. */
+  prNumbers?: number[];
   /** Detection latency in milliseconds for this item's last transition. */
   detectionLatencyMs?: number;
   /** ISO timestamp of when the worker was launched. */
@@ -172,6 +174,13 @@ export function collectRunMetrics(
     retryCount: item.retryCount,
     tool: aiTool,
     ...(item.prNumber != null ? { prNumber: item.prNumber } : {}),
+    ...(() => {
+      const prNumbers = [
+        ...(item.priorPrNumbers ?? []),
+        ...(item.prNumber != null ? [item.prNumber] : []),
+      ];
+      return prNumbers.length > 0 ? { prNumbers } : {};
+    })(),
     ...(item.detectionLatencyMs != null ? { detectionLatencyMs: item.detectionLatencyMs } : {}),
     ...(item.startedAt ? { startedAt: item.startedAt } : {}),
     ...(item.endedAt ? { endedAt: item.endedAt } : {}),

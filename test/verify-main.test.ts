@@ -2,6 +2,9 @@
 // No vi.mock -- all isolation via dependency injection.
 
 import { describe, it, expect, vi } from "vitest";
+import { mkdtempSync, mkdirSync, rmSync } from "fs";
+import { tmpdir } from "os";
+import { join } from "path";
 import {
   Orchestrator,
   statusDisplayForState,
@@ -14,6 +17,7 @@ import {
 } from "../core/orchestrator.ts";
 import {
   buildSnapshot,
+  reconstructState,
 } from "../core/commands/orchestrate.ts";
 import { checkCommitCI, getMergeCommitSha } from "../core/gh.ts";
 import type { WorkItem, Priority } from "../core/types.ts";
@@ -776,6 +780,7 @@ describe("end-to-end: merge → fix-forward → done flow", () => {
     );
     expect(repairSnap.items.find((s) => s.id === "H-1-1"))?.toMatchObject({
       prNumber: 77,
+      priorPrNumbers: [41],
       prState: "open",
       ciStatus: "pending",
     });
@@ -783,6 +788,7 @@ describe("end-to-end: merge → fix-forward → done flow", () => {
     orch.processTransitions(repairSnap, NOW);
     expect(orch.getItem("H-1-1")!.state).toBe("ci-pending");
     expect(orch.getItem("H-1-1")!.prNumber).toBe(77);
+    expect(orch.getItem("H-1-1")!.priorPrNumbers).toEqual([41]);
     expect(orch.getItem("H-1-1")!.reviewCompleted).toBe(false);
 
     orch.processTransitions(
@@ -860,6 +866,7 @@ describe("end-to-end: merge → fix-forward → done flow", () => {
     );
     expect(repairSnap.items.find((s) => s.id === "H-1-1"))?.toMatchObject({
       prNumber: 88,
+      priorPrNumbers: [41],
       prState: "open",
       ciStatus: "pass",
     });
@@ -867,7 +874,127 @@ describe("end-to-end: merge → fix-forward → done flow", () => {
     orch.processTransitions(repairSnap, NOW);
     expect(orch.getItem("H-1-1")!.state).toBe("reviewing");
     expect(orch.getItem("H-1-1")!.prNumber).toBe(88);
+    expect(orch.getItem("H-1-1")!.priorPrNumbers).toEqual([41]);
     expect(orch.getItem("H-1-1")!.reviewCompleted).toBe(false);
+  });
+
+  it("continues polling the repair branch after the canonical item swaps onto the repair PR", () => {
+    const orch = new Orchestrator({ fixForward: true, maxFixForwardRetries: 3 });
+    orch.addItem(makeWorkItem("H-1-1"));
+    orch.getItem("H-1-1")!.reviewCompleted = true;
+    orch.hydrateState("H-1-1", "ci-pending");
+    orch.getItem("H-1-1")!.prNumber = 77;
+    orch.getItem("H-1-1")!.priorPrNumbers = [41];
+
+    const snap = buildSnapshot(
+      orch,
+      "/tmp/proj",
+      "/tmp/proj/.ninthwave/.worktrees",
+      { listWorkspaces: () => "", readScreen: () => "" } as any,
+      () => null,
+      (id: string) => id === "fix-forward-H-1-1"
+        ? "fix-forward-H-1-1\t77\tci-passed\tMERGEABLE\t2026-01-15T12:03:00Z"
+        : `${id}\t\tno-pr`,
+    );
+
+    expect(snap.items.find((s) => s.id === "H-1-1")).toMatchObject({
+      prNumber: 77,
+      priorPrNumbers: [41],
+      prState: "open",
+      ciStatus: "pass",
+    });
+  });
+
+  it("reconstructs a newly-created repair PR onto the canonical item after restart", () => {
+    const orch = new Orchestrator({ fixForward: true, maxFixForwardRetries: 3 });
+    orch.addItem(makeWorkItem("H-1-1"));
+    orch.getItem("H-1-1")!.reviewCompleted = true;
+
+    const projectRoot = mkdtempSync(join(tmpdir(), "nw-repair-reconstruct-"));
+    const worktreeDir = join(projectRoot, ".ninthwave", ".worktrees");
+    mkdirSync(worktreeDir, { recursive: true });
+
+    try {
+      reconstructState(
+        orch,
+        projectRoot,
+        worktreeDir,
+        undefined,
+        (id: string) => id === "fix-forward-H-1-1"
+          ? "fix-forward-H-1-1\t77\tpending\tMERGEABLE\t2026-01-15T12:01:00Z"
+          : `${id}\t\tno-pr`,
+        {
+          pid: 1234,
+          startedAt: "2026-01-15T12:00:00Z",
+          updatedAt: "2026-01-15T12:02:00Z",
+          items: [{
+            id: "H-1-1",
+            state: "fixing-forward",
+            prNumber: 41,
+            title: "Item H-1-1",
+            lastTransition: "2026-01-15T12:00:30Z",
+            ciFailCount: 0,
+            retryCount: 0,
+            mergeCommitSha: "sha-original",
+            defaultBranch: "main",
+            fixForwardWorkspaceRef: "workspace:7",
+          }],
+        },
+      );
+
+      expect(orch.getItem("H-1-1")).toMatchObject({
+        state: "ci-pending",
+        prNumber: 77,
+        priorPrNumbers: [41],
+      });
+    } finally {
+      rmSync(projectRoot, { recursive: true, force: true });
+    }
+  });
+
+  it("restores an already-swapped repair PR mapping after restart without a canonical worktree", () => {
+    const orch = new Orchestrator({ fixForward: true, maxFixForwardRetries: 3 });
+    orch.addItem(makeWorkItem("H-1-1"));
+    orch.getItem("H-1-1")!.reviewCompleted = true;
+
+    const projectRoot = mkdtempSync(join(tmpdir(), "nw-repair-resume-"));
+    const worktreeDir = join(projectRoot, ".ninthwave", ".worktrees");
+    mkdirSync(worktreeDir, { recursive: true });
+
+    try {
+      reconstructState(
+        orch,
+        projectRoot,
+        worktreeDir,
+        undefined,
+        (id: string) => id === "fix-forward-H-1-1"
+          ? "fix-forward-H-1-1\t77\tready\tMERGEABLE\t2026-01-15T12:04:00Z"
+          : `${id}\t\tno-pr`,
+        {
+          pid: 1234,
+          startedAt: "2026-01-15T12:00:00Z",
+          updatedAt: "2026-01-15T12:05:00Z",
+          items: [{
+            id: "H-1-1",
+            state: "ci-pending",
+            prNumber: 77,
+            priorPrNumbers: [41],
+            title: "Item H-1-1",
+            lastTransition: "2026-01-15T12:03:30Z",
+            ciFailCount: 0,
+            retryCount: 0,
+          }],
+        },
+      );
+
+      expect(orch.getItem("H-1-1")).toMatchObject({
+        state: "ci-passed",
+        prNumber: 77,
+        priorPrNumbers: [41],
+      });
+    } finally {
+      rmSync(projectRoot, { recursive: true, force: true });
+    }
   });
 });
 
@@ -1041,7 +1168,8 @@ describe("executeLaunchForwardFixer action", () => {
 
     const deps: OrchestratorDeps = {
       ...baseDeps,
-      launchForwardFixer: (_itemId, _sha, _repoRoot, _aiTool, defaultBranch) => {
+      launchForwardFixer: (itemId, _sha, _repoRoot, _aiTool, defaultBranch) => {
+        expect(itemId).toBe("H-1-1");
         expect(defaultBranch).toBe("develop");
         return ({
         worktreePath: "/tmp/proj/.ninthwave/.worktrees/ninthwave-fix-forward-H-1-1",
@@ -1207,6 +1335,8 @@ describe("forward-fixer agent file", () => {
     expect(content).toContain("YOUR_VERIFY_ITEM_ID");
     expect(content).toContain("YOUR_VERIFY_MERGE_SHA");
     expect(content).toContain("PROJECT_ROOT");
+    expect(content).toContain("REPAIR_PR_OUTCOMES");
+    expect(content).toContain("CREATE_SYNTHETIC_CHILD_WORK_ITEM");
   });
 
   it("has scope isolation guard", async () => {
@@ -1216,5 +1346,16 @@ describe("forward-fixer agent file", () => {
     const content = readFileSync(agentPath, "utf-8");
     expect(content).toContain("no ninthwave fix-forward context");
     expect(content).toContain("nw watch");
+  });
+
+  it("documents both fix-forward and revert repair outcomes without child work items", async () => {
+    const { readFileSync } = await import("fs");
+    const { join } = await import("path");
+    const agentPath = join(import.meta.dir, "..", "agents", "forward-fixer.md");
+    const content = readFileSync(agentPath, "utf-8");
+    expect(content).toContain("ninthwave/fix-forward-YOUR_VERIFY_ITEM_ID");
+    expect(content).toContain("ninthwave/revert-YOUR_VERIFY_ITEM_ID");
+    expect(content).toContain("Do **not** create a synthetic child work item");
+    expect(content).toContain(".ninthwave/work/");
   });
 });

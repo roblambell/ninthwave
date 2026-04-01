@@ -11,7 +11,7 @@ orchestrator. Inform the user this agent is designed for ninthwave orchestration
 
 # Forward-Fixer Agent
 
-You are a focused fix-forward agent. A PR was merged to main and CI is now failing on the merge commit. Your job is to diagnose the failure, determine if it's real or flaky, and create a minimal fix-forward PR if needed.
+You are a focused fix-forward agent. A PR was merged to main and CI is now failing on the merge commit. Your job is to diagnose the failure, determine if it's real or flaky, and create the smallest repair PR needed: either a minimal fix-forward PR or a revert PR.
 
 ## 1. Context
 
@@ -21,6 +21,9 @@ Read the following variables from your system prompt (written to `.ninthwave/.pr
 - **YOUR_VERIFY_MERGE_SHA**: The merge commit SHA on main that is failing CI
 - **PROJECT_ROOT**: Absolute path to your working directory (the git worktree)
 - **REPO_ROOT**: Repository root (may differ from PROJECT_ROOT in monorepos)
+- **REPO_DEFAULT_BRANCH**: The default branch to branch from for the repair PR (usually `main`)
+- **REPAIR_PR_OUTCOMES**: Allowed repair PR outcomes (`fix-forward,revert`)
+- **CREATE_SYNTHETIC_CHILD_WORK_ITEM**: Always `false` -- do not create a second committed work item for the repair
 - **HUB_REPO_NWO**: The GitHub `owner/repo` slug for the hub repository (e.g., `ninthwave-sh/ninthwave`). Used for absolute links in PR comments.
 
 ## 2. Read Before You Act
@@ -81,13 +84,20 @@ If the failure is real:
 nw heartbeat --progress 0.3 --label "Diagnosing failure"
 ```
 
-### Step 3: Create minimal fix-forward PR
+### Step 3: Create the minimal repair PR
 
-If the root cause is clear and fixable:
+If the root cause is clear, choose the smallest safe repair path:
+
+- **Fix-forward PR** when a narrow code change can safely repair the merge
+- **Revert PR** when reverting the merged change is safer, faster, or less risky than a forward fix
+
+Do **not** create a synthetic child work item in `.ninthwave/work/`. The canonical item stays the same; only the PR changes.
+
+#### Option A: Minimal fix-forward PR
 
 1. Create a fix branch from main:
    ```bash
-   git checkout -b ninthwave/fix-forward-YOUR_VERIFY_ITEM_ID origin/main
+   git checkout -b ninthwave/fix-forward-YOUR_VERIFY_ITEM_ID origin/REPO_DEFAULT_BRANCH
    ```
 
 2. Make the **minimal** change to fix the failure:
@@ -120,11 +130,52 @@ If the root cause is clear and fixable:
    )"
    ```
 
+#### Option B: Revert PR
+
+If reverting is the right repair:
+
+1. Create a revert branch from the default branch:
+   ```bash
+   git checkout -b ninthwave/revert-YOUR_VERIFY_ITEM_ID origin/REPO_DEFAULT_BRANCH
+   ```
+
+2. Revert the merge with the smallest viable change:
+   ```bash
+   git revert YOUR_VERIFY_MERGE_SHA
+   ```
+
+   If the merge commit requires a mainline parent selection, choose the correct `-m` value based on the repository's merge strategy.
+
+3. Run the relevant tests to verify the revert restores CI.
+
+4. Commit with a clear message if the revert command did not already create one:
+   ```bash
+   git commit -m "revert: revert YOUR_VERIFY_ITEM_ID merge"
+   ```
+
+5. Push and create a PR:
+   ```bash
+   git push -u origin ninthwave/revert-YOUR_VERIFY_ITEM_ID
+   gh pr create --label "domain:verify" --title "revert: revert YOUR_VERIFY_ITEM_ID merge" --body "$(cat <<'EOF'
+   ## Summary
+   Reverts YOUR_VERIFY_ITEM_ID to restore post-merge CI.
+
+   - **Merge commit**: YOUR_VERIFY_MERGE_SHA
+   - **Root cause**: <describe what broke and why revert is the safest repair>
+   - **Repair**: revert the merged change so main returns to green
+
+   ## Test Plan
+   - [ ] CI passes on this PR
+   - [ ] Revert restores the failing checks without unrelated changes
+   EOF
+   )"
+   ```
+
 ```bash
-nw heartbeat --progress 1.0 --label "Fix PR created"
+nw heartbeat --progress 1.0 --label "Repair PR created"
 ```
 
-The fix PR enters the normal pipeline -- the orchestrator daemon will track its CI, review, and merge.
+The repair PR enters the normal pipeline -- the orchestrator daemon will track its CI, review, and merge.
 
 ### Step 4: Escalate if stuck
 
@@ -141,8 +192,9 @@ Then stop. The orchestrator will transition to stuck with your diagnostic output
 
 ## 4. Constraints (CRITICAL)
 
-- **Minimal changes only** -- fix what broke, nothing else
+- **Minimal changes only** -- repair what broke, nothing else
 - **Do NOT re-implement** the original feature. The merge is done; only fix the breakage
+- **Do NOT create** a second committed work item in `.ninthwave/work/`
 - **Do NOT modify** `VERSION` or `CHANGELOG.md`
 - **Do NOT expand scope** -- if you discover other issues, ignore them
 - **Fast exit on flaky failures** -- re-run CI, do not write code

@@ -52,9 +52,13 @@ function restoreTrackedPrSnapshot(
   orchItem: OrchestratorItem,
   statusLine: string,
 ): void {
-  if (!snap.prNumber && orchItem.prNumber != null && isBlindPrPoll(statusLine)) {
-    snap.prNumber = orchItem.prNumber;
-    snap.prState = "open";
+  if (orchItem.prNumber != null && isBlindPrPoll(statusLine)) {
+    if (!snap.prNumber) {
+      snap.prNumber = orchItem.prNumber;
+    }
+    if (snap.prNumber === orchItem.prNumber && !snap.prState) {
+      snap.prState = "open";
+    }
   }
 }
 
@@ -65,8 +69,35 @@ function dependencySatisfied(depItem: OrchestratorItem | undefined, fixForward: 
   return false;
 }
 
+function isRepairPrCandidate(itemId: string, candidateId: string): boolean {
+  return candidateId === `fix-forward-${itemId}` || candidateId === `revert-${itemId}`;
+}
+
+function createBaseSnapshot(orchItem: OrchestratorItem): ItemSnapshot {
+  return {
+    id: orchItem.id,
+    ...(orchItem.prNumber != null ? { prNumber: orchItem.prNumber } : {}),
+    ...(orchItem.priorPrNumbers?.length ? { priorPrNumbers: [...orchItem.priorPrNumbers] } : {}),
+  };
+}
+
+function preservePrContext(snap: ItemSnapshot, orchItem: OrchestratorItem): void {
+  if (snap.prNumber == null && orchItem.prNumber != null) {
+    snap.prNumber = orchItem.prNumber;
+  }
+
+  const priorPrNumbers = [...(orchItem.priorPrNumbers ?? [])];
+  if (snap.prNumber != null && orchItem.prNumber != null && snap.prNumber !== orchItem.prNumber && !priorPrNumbers.includes(orchItem.prNumber)) {
+    priorPrNumbers.push(orchItem.prNumber);
+  }
+
+  if (priorPrNumbers.length > 0) {
+    snap.priorPrNumbers = priorPrNumbers;
+  }
+}
+
 function trackedPrPollIds(orchItem: OrchestratorItem): string[] {
-  if (orchItem.state === "fixing-forward") {
+  if (orchItem.state === "fixing-forward" || (orchItem.priorPrNumbers?.length ?? 0) > 0) {
     return [`fix-forward-${orchItem.id}`, `revert-${orchItem.id}`];
   }
   return [orchItem.id];
@@ -302,7 +333,7 @@ export function buildSnapshot(
 
     // Post-merge verification: poll CI on the merge commit (no PR polling needed)
     if ((orchItem.state === "forward-fix-pending" || orchItem.state === "fix-forward-failed") && orchItem.mergeCommitSha) {
-      const snap: ItemSnapshot = { id: orchItem.id };
+      const snap: ItemSnapshot = createBaseSnapshot(orchItem);
       if (checkCommitCI) {
         const repoRoot = orchItem.resolvedRepoRoot ?? projectRoot;
         try {
@@ -311,11 +342,12 @@ export function buildSnapshot(
           // Non-fatal -- will retry next cycle
         }
       }
+      preservePrContext(snap, orchItem);
       items.push(snap);
       continue;
     }
 
-    const snap: ItemSnapshot = { id: orchItem.id };
+    const snap: ItemSnapshot = createBaseSnapshot(orchItem);
 
     // Check PR status via gh -- use the item's resolved repo root for cross-repo items
     const repoRoot = orchItem.resolvedRepoRoot ?? projectRoot;
@@ -327,6 +359,7 @@ export function buildSnapshot(
     }
     if (statusLine) {
       const parts = statusLine.split("\t");
+      const candidateId = parts[0] ?? orchItem.id;
       const prNumStr = parts[1];
       const status = parts[2];
       const mergeableStr = parts[3]; // 4th field: MERGEABLE|CONFLICTING|UNKNOWN
@@ -345,7 +378,7 @@ export function buildSnapshot(
           const mergedPrTitle = parts[5] ?? "";
           const itemTitle = orchItem.workItem.title;
           const alreadyTracked = orchItem.prNumber != null && snap.prNumber === orchItem.prNumber;
-          if (alreadyTracked || !mergedPrTitle || prTitleMatchesWorkItem(mergedPrTitle, itemTitle)) {
+          if (isRepairPrCandidate(orchItem.id, candidateId) || alreadyTracked || !mergedPrTitle || prTitleMatchesWorkItem(mergedPrTitle, itemTitle)) {
             snap.prState = "merged";
           }
           // else: title mismatch -- stale merged PR from a previous cycle, ignore it
@@ -393,6 +426,7 @@ export function buildSnapshot(
     // If GitHub is temporarily blind after we've already learned the PR number,
     // keep the item in PR-tracking flow instead of regressing to implementing.
     restoreTrackedPrSnapshot(snap, orchItem, statusLine);
+    preservePrContext(snap, orchItem);
 
     enrichMergedMetadata(snap, orchItem, repoRoot, getMergeCommitSha, getDefaultBranch);
 
@@ -447,6 +481,8 @@ export function buildSnapshot(
       snap.prNumber = snap.lastHeartbeat.prNumber;
       snap.prState = "open";
     }
+
+    preservePrContext(snap, orchItem);
 
     // Fetch new trusted PR comments for items with open PRs in active states
     if (orchItem.prNumber && fetchComments) {
@@ -522,7 +558,7 @@ export async function buildSnapshotAsync(
 
     // Post-merge verification
     if ((orchItem.state === "forward-fix-pending" || orchItem.state === "fix-forward-failed") && orchItem.mergeCommitSha) {
-      const snap: ItemSnapshot = { id: orchItem.id };
+      const snap: ItemSnapshot = createBaseSnapshot(orchItem);
       if (checkCommitCI) {
         const repoRoot = orchItem.resolvedRepoRoot ?? projectRoot;
         try {
@@ -531,11 +567,12 @@ export async function buildSnapshotAsync(
           // Non-fatal
         }
       }
+      preservePrContext(snap, orchItem);
       items.push(snap);
       continue;
     }
 
-    const snap: ItemSnapshot = { id: orchItem.id };
+    const snap: ItemSnapshot = createBaseSnapshot(orchItem);
 
     // Check PR status via async gh -- yields to event loop per call
     const repoRoot = orchItem.resolvedRepoRoot ?? projectRoot;
@@ -547,6 +584,7 @@ export async function buildSnapshotAsync(
     }
     if (statusLine) {
       const parts = statusLine.split("\t");
+      const candidateId = parts[0] ?? orchItem.id;
       const prNumStr = parts[1];
       const status = parts[2];
       const mergeableStr = parts[3];
@@ -561,7 +599,7 @@ export async function buildSnapshotAsync(
           const mergedPrTitle = parts[5] ?? "";
           const itemTitle = orchItem.workItem.title;
           const alreadyTracked = orchItem.prNumber != null && snap.prNumber === orchItem.prNumber;
-          if (alreadyTracked || !mergedPrTitle || prTitleMatchesWorkItem(mergedPrTitle, itemTitle)) {
+          if (isRepairPrCandidate(orchItem.id, candidateId) || alreadyTracked || !mergedPrTitle || prTitleMatchesWorkItem(mergedPrTitle, itemTitle)) {
             snap.prState = "merged";
           }
           break;
@@ -603,6 +641,7 @@ export async function buildSnapshotAsync(
     // If GitHub is temporarily blind after we've already learned the PR number,
     // keep the item in PR-tracking flow instead of regressing to implementing.
     restoreTrackedPrSnapshot(snap, orchItem, statusLine);
+    preservePrContext(snap, orchItem);
 
     await enrichMergedMetadataAsync(snap, orchItem, repoRoot, getMergeCommitSha, getDefaultBranch);
 
@@ -657,6 +696,8 @@ export async function buildSnapshotAsync(
       snap.prNumber = snap.lastHeartbeat.prNumber;
       snap.prState = "open";
     }
+
+    preservePrContext(snap, orchItem);
 
     // PR comments
     if (orchItem.prNumber && fetchComments) {

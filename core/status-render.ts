@@ -189,6 +189,8 @@ export interface StatusItem {
   descriptionSnippet?: string;
   state: ItemState;
   prNumber: number | null;
+  /** Prior active PR numbers for this item, oldest first. */
+  priorPrNumbers?: number[];
   ageMs: number; // milliseconds since worktree created
   /** Countdown remaining during timeout grace period. */
   timeoutRemainingMs?: number;
@@ -1247,6 +1249,7 @@ export function daemonStateToStatusItems(state: DaemonState): StatusItem[] {
     prNumber: item.remoteSnapshot
       ? item.remoteSnapshot.prNumber ?? null
       : item.prNumber,
+    priorPrNumbers: item.priorPrNumbers,
     ageMs: Date.now() - new Date(item.lastTransition).getTime(),
     repoLabel: "",
     failureReason: item.failureReason,
@@ -2256,6 +2259,11 @@ export function formatItemDetail(
     }
   } else {
     lines.push(`  ${DIM}PR:${RESET}        ${DIM}--${RESET}`);
+  }
+
+  if (item.prNumber && item.priorPrNumbers && item.priorPrNumbers.length > 0) {
+    const prChain = [...item.priorPrNumbers, item.prNumber].map((pr) => `#${pr}`).join(" → ");
+    lines.push(`  ${DIM}PRs:${RESET}       ${prChain}`);
   }
 
   if (item.descriptionSnippet) {

@@ -1015,6 +1015,21 @@ export class Orchestrator {
   }
 
   /**
+   * Replace the active PR for an item while preserving the prior active PR chain.
+   * Used when a canonical item re-enters the normal pipeline on a repair PR.
+   */
+  private adoptTrackedPrNumber(item: OrchestratorItem, prNumber: number): void {
+    if (item.prNumber != null && item.prNumber !== prNumber) {
+      const priorPrNumbers = [...(item.priorPrNumbers ?? [])];
+      if (!priorPrNumbers.includes(item.prNumber)) {
+        priorPrNumbers.push(item.prNumber);
+      }
+      item.priorPrNumbers = priorPrNumbers;
+    }
+    item.prNumber = prNumber;
+  }
+
+  /**
    * Handle "fix-forward-failed" state: CI failed on main after merge.
    * If max retries exceeded, transition to stuck.
    * Otherwise, launch a forward-fixer worker to diagnose and fix-forward.
@@ -1063,7 +1078,7 @@ export class Orchestrator {
     // lifecycle using that PR as the active one instead of continuing to look
     // post-merge-complete.
     if (snap?.prNumber && (snap.prState === "open" || snap.prState === "merged")) {
-      item.prNumber = snap.prNumber;
+      this.adoptTrackedPrNumber(item, snap.prNumber);
       item.reviewCompleted = false;
       item.reviewRound = undefined;
       item.lastCommentCheck = undefined;

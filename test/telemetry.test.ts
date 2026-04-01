@@ -379,6 +379,7 @@ describe("daemonStateToStatusItems passes telemetry", () => {
         id: "T-1-1",
         state: "stuck",
         prNumber: 42,
+        priorPrNumbers: [11],
         title: "Test item",
         lastTransition: new Date().toISOString(),
         ciFailCount: 2,
@@ -397,6 +398,7 @@ describe("daemonStateToStatusItems passes telemetry", () => {
     expect(items[0]!.endedAt).toBe("2026-03-25T10:15:00.000Z");
     expect(items[0]!.exitCode).toBe(1);
     expect(items[0]!.stderrTail).toBe("Error: something went wrong");
+    expect(items[0]!.priorPrNumbers).toEqual([11]);
   });
 
   it("handles missing telemetry fields gracefully", () => {
@@ -432,6 +434,8 @@ describe("serializeOrchestratorState includes telemetry", () => {
       id: "T-1-1",
       workItem: makeWorkItem("T-1-1"),
       state: "stuck",
+      prNumber: 42,
+      priorPrNumbers: [11],
       ciFailCount: 2,
       retryCount: 1,
       lastTransition: new Date().toISOString(),
@@ -446,6 +450,7 @@ describe("serializeOrchestratorState includes telemetry", () => {
     expect(state.items[0]!.endedAt).toBe("2026-03-25T10:15:00.000Z");
     expect(state.items[0]!.exitCode).toBe(1);
     expect(state.items[0]!.stderrTail).toBe("Error: test failed");
+    expect(state.items[0]!.priorPrNumbers).toEqual([11]);
   });
 
   it("omits telemetry fields when not present (sparse serialization)", () => {
@@ -475,6 +480,8 @@ describe("collectRunMetrics includes telemetry fields", () => {
         id: "T-1-1",
         workItem: makeWorkItem("T-1-1"),
         state: "done",
+        prNumber: 42,
+        priorPrNumbers: [11],
         ciFailCount: 0,
         retryCount: 0,
         lastTransition: new Date().toISOString(),
@@ -498,12 +505,21 @@ describe("collectRunMetrics includes telemetry fields", () => {
     const config: OrchestratorConfig = {
       wipLimit: 4,
       mergeStrategy: "auto",
+      bypassEnabled: false,
       maxCiRetries: 2,
       maxRetries: 1,
       launchTimeoutMs: 30 * 60 * 1000,
       activityTimeoutMs: 60 * 60 * 1000,
       enableStacking: true,
       reviewAutoFix: "off",
+      maxMergeRetries: 3,
+      maxRebaseAttempts: 3,
+      maxReviewRounds: 3,
+      fixForward: true,
+      maxFixForwardRetries: 2,
+      skipReview: false,
+      gracePeriodMs: 5 * 60 * 1000,
+      maxTimeoutExtensions: 3,
     };
 
     const metrics = collectRunMetrics(items, config, "2026-03-25T10:00:00.000Z", "2026-03-25T10:20:00.000Z", "claude");
@@ -513,6 +529,8 @@ describe("collectRunMetrics includes telemetry fields", () => {
     expect(item1.startedAt).toBe("2026-03-25T10:01:00.000Z");
     expect(item1.endedAt).toBe("2026-03-25T10:15:00.000Z");
     expect(item1.exitCode).toBe(0);
+    expect(item1.prNumber).toBe(42);
+    expect(item1.prNumbers).toEqual([11, 42]);
 
     // Second item (stuck) should have telemetry too
     const item2 = metrics.items.find((i) => i.id === "T-1-2")!;
@@ -534,12 +552,21 @@ describe("collectRunMetrics includes telemetry fields", () => {
     const config: OrchestratorConfig = {
       wipLimit: 4,
       mergeStrategy: "auto",
+      bypassEnabled: false,
       maxCiRetries: 2,
       maxRetries: 1,
       launchTimeoutMs: 30 * 60 * 1000,
       activityTimeoutMs: 60 * 60 * 1000,
       enableStacking: true,
       reviewAutoFix: "off",
+      maxMergeRetries: 3,
+      maxRebaseAttempts: 3,
+      maxReviewRounds: 3,
+      fixForward: true,
+      maxFixForwardRetries: 2,
+      skipReview: false,
+      gracePeriodMs: 5 * 60 * 1000,
+      maxTimeoutExtensions: 3,
     };
 
     const metrics = collectRunMetrics(items, config, "2026-03-25T10:00:00.000Z", "2026-03-25T10:20:00.000Z", "claude");
