@@ -21,6 +21,7 @@ import { readWorkItem } from "../work-item-files.ts";
 import { prList as defaultPrList } from "../gh.ts";
 import { cleanInbox } from "./inbox.ts";
 import {
+  allToolIds,
   isAiToolId,
   getToolProfile,
   defaultLaunchDeps,
@@ -63,34 +64,6 @@ export function sanitizeTitle(title: string): string {
   return title.replace(/[^a-zA-Z0-9 _-]/g, "_");
 }
 
-function waitForStableScreen(
-  mux: Pick<Multiplexer, "readScreen">,
-  ref: string,
-  sleep: (ms: number) => void = process.env.NODE_ENV === "test"
-    ? () => {}
-    : (ms) => Bun.sleepSync(ms),
-  maxAttempts: number = 30,
-  pollMs: number = 500,
-): boolean {
-  let lastScreen = "";
-
-  for (let i = 0; i < maxAttempts; i++) {
-    sleep(pollMs);
-    const screen = mux.readScreen(ref, 10);
-    const lines = screen.split("\n").filter((line) => line.trim().length > 0);
-    if (lines.length >= 3 && screen === lastScreen) {
-      return true;
-    }
-    lastScreen = screen;
-  }
-
-  return false;
-}
-
-type LaunchMux = Multiplexer & {
-  sendMessage?: (ref: string, message: string) => boolean;
-};
-
 /** Result of launching a single work item. */
 export interface LaunchResult {
   worktreePath: string;
@@ -113,45 +86,24 @@ export function launchAiSession(
   id: string,
   safeTitle: string,
   promptFile: string,
-  mux: LaunchMux,
+  mux: Multiplexer,
   options: { projectRoot?: string; agentName?: string } = {},
   deps: LaunchDeps = defaultLaunchDeps,
 ): string | null {
   const agentName = options.agentName ?? "ninthwave-implementer";
   const wsName = `${id} ${safeTitle}`;
-  let cmd = "";
-  let initialPrompt = "Start";
-
-  if (isAiToolId(tool)) {
-    // Known tool: dispatch through its registered profile.
-    const profile = getToolProfile(tool);
-    const stateDir = userStateDir(options.projectRoot ?? worktreePath);
-    const result = profile.buildLaunchCmd({ wsName, agentName, promptFile, id, stateDir }, deps);
-    cmd = result.cmd;
-    initialPrompt = result.initialPrompt;
-  } else {
-    // Unknown/custom tool (e.g. --tool override): launch the raw
-    // command string and deliver the prompt post-launch via sendMessage.
-    cmd = tool;
-    initialPrompt = `${deps.readFileSync(promptFile, "utf-8")}\n\nStart implementing this work item now.`;
+  if (!isAiToolId(tool)) {
+    throw new Error(`Unknown AI tool: ${tool}. Supported: ${allToolIds().join(", ")}`);
   }
+
+  const profile = getToolProfile(tool);
+  const stateDir = userStateDir(options.projectRoot ?? worktreePath);
+  const { cmd } = profile.buildLaunchCmd({ wsName, agentName, promptFile, id, stateDir }, deps);
 
   const wsRef = mux.launchWorkspace(worktreePath, cmd, id);
   if (!wsRef) {
     warn(`${mux.type} launch failed for ${id} -- is ${mux.type} running?`);
     return null;
-  }
-
-  // Skip send when the prompt was already embedded in the launch command (e.g. copilot -i).
-  if (!initialPrompt) return wsRef;
-
-  if (!waitForStableScreen(mux, wsRef)) {
-    warn(
-      `Workspace ${wsRef} did not become ready within timeout for ${id} -- sending prompt anyway`,
-    );
-  }
-  if (typeof mux.sendMessage !== "function" || !mux.sendMessage(wsRef, initialPrompt + "\n")) {
-    warn(`Failed to send initial prompt to ${wsRef} for ${id}`);
   }
 
   return wsRef;
