@@ -4,7 +4,7 @@
 // routes to the appropriate flow:
 // 1. No git repo → help text
 // 2. No .ninthwave/ → first-run onboarding (init flow)
-// 3. .ninthwave/ exists, no work items → guidance message
+// 3. .ninthwave/ exists, no work items → guidance about populating live queue
 // 4. Daemon running → live status view
 // 5. Work items exist, no daemon → TUI selection → cmdWatch
 
@@ -278,7 +278,10 @@ export async function onboard(
 
   console.log(`${GREEN}You're all set!${RESET}`);
   console.log(
-    `Add work items to ${BOLD}.ninthwave/work/${RESET} or use ${BOLD}/decompose${RESET} in ${chosenTool.displayName} to break down a feature.`,
+    `Use ${BOLD}/decompose${RESET} in ${chosenTool.displayName} or add markdown files to ${BOLD}.ninthwave/work/${RESET} to populate the live queue.`,
+  );
+  console.log(
+    `${BOLD}nw${RESET} works through that queue. Completed items disappear from ${BOLD}.ninthwave/work/${RESET} on purpose -- look them up in merged PRs, ${BOLD}nw history${RESET}, or git history.`,
   );
   console.log();
 }

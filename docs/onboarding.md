@@ -14,6 +14,8 @@ There are two ways onboarding runs:
 
 Both paths converge on the same `initProject()` function for the actual setup work. The difference is that `nw` (no-args) wraps it in an interactive guided flow with multiplexer/AI tool selection and session launch.
 
+The queue mental model is intentional: `/decompose` (or manual file creation) populates `.ninthwave/work/`, `nw` works through that live queue, and completed work is looked up through merged PRs, `nw history`, `nw logs`, or git history rather than retained in a `done` lane under `.ninthwave/work/`.
+
 ---
 
 ## 1. User Journey: `nw` No-Args Routing
@@ -29,7 +31,7 @@ flowchart TD
     D -->|Yes| E{".ninthwave/ exists?"}
     E -->|No| F["First-run onboarding<br/><code>onboard()</code>"]
     E -->|Yes| G{Work items in<br/>.ninthwave/work/?}
-    G -->|None| H["Print guidance:<br/>'Run /decompose to get started'"]
+    G -->|None| H["Print guidance:<br/>'Run /decompose to populate the live queue'"]
     G -->|Yes| I{Daemon running?}
     I -->|Yes| J["Live status view<br/><code>cmdStatusWatch()</code>"]
     I -->|No| K[Display items summary]
@@ -217,7 +219,7 @@ Every file and directory created during onboarding:
 | `.ninthwave/config` | File | Always | **Yes** (authoritative) | Yes | Auto-detected environment settings (INI format) |
 | `.ninthwave/config.json` | File | Only if monorepo detected | **Yes** | Yes | Structured workspace package list |
 | `.ninthwave/domains.conf` | File | Only if missing | **No** (preserved) | Yes | Domain pattern mappings for work item filtering |
-| `.ninthwave/work/` | Directory | Always | N/A | Yes | Work item markdown files |
+| `.ninthwave/work/` | Directory | Always | N/A | Yes | Live queue of open work item markdown files |
 | `.ninthwave/work/.gitkeep` | File | Always | Yes | Yes | Keeps empty dir in git |
 | `.ninthwave/friction/` | Directory | Always | N/A | Yes | Friction log entries |
 | `.ninthwave/friction/.gitkeep` | File | Always | Yes | Yes | Keeps empty dir in git |

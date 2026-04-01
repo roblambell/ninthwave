@@ -247,6 +247,10 @@ describe("onboard", () => {
     expect(output).toContain("Setting up ninthwave");
     // Should complete with guidance (no session launch)
     expect(output).toContain("You're all set!");
+    expect(output).toContain("populate the live queue");
+    expect(output).toContain("Completed items disappear from");
+    expect(output).toContain("merged PRs");
+    expect(output).toContain("nw history");
     expect(output).not.toContain("Launching");
     expect(output).not.toContain("Session started");
     // .ninthwave/ should now exist from setup
@@ -274,6 +278,7 @@ describe("onboard", () => {
     // Single tool should be auto-selected -- no "Choose" prompt for AI tool
     expect(output).not.toContain("Choose [1-");
     expect(output).toContain("You're all set!");
+    expect(output).toContain("populate the live queue");
   });
 
   it("persists detected tools via user config instead of project config", async () => {

@@ -37,6 +37,8 @@ This skill is highly interactive. You MUST use your interactive question tool to
 
 This skill decomposes a feature spec into work items sized for individual human-reviewable PRs. Each item is written as an individual file in `.ninthwave/work/`, ready for orchestration via `nw`.
 
+Treat `.ninthwave/work/` as the live queue of open work: `/decompose` populates it, `nw` works through it, and completed work is intentionally looked up through merged PRs, `nw history`, `nw logs`, and git history rather than retained in a `done` lane.
+
 **Prerequisites:** `ninthwave` (or `nw`) must be in PATH. `.ninthwave/work/` directory must exist.
 
 ---
@@ -229,6 +231,8 @@ Key files: `path/to/file.ts`, `path/to/other.ex`
 ### Phase 7: HANDOFF
 
 Present summary and connect to `nw` for orchestration.
+
+Explicitly remind the user that the files you just wrote are now the live queue. The next step is to run `nw`, which works through `.ninthwave/work/`. When items finish, their files disappear from that directory on purpose; use merged PRs, `nw history`, `nw logs`, and git history for retrospective lookup.
 
 ---
 
