@@ -145,8 +145,10 @@ export interface TuiState {
   logScrollOffset: number;
   /** Current log level filter. */
   logLevelFilter: LogLevelFilter;
-  /** Selected item index in the visible item list (0-based). Defaults to 0. */
-  selectedIndex?: number;
+  /** Item ID currently selected in the visible status list. */
+  selectedItemId?: string;
+  /** Most recent visible selectable item order from the status panel. */
+  visibleItemIds?: string[];
   /** Item ID currently shown in the detail panel (null = log panel visible). */
   detailItemId?: string | null;
   /** Scroll offset within the detail overlay content (0 = top). */
@@ -175,12 +177,8 @@ export interface TuiState {
   onCollaborationJoinSubmit?: CollaborationJoinSubmitHandler;
   /** Called after any key that should trigger an immediate re-render. */
   onUpdate?: () => void;
-  /** Resolve item ID at the given index in the visible item list. */
-  getSelectedItemId?: (index: number) => string | undefined;
   /** Extend timeout for the currently selected item in grace period. */
   onExtendTimeout?: (itemId: string) => boolean;
-  /** Get total number of items for clamping selectedIndex. */
-  getItemCount?: () => number;
   /** Session code (if sharing via ninthwave.sh). Shown in help overlay. */
   sessionCode?: string;
   /** Tmux session name (when running outside tmux). Shown in help overlay. */
@@ -522,15 +520,23 @@ export function setupKeyboardShortcuts(
   const moveStatusSelection = (delta: -1 | 1) => {
     if (!tuiState) return;
 
-    const selectableItemIds = tuiState.statusLayout?.visibleLayout?.selectableItemIds;
-    const count = selectableItemIds?.length ?? tuiState.getItemCount?.() ?? 0;
+    const selectableItemIds = tuiState.statusLayout?.visibleLayout?.selectableItemIds
+      ?? tuiState.visibleItemIds
+      ?? [];
+    const count = selectableItemIds.length;
     if (count <= 0) return;
 
-    const currentIndex = Math.max(0, Math.min(tuiState.selectedIndex ?? 0, count - 1));
+    const currentIndex = Math.max(
+      0,
+      Math.min(
+        tuiState.selectedItemId ? selectableItemIds.indexOf(tuiState.selectedItemId) : 0,
+        count - 1,
+      ),
+    );
     const nextIndex = (currentIndex + delta + count) % count;
-    tuiState.selectedIndex = nextIndex;
+    tuiState.selectedItemId = selectableItemIds[nextIndex];
 
-    const selectedItemId = selectableItemIds?.[nextIndex] ?? tuiState.getSelectedItemId?.(nextIndex);
+    const selectedItemId = selectableItemIds[nextIndex];
     if (selectedItemId && tuiState.statusLayout) {
       tuiState.scrollOffset = scrollStatusItemIntoView(
         tuiState.statusLayout,
@@ -717,21 +723,17 @@ export function setupKeyboardShortcuts(
           handled = false;
           break;
         }
-        const selIdx = tuiState.selectedIndex ?? 0;
-        const itemId = tuiState.getSelectedItemId?.(selIdx);
+        const itemId = tuiState.selectedItemId;
         handled = itemId ? (tuiState.onExtendTimeout?.(itemId) ?? false) : false;
         break;
       }
       case "\r": // Enter -- open detail panel for selected item
       case "i": { // i -- open detail panel for selected item
-        const selIdx = tuiState.selectedIndex ?? 0;
-        if (selIdx >= 0 && !tuiState.detailItemId) {
-          const itemId = tuiState.getSelectedItemId?.(selIdx);
-          if (itemId) {
-            tuiState.savedLogScrollOffset = tuiState.logScrollOffset;
-            tuiState.detailItemId = itemId;
-            tuiState.detailScrollOffset = 0;
-          }
+        const itemId = tuiState.selectedItemId;
+        if (itemId && !tuiState.detailItemId) {
+          tuiState.savedLogScrollOffset = tuiState.logScrollOffset;
+          tuiState.detailItemId = itemId;
+          tuiState.detailScrollOffset = 0;
         }
         break;
       }

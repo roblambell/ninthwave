@@ -2040,23 +2040,12 @@ export function buildPanelLayout(
     viewOptions?: ViewOptions;
     logScrollOffset?: number;
     statusScrollOffset?: number;
-    /** Selected item index for highlight (0-based, -1 for none). */
-    selectedIndex?: number;
+    /** Selected item id for highlight. */
+    selectedItemId?: string;
   },
 ): PanelLayout {
   const logScrollOffset = opts?.logScrollOffset ?? 0;
-
-  // Resolve selectedIndex → selectedItemId using visible render order so the
-  // highlighted row matches what the user sees onscreen.
-  const selectedIndex = opts?.selectedIndex;
-  let selectedItemId: string | undefined;
-  if (selectedIndex != null && selectedIndex >= 0) {
-    const visibleLayout = buildVisibleStatusLayoutMetadata(items, {
-      flat: opts?.flat,
-      showBlockerDetail: opts?.viewOptions?.showBlockerDetail,
-    });
-    selectedItemId = visibleLayout.selectableItemIds[selectedIndex];
-  }
+  const selectedItemId = opts?.selectedItemId;
 
   // Below MIN_FULLSCREEN_ROWS: legacy flat rendering, no panels
   if (termRows < MIN_FULLSCREEN_ROWS) {

@@ -92,6 +92,7 @@ import {
   renderControlsOverlay,
   renderDetailOverlay,
   clampScrollOffset,
+  scrollStatusItemIntoView,
   buildPanelLayout,
   renderPanelFrame,
   MIN_FULLSCREEN_ROWS,
@@ -599,13 +600,76 @@ export function orchestratorItemsToStatusItems(
   });
 }
 
-export function getSelectedItemId(items: StatusItem[], index: number): string | undefined {
-  if (index < 0) return undefined;
-  return buildVisibleStatusLayoutMetadata(items).selectableItemIds[index];
+export function getVisibleSelectableItemIds(items: StatusItem[]): string[] {
+  return buildVisibleStatusLayoutMetadata(items).selectableItemIds;
 }
 
-export function getItemCount(items: StatusItem[]): number {
-  return buildVisibleStatusLayoutMetadata(items).selectableItemIds.length;
+export function normalizeSelectedItemId(
+  nextVisibleItemIds: string[],
+  selectedItemId?: string,
+  previousVisibleItemIds: string[] = [],
+): string | undefined {
+  if (nextVisibleItemIds.length === 0) return undefined;
+  if (!selectedItemId) return nextVisibleItemIds[0];
+  if (nextVisibleItemIds.includes(selectedItemId)) return selectedItemId;
+
+  const previousIndex = previousVisibleItemIds.indexOf(selectedItemId);
+  if (previousIndex < 0) return nextVisibleItemIds[0];
+
+  const nextVisibleItemIdSet = new Set(nextVisibleItemIds);
+  for (let distance = 1; distance <= previousVisibleItemIds.length; distance++) {
+    const nextId = previousVisibleItemIds[previousIndex + distance];
+    if (nextId && nextVisibleItemIdSet.has(nextId)) return nextId;
+
+    const previousId = previousVisibleItemIds[previousIndex - distance];
+    if (previousId && nextVisibleItemIdSet.has(previousId)) return previousId;
+  }
+
+  return nextVisibleItemIds[Math.min(previousIndex, nextVisibleItemIds.length - 1)] ?? nextVisibleItemIds[0];
+}
+
+function prepareStatusSelection(tuiState: TuiState, items: StatusItem[]): void {
+  const previousVisibleItemIds = tuiState.statusLayout?.visibleLayout?.selectableItemIds
+    ?? tuiState.visibleItemIds
+    ?? [];
+  const nextVisibleItemIds = getVisibleSelectableItemIds(items);
+  tuiState.selectedItemId = normalizeSelectedItemId(
+    nextVisibleItemIds,
+    tuiState.selectedItemId,
+    previousVisibleItemIds,
+  );
+  tuiState.visibleItemIds = nextVisibleItemIds;
+  if (nextVisibleItemIds.length === 0) {
+    tuiState.scrollOffset = 0;
+  }
+}
+
+function syncStatusLayout(tuiState: TuiState, panelLayout: ReturnType<typeof buildPanelLayout>, termRows: number): void {
+  tuiState.statusLayout = panelLayout.statusPanel;
+  tuiState.visibleItemIds = panelLayout.statusPanel?.visibleLayout?.selectableItemIds ?? tuiState.visibleItemIds ?? [];
+
+  if (!panelLayout.statusPanel) return;
+
+  if (tuiState.selectedItemId) {
+    tuiState.scrollOffset = scrollStatusItemIntoView(
+      panelLayout.statusPanel,
+      termRows,
+      tuiState.scrollOffset,
+      tuiState.selectedItemId,
+      1,
+    );
+    return;
+  }
+
+  const viewportHeight = Math.max(
+    1,
+    termRows - panelLayout.statusPanel.headerLines.length - panelLayout.footerLines.length,
+  );
+  tuiState.scrollOffset = clampScrollOffset(
+    tuiState.scrollOffset,
+    panelLayout.statusPanel.itemLines.length,
+    viewportHeight,
+  );
 }
 
 /**
@@ -721,11 +785,12 @@ export function renderTuiPanelFrame(
       // Item no longer exists -- clear detail view and render normal frame
       tuiState.detailItemId = null;
       const filteredLogs = filterLogsByLevel(tuiState.logBuffer, tuiState.logLevelFilter);
+      prepareStatusSelection(tuiState, statusItems);
       const panelLayout = buildPanelLayout(
         tuiState.panelMode, statusItems, filteredLogs, termWidth, termRows,
-        { wipLimit, viewOptions: fullScreenViewOptions, logScrollOffset: tuiState.logScrollOffset, statusScrollOffset: tuiState.scrollOffset, selectedIndex: tuiState.selectedIndex },
+        { wipLimit, viewOptions: fullScreenViewOptions, logScrollOffset: tuiState.logScrollOffset, statusScrollOffset: tuiState.scrollOffset, selectedItemId: tuiState.selectedItemId },
       );
-      tuiState.statusLayout = panelLayout.statusPanel;
+      syncStatusLayout(tuiState, panelLayout, termRows);
       const frameLines = renderPanelFrame(panelLayout, termRows, termWidth, tuiState.scrollOffset);
       const content = frameLines.join("\n");
       write(content.replace(/\n/g, "\x1B[K\n") + "\x1B[K");
@@ -733,6 +798,7 @@ export function renderTuiPanelFrame(
   } else {
     const filteredLogs = filterLogsByLevel(tuiState.logBuffer, tuiState.logLevelFilter);
 
+    prepareStatusSelection(tuiState, statusItems);
     const panelLayout = buildPanelLayout(
       tuiState.panelMode,
       statusItems,
@@ -744,10 +810,10 @@ export function renderTuiPanelFrame(
         viewOptions: fullScreenViewOptions,
         logScrollOffset: tuiState.logScrollOffset,
         statusScrollOffset: tuiState.scrollOffset,
-        selectedIndex: tuiState.selectedIndex,
+        selectedItemId: tuiState.selectedItemId,
       },
     );
-    tuiState.statusLayout = panelLayout.statusPanel;
+    syncStatusLayout(tuiState, panelLayout, termRows);
     const frameLines = renderPanelFrame(panelLayout, termRows, termWidth, tuiState.scrollOffset);
     const content = frameLines.join("\n");
     write(content.replace(/\n/g, "\x1B[K\n") + "\x1B[K");
@@ -811,20 +877,13 @@ export async function runTUI(opts: RunTUIOptions): Promise<void> {
     logBuffer,
     logScrollOffset: 0,
     logLevelFilter: "all",
-    selectedIndex: 0,
+    selectedItemId: undefined,
+    visibleItemIds: [],
     detailItemId: null,
     detailScrollOffset: 0,
     detailContentLines: 0,
     savedLogScrollOffset: 0,
     statusLayout: null,
-    getSelectedItemId: (index: number) => {
-      const data = getItems();
-      return getSelectedItemId(data.items, index);
-    },
-    getItemCount: () => {
-      const data = getItems();
-      return getItemCount(data.items);
-    },
     onUpdate: () => {
       try { render(); } catch { /* non-fatal */ }
     },
@@ -887,6 +946,7 @@ export async function runTUI(opts: RunTUIOptions): Promise<void> {
     } else {
       const filteredLogs = filterLogsByLevel(logBuffer, tuiState.logLevelFilter);
 
+      prepareStatusSelection(tuiState, data.items);
       const panelLayout = buildPanelLayout(
         tuiState.panelMode,
         data.items,
@@ -898,10 +958,10 @@ export async function runTUI(opts: RunTUIOptions): Promise<void> {
           viewOptions: tuiState.viewOptions,
           logScrollOffset: tuiState.logScrollOffset,
           statusScrollOffset: tuiState.scrollOffset,
-          selectedIndex: tuiState.selectedIndex,
+          selectedItemId: tuiState.selectedItemId,
         },
       );
-      tuiState.statusLayout = panelLayout.statusPanel;
+      syncStatusLayout(tuiState, panelLayout, termRows);
       const frameLines = renderPanelFrame(panelLayout, termRows, termWidth, tuiState.scrollOffset);
       const content = frameLines.join("\n");
       write(content.replace(/\n/g, "\x1B[K\n") + "\x1B[K");
@@ -3099,20 +3159,13 @@ export async function cmdOrchestrate(
     logBuffer,
     logScrollOffset: 0,
     logLevelFilter: "all",
-    selectedIndex: 0,
+    selectedItemId: undefined,
+    visibleItemIds: [],
     detailItemId: null,
     detailScrollOffset: 0,
     detailContentLines: 0,
     savedLogScrollOffset: 0,
     statusLayout: null,
-    getSelectedItemId: (index: number) => {
-      const items = orchestratorItemsToStatusItems(lastTuiItems, getRemoteItemSnapshots(), orch.config.maxTimeoutExtensions, lastTuiHeartbeats);
-      return getSelectedItemId(items, index);
-    },
-    getItemCount: () => {
-      const items = orchestratorItemsToStatusItems(lastTuiItems, getRemoteItemSnapshots(), orch.config.maxTimeoutExtensions, lastTuiHeartbeats);
-      return getItemCount(items);
-    },
     onExtendTimeout: (itemId) => orch.extendTimeout(itemId),
     ...runtimeControlHandlers,
     onPanelModeChange: (mode) => {

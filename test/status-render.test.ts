@@ -4342,14 +4342,14 @@ describe("buildPanelLayout queueStartIndex passthrough", () => {
     expect(layout.statusPanel!.queueStartIndex).toBeDefined();
   });
 
-  it("highlights queued rows when selectedIndex points at a queued item", () => {
+  it("highlights queued rows when selectedItemId points at a queued item", () => {
     const items = [
       makeStatusItem({ id: "A-1", state: "implementing" }),
       makeStatusItem({ id: "A-2", state: "queued", title: "Queued item" }),
     ];
 
     const layout = buildPanelLayout("status-only", items, [], 80, 50, {
-      selectedIndex: 1,
+      selectedItemId: "A-2",
     });
 
     const queuedRow = layout.statusPanel!.itemLines
@@ -4360,14 +4360,14 @@ describe("buildPanelLayout queueStartIndex passthrough", () => {
     expect(queuedRow!).toMatch(/^> /);
   });
 
-  it("maps selectedIndex through visible item order instead of raw input order", () => {
+  it("highlights the same item id even when input order differs from visible order", () => {
     const items = [
       makeStatusItem({ id: "B-2", state: "queued", title: "Blocked queued item", dependencies: ["A-1"] }),
       makeStatusItem({ id: "A-1", state: "implementing", title: "Active item" }),
     ];
 
     const layout = buildPanelLayout("status-only", items, [], 100, 50, {
-      selectedIndex: 0,
+      selectedItemId: "A-1",
     });
 
     const activeRow = layout.statusPanel!.itemLines

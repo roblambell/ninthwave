@@ -25,8 +25,8 @@ import {
   filterLogsByLevel,
   crewStatusToRemoteItemSnapshots,
   filterCrewRemoteWriteActions,
-  getItemCount,
-  getSelectedItemId,
+  getVisibleSelectableItemIds,
+  normalizeSelectedItemId,
   formatExitSummary,
   formatCompletionBanner,
   waitForCompletionKey,
@@ -1058,27 +1058,38 @@ describe("orchestrateLoop", () => {
 });
 
 describe("TUI item selection helpers", () => {
-  it("getItemCount includes queued items", () => {
+  it("getVisibleSelectableItemIds includes queued items", () => {
     const items = [
       makeStatusItem({ id: "H-TI-1", state: "implementing" }),
       makeStatusItem({ id: "H-TI-2", state: "queued" }),
       makeStatusItem({ id: "H-TI-3", state: "review" }),
     ];
 
-    expect(getItemCount(items)).toBe(3);
+    expect(getVisibleSelectableItemIds(items)).toEqual(["H-TI-1", "H-TI-3", "H-TI-2"]);
   });
 
-  it("getSelectedItemId follows visible selectable order, including queued items", () => {
+  it("normalizeSelectedItemId preserves the same item across refresh-time reordering", () => {
     const items = [
       makeStatusItem({ id: "H-TI-2", state: "queued", dependencies: ["H-TI-1"] }),
       makeStatusItem({ id: "H-TI-3", state: "review" }),
       makeStatusItem({ id: "H-TI-1", state: "implementing" }),
     ];
 
-    expect(getSelectedItemId(items, 0)).toBe("H-TI-1");
-    expect(getSelectedItemId(items, 1)).toBe("H-TI-3");
-    expect(getSelectedItemId(items, 2)).toBe("H-TI-2");
-    expect(getSelectedItemId(items, 3)).toBeUndefined();
+    const previousVisibleItemIds = ["H-TI-1", "H-TI-3", "H-TI-2"];
+    const reorderedVisibleItemIds = getVisibleSelectableItemIds(items);
+
+    expect(normalizeSelectedItemId(reorderedVisibleItemIds, "H-TI-3", previousVisibleItemIds)).toBe("H-TI-3");
+  });
+
+  it("normalizeSelectedItemId falls to the nearest remaining visible item", () => {
+    const previousVisibleItemIds = ["H-TI-1", "H-TI-3", "H-TI-2"];
+    const nextVisibleItemIds = ["H-TI-1", "H-TI-2"];
+
+    expect(normalizeSelectedItemId(nextVisibleItemIds, "H-TI-3", previousVisibleItemIds)).toBe("H-TI-2");
+  });
+
+  it("normalizeSelectedItemId clears selection when the status list is empty", () => {
+    expect(normalizeSelectedItemId([], "H-TI-3", ["H-TI-1", "H-TI-3", "H-TI-2"])).toBeUndefined();
   });
 });
 
@@ -2690,11 +2701,10 @@ describe("setupKeyboardShortcuts", () => {
       logBuffer: [],
       logScrollOffset: 0,
       logLevelFilter: "all",
-      selectedIndex: 1,
+      selectedItemId: "H-TG-3",
+      visibleItemIds: ["H-TG-1", "H-TG-3"],
       detailItemId: null,
       savedLogScrollOffset: 0,
-      getSelectedItemId: (idx: number) => idx === 1 ? "H-TG-3" : undefined,
-      getItemCount: () => 2,
       onExtendTimeout: (itemId: string) => {
         extendedIds.push(itemId);
         return true;
@@ -2792,11 +2802,10 @@ describe("setupKeyboardShortcuts", () => {
       logBuffer: [],
       logScrollOffset: 5,
       logLevelFilter: "all",
-      selectedIndex: 0,
+      selectedItemId: "H-UT-1",
+      visibleItemIds: ["H-UT-1", "H-UT-2"],
       detailItemId: null,
       savedLogScrollOffset: 0,
-      getSelectedItemId: (idx: number) => idx === 0 ? "H-UT-1" : undefined,
-      getItemCount: () => 2,
     };
 
     setupKeyboardShortcuts(ac, () => {}, stdin, tuiState);
@@ -2821,11 +2830,10 @@ describe("setupKeyboardShortcuts", () => {
       logBuffer: [],
       logScrollOffset: 3,
       logLevelFilter: "all",
-      selectedIndex: 1,
+      selectedItemId: "H-UT-2",
+      visibleItemIds: ["H-UT-1", "H-UT-2", "H-UT-3"],
       detailItemId: null,
       savedLogScrollOffset: 0,
-      getSelectedItemId: (idx: number) => idx === 1 ? "H-UT-2" : undefined,
-      getItemCount: () => 3,
     };
 
     setupKeyboardShortcuts(ac, () => {}, stdin, tuiState);
@@ -2850,7 +2858,8 @@ describe("setupKeyboardShortcuts", () => {
       logBuffer: [],
       logScrollOffset: 10, // changed while viewing detail
       logLevelFilter: "all",
-      selectedIndex: 0,
+      selectedItemId: "H-UT-1",
+      visibleItemIds: ["H-UT-1"],
       detailItemId: "H-UT-1",
       savedLogScrollOffset: 5, // was 5 before opening detail
     };
@@ -2877,11 +2886,10 @@ describe("setupKeyboardShortcuts", () => {
       logBuffer: [],
       logScrollOffset: 0,
       logLevelFilter: "all",
-      selectedIndex: 0,
+      selectedItemId: undefined,
+      visibleItemIds: [],
       detailItemId: null,
       savedLogScrollOffset: 0,
-      getSelectedItemId: () => undefined, // no items
-      getItemCount: () => 0,
     };
 
     setupKeyboardShortcuts(ac, () => {}, stdin, tuiState);
@@ -2890,7 +2898,7 @@ describe("setupKeyboardShortcuts", () => {
     expect(tuiState.detailItemId).toBeNull(); // no crash, no detail opened
   });
 
-  it("Enter is no-op when getSelectedItemId is not set", () => {
+  it("Enter is no-op when selectedItemId is not set", () => {
     const ac = new AbortController();
     const stdin = mockStdin();
     const tuiState: TuiState = {
@@ -2905,10 +2913,10 @@ describe("setupKeyboardShortcuts", () => {
       logBuffer: [],
       logScrollOffset: 0,
       logLevelFilter: "all",
-      selectedIndex: 0,
+      selectedItemId: undefined,
+      visibleItemIds: [],
       detailItemId: null,
       savedLogScrollOffset: 0,
-      // no getSelectedItemId callback
     };
 
     setupKeyboardShortcuts(ac, () => {}, stdin, tuiState);
@@ -2933,11 +2941,10 @@ describe("setupKeyboardShortcuts", () => {
       logBuffer: [],
       logScrollOffset: 0,
       logLevelFilter: "all",
-      selectedIndex: 0,
+      selectedItemId: "H-UT-1",
+      visibleItemIds: ["H-UT-1"],
       detailItemId: null,
       savedLogScrollOffset: 0,
-      getSelectedItemId: (idx: number) => idx === 0 ? "H-UT-1" : undefined,
-      getItemCount: () => 1,
       onUpdate: () => { updates++; },
     };
 
@@ -2948,7 +2955,7 @@ describe("setupKeyboardShortcuts", () => {
     expect(updates).toBeGreaterThan(0);
   });
 
-  it("Up/Down arrows move selectedIndex", () => {
+  it("Up/Down arrows move selectedItemId through visible order", () => {
     const ac = new AbortController();
     const stdin = mockStdin();
     const tuiState: TuiState = {
@@ -2963,31 +2970,31 @@ describe("setupKeyboardShortcuts", () => {
       logBuffer: [],
       logScrollOffset: 0,
       logLevelFilter: "all",
-      selectedIndex: 0,
+      selectedItemId: "H-UT-1",
+      visibleItemIds: ["H-UT-1", "H-UT-2", "H-UT-3", "H-UT-4", "H-UT-5"],
       detailItemId: null,
       savedLogScrollOffset: 0,
-      getItemCount: () => 5,
     };
 
     setupKeyboardShortcuts(ac, () => {}, stdin, tuiState);
 
     (stdin as any)._emit("data", "\x1b[B"); // Down
-    expect(tuiState.selectedIndex).toBe(1);
+    expect(tuiState.selectedItemId).toBe("H-UT-2");
 
     (stdin as any)._emit("data", "\x1b[B"); // Down
-    expect(tuiState.selectedIndex).toBe(2);
+    expect(tuiState.selectedItemId).toBe("H-UT-3");
 
     (stdin as any)._emit("data", "\x1b[A"); // Up
-    expect(tuiState.selectedIndex).toBe(1);
+    expect(tuiState.selectedItemId).toBe("H-UT-2");
 
     (stdin as any)._emit("data", "\x1b[A"); // Up
-    expect(tuiState.selectedIndex).toBe(0);
+    expect(tuiState.selectedItemId).toBe("H-UT-1");
 
     (stdin as any)._emit("data", "\x1b[A"); // Up at top -- wraps to bottom
-    expect(tuiState.selectedIndex).toBe(4);
+    expect(tuiState.selectedItemId).toBe("H-UT-5");
   });
 
-  it("Down arrow wraps selectedIndex at the bottom", () => {
+  it("Down arrow wraps selectedItemId at the bottom", () => {
     const ac = new AbortController();
     const stdin = mockStdin();
     const tuiState: TuiState = {
@@ -3002,16 +3009,16 @@ describe("setupKeyboardShortcuts", () => {
       logBuffer: [],
       logScrollOffset: 0,
       logLevelFilter: "all",
-      selectedIndex: 1,
+      selectedItemId: "H-UT-2",
+      visibleItemIds: ["H-UT-1", "H-UT-2"],
       detailItemId: null,
       savedLogScrollOffset: 0,
-      getItemCount: () => 2, // max index is 1
     };
 
     setupKeyboardShortcuts(ac, () => {}, stdin, tuiState);
 
     (stdin as any)._emit("data", "\x1b[B"); // Down -- already at max
-    expect(tuiState.selectedIndex).toBe(0);
+    expect(tuiState.selectedItemId).toBe("H-UT-1");
   });
 
   it("Escape does nothing when no help and no detail open", () => {
@@ -3029,7 +3036,8 @@ describe("setupKeyboardShortcuts", () => {
       logBuffer: [],
       logScrollOffset: 0,
       logLevelFilter: "all",
-      selectedIndex: 0,
+      selectedItemId: undefined,
+      visibleItemIds: [],
       detailItemId: null,
       savedLogScrollOffset: 0,
     };

@@ -64,7 +64,8 @@ function makeTuiState(overrides: Partial<TuiState> = {}): TuiState {
     logBuffer: [],
     logScrollOffset: 0,
     logLevelFilter: "all" as LogLevelFilter,
-    selectedIndex: 0,
+    selectedItemId: undefined,
+    visibleItemIds: [],
     detailItemId: null,
     detailScrollOffset: 0,
     detailContentLines: 0,
@@ -97,8 +98,8 @@ function makeStatusNavigationState(
     panelMode: "status-only",
     viewOptions,
     statusLayout,
-    getItemCount: () => selectableItemIds.length,
-    getSelectedItemId: (index) => selectableItemIds[index],
+    selectedItemId: selectableItemIds[0],
+    visibleItemIds: selectableItemIds,
     ...overrides,
   });
 }
@@ -329,17 +330,15 @@ describe("setupKeyboardShortcuts", () => {
       makeStatusItem({ id: "C-3", state: "review" }),
       makeStatusItem({ id: "A-1", state: "implementing" }),
     ], {
-      selectedIndex: 0,
+      selectedItemId: "A-1",
     });
     const cleanup = setupKeyboardShortcuts(ac, () => {}, stdin as any, state);
 
     stdin.emit("data", "\x1b[A");
-    expect(state.selectedIndex).toBe(2);
-    expect(state.getSelectedItemId?.(state.selectedIndex ?? -1)).toBe("B-2");
+    expect(state.selectedItemId).toBe("B-2");
 
     stdin.emit("data", "\x1b[B");
-    expect(state.selectedIndex).toBe(0);
-    expect(state.getSelectedItemId?.(state.selectedIndex ?? -1)).toBe("A-1");
+    expect(state.selectedItemId).toBe("A-1");
 
     cleanup();
   });
@@ -353,19 +352,19 @@ describe("setupKeyboardShortcuts", () => {
       makeStatusItem({ id: "C-3", state: "review" }),
       makeStatusItem({ id: "A-1", state: "implementing" }),
     ];
-    const arrowState = makeStatusNavigationState(items, { selectedIndex: 0 });
-    const vimState = makeStatusNavigationState(items, { selectedIndex: 0 });
+    const arrowState = makeStatusNavigationState(items, { selectedItemId: "A-1" });
+    const vimState = makeStatusNavigationState(items, { selectedItemId: "A-1" });
     const arrowCleanup = setupKeyboardShortcuts(ac, () => {}, arrowStdin as any, arrowState);
     const vimCleanup = setupKeyboardShortcuts(ac, () => {}, vimStdin as any, vimState);
 
     arrowStdin.emit("data", "\x1b[A");
     vimStdin.emit("data", "k");
-    expect(vimState.selectedIndex).toBe(arrowState.selectedIndex);
+    expect(vimState.selectedItemId).toBe(arrowState.selectedItemId);
     expect(vimState.scrollOffset).toBe(arrowState.scrollOffset);
 
     arrowStdin.emit("data", "\x1b[B");
     vimStdin.emit("data", "j");
-    expect(vimState.selectedIndex).toBe(arrowState.selectedIndex);
+    expect(vimState.selectedItemId).toBe(arrowState.selectedItemId);
     expect(vimState.scrollOffset).toBe(arrowState.scrollOffset);
 
     arrowCleanup();
@@ -378,18 +377,18 @@ describe("setupKeyboardShortcuts", () => {
     const state = makeTuiState({
       panelMode: "logs-only",
       logScrollOffset: 2,
-      selectedIndex: 1,
-      getItemCount: () => 4,
+      selectedItemId: "B-2",
+      visibleItemIds: ["A-1", "B-2", "C-3", "D-4"],
     });
     const cleanup = setupKeyboardShortcuts(ac, () => {}, stdin as any, state);
 
     stdin.emit("data", "\x1b[A");
     expect(state.logScrollOffset).toBe(1);
-    expect(state.selectedIndex).toBe(1);
+    expect(state.selectedItemId).toBe("B-2");
 
     stdin.emit("data", "\x1b[B");
     expect(state.logScrollOffset).toBe(2);
-    expect(state.selectedIndex).toBe(1);
+    expect(state.selectedItemId).toBe("B-2");
 
     cleanup();
   });
@@ -424,7 +423,7 @@ describe("setupKeyboardShortcuts", () => {
     Object.defineProperty(process.stdout, "rows", { value: 12, configurable: true });
     try {
       const state = makeStatusNavigationState(items, {
-        selectedIndex: 0,
+        selectedItemId: "A-1",
         scrollOffset: 0,
       });
       const cleanup = setupKeyboardShortcuts(ac, () => {}, stdin as any, state);
@@ -433,14 +432,14 @@ describe("setupKeyboardShortcuts", () => {
           stdin.emit("data", "\x1b[B");
         }
 
-        const selectedItemId = state.getSelectedItemId?.(state.selectedIndex ?? -1);
+        const selectedItemId = state.selectedItemId;
         const span = state.statusLayout?.visibleLayout?.renderedLineSpans[selectedItemId ?? ""];
         const visibleRange = getStatusVisibleLineRange(state.statusLayout!, process.stdout.rows ?? 24, state.scrollOffset);
 
         expect(selectedItemId).toBe("B-8");
         expect(span).toBeDefined();
-        expect(span!.startLineIndex).toBeGreaterThan(state.selectedIndex ?? 0);
-        expect(state.scrollOffset).toBeGreaterThan(state.selectedIndex ?? 0);
+        expect(span!.startLineIndex).toBeGreaterThan(0);
+        expect(state.scrollOffset).toBeGreaterThan(0);
         expect(span!.startLineIndex).toBeGreaterThanOrEqual(visibleRange.visibleStartLineIndex);
         expect(span!.endLineIndex).toBeLessThanOrEqual(visibleRange.visibleEndLineIndex);
       } finally {
@@ -915,7 +914,7 @@ describe("detail overlay scroll keys", () => {
     stdin.emit("data", "\x1b[B"); // Down arrow
     expect(state.detailScrollOffset).toBe(1);
     // Selection should NOT have moved
-    expect(state.selectedIndex).toBe(0);
+    expect(state.selectedItemId).toBeUndefined();
     cleanup();
   });
 
@@ -1017,10 +1016,9 @@ describe("detail overlay scroll keys", () => {
     const ac = new AbortController();
     const stdin = makeFakeStdin();
     const state = makeTuiState({
-      selectedIndex: 0,
+      selectedItemId: "X-2",
       detailItemId: null,
       detailScrollOffset: 5, // stale from previous open
-      getSelectedItemId: () => "X-2",
     });
     const cleanup = setupKeyboardShortcuts(ac, () => {}, stdin as any, state);
 
@@ -1036,8 +1034,8 @@ describe("detail overlay scroll keys", () => {
     const state = makeTuiState({
       detailItemId: "X-1",
       detailScrollOffset: 3,
-      selectedIndex: 1,
-      getItemCount: () => 5,
+      selectedItemId: "B-2",
+      visibleItemIds: ["A-1", "B-2", "C-3", "D-4", "E-5"],
     });
     const cleanup = setupKeyboardShortcuts(ac, () => {}, stdin as any, state);
 
@@ -1047,7 +1045,7 @@ describe("detail overlay scroll keys", () => {
 
     // Now arrows should move selection
     stdin.emit("data", "\x1b[B"); // Down
-    expect(state.selectedIndex).toBe(2);
+    expect(state.selectedItemId).toBe("C-3");
     cleanup();
   });
 
