@@ -25,6 +25,57 @@ function makeOrch(): Orchestrator {
 }
 
 describe("scenario: watch mode", () => {
+  it("discovers new items during an active run before watch idle mode", async () => {
+    const fakeGh = new FakeGitHub();
+    const fakeMux = new FakeMux();
+    const orch = new Orchestrator({
+      wipLimit: 1,
+      mergeStrategy: "auto",
+      bypassEnabled: false,
+      enableStacking: false,
+      fixForward: false,
+    });
+
+    orch.addItem(makeWorkItem("W-1"));
+
+    const actionDeps = buildActionDeps(fakeGh, fakeMux);
+    const loopDeps = buildLoopDeps(fakeGh, fakeMux, actionDeps);
+
+    let scanCallCount = 0;
+    loopDeps.scanWorkItems = vi.fn(() => {
+      scanCallCount++;
+      if (scanCallCount === 1) return [makeWorkItem("W-1")];
+      return [makeWorkItem("W-1"), makeWorkItem("W-2")];
+    });
+
+    loopDeps.sleep = async () => {
+      for (const id of ["W-1", "W-2"]) {
+        const orchItem = orch.getItem(id);
+        if (orchItem?.state === "implementing" && !fakeGh.getPR(`ninthwave/${id}`)) {
+          completeItem(id, fakeGh, orch);
+        }
+      }
+    };
+
+    await orchestrateLoop(orch, defaultCtx, loopDeps, {
+      maxIterations: 40,
+      watch: true,
+      watchIntervalMs: 0,
+    });
+
+    expect(orch.getItem("W-1")?.state).toBe("done");
+    expect(orch.getItem("W-2")?.state).toBe("done");
+
+    const watchNewLogs = loopDeps.__logs.filter((l) => l.event === "watch_new_items");
+    expect(watchNewLogs).toHaveLength(1);
+    expect(watchNewLogs[0]?.newIds).toEqual(["W-2"]);
+
+    const watchNewIndex = loopDeps.__logs.findIndex((l) => l.event === "watch_new_items");
+    const watchWaitIndex = loopDeps.__logs.findIndex((l) => l.event === "watch_mode_waiting");
+    expect(watchNewIndex).toBeGreaterThanOrEqual(0);
+    expect(watchWaitIndex === -1 || watchNewIndex < watchWaitIndex).toBe(true);
+  });
+
   it("starts the first newly discovered item when the queue begins empty", async () => {
     const fakeGh = new FakeGitHub();
     const fakeMux = new FakeMux();

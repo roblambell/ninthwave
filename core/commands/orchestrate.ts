@@ -1663,7 +1663,33 @@ export async function orchestrateLoop(
   let __lastTransitionIter = 0;
   let lastScheduleCheckMs = 0; // Force first check immediately
   let lastMainRefreshMs = 0; // Force first refresh immediately
+  const watchIntervalMs = config.watchIntervalMs ?? 30_000;
+  let lastWatchScanMs = Date.now();
   const loopStartMs = Date.now();
+
+  const scanForNewWatchItems = (): WorkItem[] => {
+    if (!config.watch || !deps.scanWorkItems) return [];
+
+    const freshItems = deps.scanWorkItems();
+    const existingIds = new Set(orch.getAllItems().map((i) => i.id));
+    const newItems = freshItems.filter((item) => !existingIds.has(item.id));
+    if (newItems.length === 0) return [];
+
+    for (const item of newItems) {
+      orch.addItem(item);
+    }
+
+    log({
+      ts: new Date().toISOString(),
+      level: "info",
+      event: "watch_new_items",
+      newIds: newItems.map((item) => item.id),
+      count: newItems.length,
+    });
+
+    return newItems;
+  };
+
   while (true) {
     __iterations++;
     if (config.maxIterations != null && __iterations > config.maxIterations) {
@@ -1704,13 +1730,12 @@ export async function orchestrateLoop(
 
       // Watch mode: instead of exiting, poll for new work items
       if (config.watch && deps.scanWorkItems) {
-        const watchInterval = config.watchIntervalMs ?? 30_000;
         log({
           ts: new Date().toISOString(),
           level: "info",
           event: "watch_mode_waiting",
           message: "All items complete. Watching for new work items...",
-          watchIntervalMs: watchInterval,
+          watchIntervalMs,
         });
 
         // Poll for new work items until we find some or get aborted
@@ -1724,28 +1749,14 @@ export async function orchestrateLoop(
             log({ ts: new Date().toISOString(), level: "info", event: "shutdown", reason: "watch_aborted" });
             return {};
           }
-          await deps.sleep(watchInterval);
+          await deps.sleep(watchIntervalMs);
           if (signal?.aborted) {
             log({ ts: new Date().toISOString(), level: "info", event: "shutdown", reason: "watch_aborted" });
             return {};
           }
 
-          // Re-scan for work item files
-          const freshItems = deps.scanWorkItems();
-          const existingIds = new Set(orch.getAllItems().map((i) => i.id));
-          const newItems = freshItems.filter((t) => !existingIds.has(t.id));
-
-          if (newItems.length > 0) {
-            for (const item of newItems) {
-              orch.addItem(item);
-            }
-            log({
-              ts: new Date().toISOString(),
-              level: "info",
-              event: "watch_new_items",
-              newIds: newItems.map((t) => t.id),
-              count: newItems.length,
-            });
+          lastWatchScanMs = Date.now();
+          if (scanForNewWatchItems().length > 0) {
             foundNew = true;
           }
         }
@@ -1792,6 +1803,14 @@ export async function orchestrateLoop(
       }
 
       break;
+    }
+
+    if (config.watch && deps.scanWorkItems) {
+      const nowWatchScanMs = Date.now();
+      if (nowWatchScanMs - lastWatchScanMs >= watchIntervalMs) {
+        lastWatchScanMs = nowWatchScanMs;
+        scanForNewWatchItems();
+      }
     }
 
     // Capture pre-transition states for logging
