@@ -38,7 +38,9 @@ function makeTuiState(overrides: Partial<TuiState> = {}): TuiState {
     viewOptions: { showBlockerDetail: true },
     mergeStrategy: "manual" as MergeStrategy,
     pendingStrategy: undefined,
+    pendingStrategyDeadlineMs: undefined,
     pendingStrategyTimer: undefined,
+    pendingStrategyCountdownTimer: undefined,
     bypassEnabled: false,
     ctrlCPending: false,
     ctrlCTimestamp: 0,
@@ -434,7 +436,7 @@ describe("controls overlay row navigation", () => {
     expect(state.pendingStrategy).toBe("auto");
     expect(onStrategyChange).not.toHaveBeenCalled();
 
-    vi.advanceTimersByTime(STRATEGY_DEBOUNCE_MS);
+    vi.advanceTimersByTime(STRATEGY_DEBOUNCE_MS + 1);
     expect(state.mergeStrategy).toBe("auto");
     expect(state.pendingStrategy).toBeUndefined();
     expect(onStrategyChange).toHaveBeenCalledWith("auto");
@@ -512,6 +514,7 @@ describe("Shift+Tab merge strategy cycle", () => {
     expect(state.mergeStrategy).toBe("auto");
     expect(state.pendingStrategy).toBe("manual");
     expect(state.viewOptions.pendingStrategy).toBe("manual");
+    expect(state.viewOptions.pendingStrategyCountdownSeconds).toBe(5);
     expect(onStrategyChange).not.toHaveBeenCalled();
 
     cleanup();
@@ -561,11 +564,61 @@ describe("Shift+Tab merge strategy cycle", () => {
     stdin.emit("data", "\x1B[Z");
     expect(state.pendingStrategy).toBe("bypass");
 
-    vi.advanceTimersByTime(STRATEGY_DEBOUNCE_MS);
+    vi.advanceTimersByTime(STRATEGY_DEBOUNCE_MS + 1);
     expect(state.mergeStrategy).toBe("bypass");
     expect(state.pendingStrategy).toBeUndefined();
     expect(onStrategyChange).toHaveBeenCalledTimes(1);
     expect(onStrategyChange).toHaveBeenCalledWith("bypass");
+
+    cleanup();
+    vi.useRealTimers();
+  });
+
+  it("updates the pending strategy countdown and clears it after apply", () => {
+    vi.useFakeTimers();
+    const ac = new AbortController();
+    const stdin = makeFakeStdin();
+    const onStrategyChange = vi.fn();
+    const countdowns: Array<number | undefined> = [];
+    let state!: TuiState;
+    const onUpdate = () => {
+      countdowns.push(state.viewOptions.pendingStrategyCountdownSeconds);
+    };
+    state = makeTuiState({
+      mergeStrategy: "auto",
+      bypassEnabled: false,
+      onStrategyChange,
+      onUpdate,
+    });
+    const cleanup = setupKeyboardShortcuts(ac, () => {}, stdin as any, state);
+
+    stdin.emit("data", "\x1B[Z");
+    expect(state.pendingStrategy).toBe("manual");
+    expect(state.viewOptions.pendingStrategyCountdownSeconds).toBe(5);
+
+    vi.advanceTimersByTime(1000);
+    expect(state.viewOptions.pendingStrategyCountdownSeconds).toBe(4);
+    vi.advanceTimersByTime(1000);
+    expect(state.viewOptions.pendingStrategyCountdownSeconds).toBe(3);
+    vi.advanceTimersByTime(1000);
+    expect(state.viewOptions.pendingStrategyCountdownSeconds).toBe(2);
+    vi.advanceTimersByTime(1000);
+    expect(state.viewOptions.pendingStrategyCountdownSeconds).toBe(1);
+    vi.advanceTimersByTime(1000);
+
+    expect(countdowns).toContain(0);
+    expect(state.mergeStrategy).toBe("auto");
+    expect(state.pendingStrategy).toBe("manual");
+    expect(state.viewOptions.pendingStrategy).toBe("manual");
+    expect(state.viewOptions.pendingStrategyCountdownSeconds).toBe(0);
+
+    vi.advanceTimersByTime(1);
+
+    expect(state.mergeStrategy).toBe("manual");
+    expect(state.pendingStrategy).toBeUndefined();
+    expect(state.viewOptions.pendingStrategy).toBeUndefined();
+    expect(state.viewOptions.pendingStrategyCountdownSeconds).toBeUndefined();
+    expect(onStrategyChange).toHaveBeenCalledWith("manual");
 
     cleanup();
     vi.useRealTimers();
@@ -583,11 +636,11 @@ describe("Shift+Tab merge strategy cycle", () => {
 
     stdin.emit("data", "\x1B[Z");
     expect(state.pendingStrategy).toBe("bypass");
-    vi.advanceTimersByTime(STRATEGY_DEBOUNCE_MS);
+    vi.advanceTimersByTime(STRATEGY_DEBOUNCE_MS + 1);
     expect(state.mergeStrategy).toBe("bypass");
 
     stdin.emit("data", "\x1B[Z");
-    vi.advanceTimersByTime(STRATEGY_DEBOUNCE_MS);
+    vi.advanceTimersByTime(STRATEGY_DEBOUNCE_MS + 1);
     expect(state.mergeStrategy).toBe("auto");
     cleanup();
     vi.useRealTimers();
@@ -625,8 +678,11 @@ describe("cleanup function", () => {
     cleanup();
     vi.advanceTimersByTime(STRATEGY_DEBOUNCE_MS);
 
+    expect(state.pendingStrategyCountdownTimer).toBeUndefined();
+    expect(state.pendingStrategyDeadlineMs).toBeUndefined();
     expect(state.pendingStrategyTimer).toBeUndefined();
     expect(state.pendingStrategy).toBeUndefined();
+    expect(state.viewOptions.pendingStrategyCountdownSeconds).toBeUndefined();
     expect(onStrategyChange).not.toHaveBeenCalled();
     vi.useRealTimers();
   });

@@ -1230,24 +1230,28 @@ export function waitForArmingKey(
     const startMs = now();
     let lastRemainingSec = Math.max(0, Math.ceil(durationMs / 1000));
 
-    const timer = setTimeout(() => {
-      if (!paused) {
-        cleanup();
-        resolve("local");
-      }
-    }, durationMs);
-
     const tickTimer = onTick
       ? setInterval(() => {
           if (paused) return;
           const remainingMs = Math.max(0, durationMs - (now() - startMs));
           const remainingSec = Math.max(0, Math.ceil(remainingMs / 1000));
-          if (remainingSec > 0 && remainingSec !== lastRemainingSec) {
+          if (remainingSec !== lastRemainingSec) {
             lastRemainingSec = remainingSec;
             onTick(remainingMs);
           }
         }, 1000)
       : undefined;
+
+    const timer = setTimeout(() => {
+      if (!paused) {
+        if (onTick && lastRemainingSec !== 0) {
+          lastRemainingSec = 0;
+          onTick(0);
+        }
+        cleanup();
+        resolve("local");
+      }
+    }, durationMs);
 
     const onAbort = () => {
       cleanup();

@@ -56,6 +56,8 @@ export interface ViewOptions {
   mergeStrategy?: MergeStrategy;
   /** Pending merge strategy selection waiting for the debounce window to settle. */
   pendingStrategy?: MergeStrategy;
+  /** Live pending merge strategy countdown in seconds. */
+  pendingStrategyCountdownSeconds?: number;
   /** When true, footer shows "Press Ctrl-C again to exit" instead of strategy indicator. */
   ctrlCPending?: boolean;
   /** When true, render the help overlay instead of the normal frame. */
@@ -102,18 +104,21 @@ export function strategyIndicator(strategy: MergeStrategy): string {
 function strategyFooterIndicator(
   strategy: MergeStrategy,
   pendingStrategy?: MergeStrategy,
+  pendingStrategyCountdownSeconds?: number,
 ): string {
   if (!pendingStrategy || pendingStrategy === strategy) {
     return strategyIndicator(strategy);
   }
-  return `${strategyIndicator(strategy)} ${DIM}->${RESET} ${strategyIndicator(pendingStrategy)} ${DIM}(5s...)${RESET}`;
+  const countdownSeconds = Math.max(0, pendingStrategyCountdownSeconds ?? 5);
+  return `${strategyIndicator(pendingStrategy)} ${DIM}(${countdownSeconds}s)${RESET}`;
 }
 
 function formatStrategyFooterLine(
   strategy: MergeStrategy,
   pendingStrategy?: MergeStrategy,
+  pendingStrategyCountdownSeconds?: number,
 ): string {
-  const badge = strategyFooterIndicator(strategy, pendingStrategy);
+  const badge = strategyFooterIndicator(strategy, pendingStrategy, pendingStrategyCountdownSeconds);
   return `  ${badge} ${DIM}(shift+tab to cycle) · c controls · ? help${RESET}`;
 }
 
@@ -1669,7 +1674,11 @@ export function buildStatusLayout(
   if (viewOptions?.ctrlCPending) {
     footerLines.push(`  ${YELLOW}Press Ctrl-C again to exit${RESET}`);
   } else if (viewOptions?.mergeStrategy) {
-    const left = formatStrategyFooterLine(viewOptions.mergeStrategy, viewOptions.pendingStrategy);
+    const left = formatStrategyFooterLine(
+      viewOptions.mergeStrategy,
+      viewOptions.pendingStrategy,
+      viewOptions.pendingStrategyCountdownSeconds,
+    );
     if (apiWarning) {
       const leftLen = stripAnsiForWidth(left).length;
       const warnLen = stripAnsiForWidth(apiWarning).length;
@@ -1959,7 +1968,13 @@ function buildPanelFooter(
   if (viewOptions?.ctrlCPending) {
     footerLines.push(`  ${YELLOW}Press Ctrl-C again to exit${RESET}`);
   } else if (viewOptions?.mergeStrategy) {
-    footerLines.push(formatStrategyFooterLine(viewOptions.mergeStrategy, viewOptions.pendingStrategy));
+    footerLines.push(
+      formatStrategyFooterLine(
+        viewOptions.mergeStrategy,
+        viewOptions.pendingStrategy,
+        viewOptions.pendingStrategyCountdownSeconds,
+      ),
+    );
   } else {
     const shortcuts = `q quit  tab switch  ↑/↓ page controls`;
     footerLines.push(`  ${DIM}${shortcuts}${RESET}`);
