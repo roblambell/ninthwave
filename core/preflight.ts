@@ -88,7 +88,7 @@ export function checkAiTool(runner: ShellRunner): CheckResult {
   };
 }
 
-/** Check: tmux or cmux multiplexer available. */
+/** Check: optional interactive backends (tmux or cmux) available. */
 export function checkMultiplexer(runner: ShellRunner): CheckResult {
   const available: string[] = [];
   if (runner("which", ["tmux"]).exitCode === 0) {
@@ -103,9 +103,10 @@ export function checkMultiplexer(runner: ShellRunner): CheckResult {
   }
 
   return {
-    status: "fail",
-    message: "No multiplexer available (need tmux or cmux)",
-    detail: "Install tmux: brew install tmux; or cmux: brew install --cask manaflow-ai/cmux/cmux",
+    status: "warn",
+    message: "No interactive backend detected (headless works by default)",
+    detail:
+      "Optional installs: tmux: brew install tmux; cmux: brew install --cask manaflow-ai/cmux/cmux",
   };
 }
 

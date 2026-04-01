@@ -124,7 +124,7 @@ describe("checkPrerequisites", () => {
     expect(result.detectedMux).toBe("cmux");
   });
 
-  it("reports missing multiplexer when neither cmux nor tmux is available", () => {
+  it("treats missing muxes as an optional upgrade when neither cmux nor tmux is available", () => {
     const logs: string[] = [];
     const origLog = console.log;
     console.log = (...args: unknown[]) => logs.push(args.join(" "));
@@ -140,13 +140,17 @@ describe("checkPrerequisites", () => {
 
     console.log = origLog;
 
-    expect(result.allPresent).toBe(false);
-    expect(result.missing).toContain("mux");
+    expect(result.allPresent).toBe(true);
+    expect(result.missing).toEqual([]);
+    expect(result.warnings).toHaveLength(1);
+    expect(result.warnings[0]).toContain("headless works by default");
     expect(result.detectedMux).toBeNull();
 
-    // Should suggest cmux install
+    // Should still suggest both optional installs
     const output = logs.join("\n");
+    expect(output).toContain("headless works by default");
     expect(output).toContain("brew install --cask manaflow-ai/cmux/cmux");
+    expect(output).toContain("brew install tmux");
   });
 
   it("detects missing gh and prints install instructions", () => {
@@ -174,7 +178,7 @@ describe("checkPrerequisites", () => {
     expect(output).toContain("brew install gh");
   });
 
-  it("detects both multiplexer and gh missing", () => {
+  it("still fails when gh is missing even if muxes are only optional", () => {
     const commandExists: CommandChecker = () => false;
     const ghAuthCheck: AuthChecker = () => ({
       authenticated: false,
@@ -185,8 +189,9 @@ describe("checkPrerequisites", () => {
     const result = checkPrerequisites(commandExists, ghAuthCheck, cmuxResolver);
 
     expect(result.allPresent).toBe(false);
-    expect(result.missing).toContain("mux");
     expect(result.missing).toContain("gh");
+    expect(result.warnings).toHaveLength(1);
+    expect(result.warnings[0]).toContain("headless works by default");
     expect(result.detectedMux).toBeNull();
   });
 

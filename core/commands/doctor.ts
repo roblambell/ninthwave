@@ -161,7 +161,7 @@ export function buildChecks(
     // Required
     { category: "Required", run: () => checkGh(runner) },
     { category: "Required", run: () => checkAiTool(runner) },
-    { category: "Required", run: () => checkMultiplexer(runner) },
+    { category: "Recommended", run: () => checkMultiplexer(runner) },
     { category: "Required", run: () => checkGitConfig(runner) },
 
     // Recommended

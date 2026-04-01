@@ -1,7 +1,7 @@
 // `ninthwave init` -- unified project initialization with auto-detection.
 //
 // Detects: (1) repo structure (monorepo vs single), (2) CI system (GitHub Actions),
-// (3) multiplexer (cmux), (4) AI tool config (.claude/, .opencode/, copilot).
+// (3) optional interactive backend (cmux or tmux), (4) AI tool config (.claude/, .opencode/, copilot).
 // Writes .ninthwave/config.json with detected settings, runs setup scaffolding,
 // creates managed skill/agent copies, nw alias, and prints a summary.
 //
@@ -25,6 +25,7 @@ import {
   copySkillFiles,
   type CommandChecker,
   type AuthChecker,
+  type CmuxResolver,
   type CommandPathResolver,
   type AgentSelection,
   checkPrerequisites,
@@ -49,7 +50,7 @@ export interface DetectionResult {
   /** Detected test command, e.g. "bun test" */
   testCommand: string | null;
   /** Detected multiplexer */
-  mux: "cmux" | null;
+  mux: "cmux" | "tmux" | null;
   /** Detected AI tool configurations */
   aiTools: string[];
   /** Repo structure type */
@@ -81,6 +82,8 @@ export interface InitProjectOpts {
   commandExists?: CommandChecker;
   /** GitHub auth checker for prerequisite checks. */
   ghAuthCheck?: AuthChecker;
+  /** cmux resolver for prerequisite checks. */
+  cmuxResolver?: CmuxResolver;
   /** Command path resolver for nw symlink creation. */
   resolveCommandPath?: CommandPathResolver;
 }
@@ -166,12 +169,13 @@ export function detectTestCommand(
 }
 
 /**
- * Detect available terminal multiplexer.
+ * Detect available optional interactive backend.
  */
-export function detectMux(deps: InitDeps = {}): "cmux" | null {
+export function detectMux(deps: InitDeps = {}): "cmux" | "tmux" | null {
   const commandExists = deps.commandExists ?? defaultCommandExists;
 
   if (commandExists("cmux")) return "cmux";
+  if (commandExists("tmux")) return "tmux";
 
   return null;
 }
@@ -555,14 +559,14 @@ export function printSummary(detection: DetectionResult): void {
     );
   }
 
-  // Multiplexer
+  // Interactive backend
   if (detection.mux) {
     console.log(
-      `  ${GREEN}✓${RESET} Multiplexer: ${detection.mux}`,
+      `  ${GREEN}✓${RESET} Interactive backend: ${detection.mux}`,
     );
   } else {
     console.log(
-      `  ${YELLOW}!${RESET} Multiplexer: none detected ${DIM}(install cmux for parallel sessions)${RESET}`,
+      `  ${YELLOW}!${RESET} Interactive backend: headless default ${DIM}(install cmux or tmux for interactive sessions)${RESET}`,
     );
   }
 
@@ -774,6 +778,7 @@ export function initProject(
   checkPrerequisites(
     cmdExists ?? undefined,
     opts?.ghAuthCheck ?? undefined,
+    opts?.cmuxResolver ?? undefined,
   );
 
   // 4. Write config with detected values (always overwrite -- init is authoritative)

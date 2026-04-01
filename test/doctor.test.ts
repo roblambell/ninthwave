@@ -158,11 +158,11 @@ describe("checkMultiplexer", () => {
     expect(result.message).toContain("cmux");
   });
 
-  it("fails when no multiplexer is available", () => {
+  it("warns when no multiplexer is available", () => {
     const runner = allFailRunner();
     const result = checkMultiplexer(runner);
-    expect(result.status).toBe("fail");
-    expect(result.message).toContain("No multiplexer");
+    expect(result.status).toBe("warn");
+    expect(result.message).toContain("headless works by default");
   });
 });
 
@@ -385,7 +385,7 @@ describe("runDoctor", () => {
     const doctor = runDoctor(repo, allPassRunner());
     expect(doctor.exitCode).toBe(0);
     expect(doctor.requiredPassed).toBe(doctor.requiredTotal);
-    expect(doctor.requiredTotal).toBe(4);
+    expect(doctor.requiredTotal).toBe(3);
   });
 
   it("returns exit code 1 when any required check fails", () => {
@@ -436,10 +436,10 @@ describe("runDoctor", () => {
 
     const doctor = runDoctor(repo, runner);
     expect(doctor.exitCode).toBe(1);
-    // gh fails + AI tool fails = 2 required failures
-    expect(doctor.requiredPassed).toBe(2); // mux + git config
-    expect(doctor.requiredTotal).toBe(4);
-    // no config warn + no pre-commit warn = 2 warnings (at least)
+    // gh fails + AI tool fails = 2 required failures; only git config passes
+    expect(doctor.requiredPassed).toBe(1);
+    expect(doctor.requiredTotal).toBe(3);
+    // mux is recommended, plus no config and no pre-commit = at least 3 warnings
     expect(doctor.warnings).toBeGreaterThanOrEqual(2);
   });
 });
@@ -480,7 +480,7 @@ describe("formatDoctorOutput", () => {
     const doctor = runDoctor(repo, allPassRunner());
     const output = formatDoctorOutput(doctor);
     expect(output).toContain("Result:");
-    expect(output).toContain("4/4 required checks passed");
+    expect(output).toContain("3/3 required checks passed");
   });
 
   it("includes warning count when warnings exist", () => {

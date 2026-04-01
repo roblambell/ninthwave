@@ -90,9 +90,9 @@ const defaultGhAuthCheck: AuthChecker = (): {
 export interface PrerequisiteResult {
   /** true if all required prerequisites are present */
   allPresent: boolean;
-  /** names of missing prerequisites */
+  /** names of missing required prerequisites */
   missing: string[];
-  /** warnings (e.g. gh not authenticated) */
+  /** warnings and optional upgrade suggestions */
   warnings: string[];
   /** detected multiplexer: "cmux", "tmux", or null if neither found */
   detectedMux: "cmux" | "tmux" | null;
@@ -128,7 +128,7 @@ export function checkPrerequisites(
     }
   }
 
-  // Detect multiplexer (cmux or tmux required; either is sufficient)
+  // Detect optional interactive backend (headless always works)
   let detectedMux: "cmux" | "tmux" | null = null;
   const hasCmux = cmuxResolver() !== null;
   const hasTmux = commandExists("tmux");
@@ -142,10 +142,12 @@ export function checkPrerequisites(
     console.log(`  ${GREEN}✓${RESET} tmux ${DIM}(multiplexer -- battle-hardened terminal sessions)${RESET}`);
   }
   if (!hasCmux && !hasTmux) {
-    console.log(`  ${RED}✗${RESET} multiplexer ${DIM}(cmux or tmux required)${RESET}`);
-    console.log(`    Install cmux: ${BOLD}brew install --cask manaflow-ai/cmux/cmux${RESET}`);
-    console.log(`    Install tmux: ${BOLD}brew install tmux${RESET}`);
-    missing.push("mux");
+    console.log(`  ${YELLOW}⚠${RESET} interactive backend ${DIM}(headless works by default; tmux/cmux are optional upgrades)${RESET}`);
+    console.log(`    Optional install (cmux): ${BOLD}brew install --cask manaflow-ai/cmux/cmux${RESET}`);
+    console.log(`    Optional install (tmux): ${BOLD}brew install tmux${RESET}`);
+    warnings.push(
+      "No interactive backend detected -- headless works by default; install tmux or cmux for interactive sessions",
+    );
   }
 
   // If gh is present, check authentication

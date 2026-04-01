@@ -388,9 +388,9 @@ function defaultOpenApp(app: string): void {
 }
 
 /**
- * Ensure we're inside a mux session, or offer an interactive install flow (TTY only).
+ * Ensure interactive backend setup is handled, or offer optional install guidance (TTY only).
  *
- * On TTY: prompts the user to install a multiplexer when none is available, or to
+ * On TTY: may offer optional install guidance for interactive backends, or to
  * open cmux when installed but not in a session. On non-TTY: falls back to die().
  *
  * Use this in place of ensureMuxOrAutoLaunch for all CLI entry points.
@@ -438,7 +438,7 @@ export async function ensureMuxInteractiveOrDie(
   }
 
   // nothing-installed
-  process.stdout.write("\nA terminal multiplexer is required to run ninthwave.\n\n");
+  process.stdout.write("\nHeadless works by default. Install tmux or cmux for interactive sessions.\n\n");
 
   const options: Array<{ name: string; description: string; installCmd: string; installArgs: string[] }> = [
     {
@@ -467,7 +467,7 @@ export async function ensureMuxInteractiveOrDie(
     process.stdout.write("On Linux, install tmux via your package manager:\n");
     process.stdout.write("  sudo apt install tmux   # Debian/Ubuntu\n");
     process.stdout.write("  brew install tmux        # Homebrew\n\n");
-    process.stdout.write("Then re-run `nw`.\n\n");
+    process.stdout.write("Then re-run `nw` if you want an interactive backend.\n\n");
     process.exit(1);
     return;
   }
@@ -476,7 +476,7 @@ export async function ensureMuxInteractiveOrDie(
   const raw = await prompt(`Install [${rangeLabel}]: `);
   const idx = parseInt(raw, 10) - 1;
   if (isNaN(idx) || idx < 0 || idx >= options.length) {
-    die("No valid selection. Install a multiplexer and re-run nw.");
+    die("No valid selection. Headless still works; install tmux or cmux and re-run nw for interactive sessions.");
     return;
   }
 
@@ -484,7 +484,7 @@ export async function ensureMuxInteractiveOrDie(
   process.stdout.write(`\nInstalling ${chosen.name}...\n\n`);
   const installResult = runInstall(chosen.installCmd, chosen.installArgs);
   if (installResult.exitCode !== 0) {
-    die(`Installation failed (exit ${installResult.exitCode}). Install manually and re-run nw.`);
+    die(`Installation failed (exit ${installResult.exitCode}). Headless still works; install tmux or cmux manually and re-run nw for interactive sessions.`);
     return;
   }
 

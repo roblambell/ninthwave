@@ -87,10 +87,10 @@ describe("checkAiTool (preflight)", () => {
 });
 
 describe("checkMultiplexer (preflight)", () => {
-  it("fails when no multiplexer is detected", () => {
+  it("warns when no interactive backend is detected", () => {
     const result = checkMultiplexer(allFailRunner());
-    expect(result.status).toBe("fail");
-    expect(result.message).toContain("No multiplexer");
+    expect(result.status).toBe("warn");
+    expect(result.message).toContain("headless works by default");
     expect(result.detail).toContain("brew install tmux");
     expect(result.detail).toContain("brew install --cask manaflow-ai/cmux/cmux");
   });
@@ -310,7 +310,7 @@ describe("preflight", () => {
     expect(result.errors[0]).toContain("No AI tool");
   });
 
-  it("returns passed=false when no multiplexer is detected", () => {
+  it("returns passed=true when no interactive backend is detected", () => {
     const runner = (cmd: string, args: string[]): RunResult => {
       if (cmd === "which" && args[0] === "gh") return { stdout: "/bin/gh", stderr: "", exitCode: 0 };
       if (cmd === "gh") return { stdout: "ok", stderr: "", exitCode: 0 };
@@ -320,20 +320,21 @@ describe("preflight", () => {
       return { stdout: "", stderr: "not found", exitCode: 1 };
     };
     const result = preflight(runner);
-    expect(result.passed).toBe(false);
-    expect(result.errors.length).toBe(1);
-    expect(result.errors[0]).toContain("No multiplexer");
+    expect(result.passed).toBe(true);
+    expect(result.errors).toHaveLength(0);
+    expect(result.checks[2]!.status).toBe("warn");
+    expect(result.checks[2]!.message).toContain("headless works by default");
   });
 
   it("reports ALL failures, not just the first", () => {
     const result = preflight(allFailRunner());
     expect(result.passed).toBe(false);
-    // gh fails, AI tool fails, mux fails, git config fails = 4 errors
-    expect(result.errors.length).toBe(4);
+    // gh fails, AI tool fails, git config fails = 3 errors; mux is advisory
+    expect(result.errors.length).toBe(3);
     expect(result.errors.some((e) => e.includes("gh CLI"))).toBe(true);
     expect(result.errors.some((e) => e.includes("No AI tool"))).toBe(true);
-    expect(result.errors.some((e) => e.includes("No multiplexer"))).toBe(true);
     expect(result.errors.some((e) => e.includes("git"))).toBe(true);
+    expect(result.checks.some((c) => c.status === "warn" && c.message.includes("headless works by default"))).toBe(true);
   });
 
   it("includes remediation detail in error messages", () => {

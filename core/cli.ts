@@ -10,8 +10,8 @@ import { cmdNoArgs } from "./commands/onboard.ts";
 import { WORK_ITEM_ID_CLI_PATTERN, cmdRunItems } from "./commands/run-items.ts";
 import { ensureMuxInteractiveOrDie } from "./mux.ts";
 
-/** Commands that require a multiplexer and should auto-launch cmux. */
-const COMMANDS_NEEDING_MUX = new Set(["start"]);
+/** Commands that use the interactive startup flow when available. */
+const COMMANDS_USING_INTERACTIVE_STARTUP = new Set(["start"]);
 
 // ── Project root resolution ──────────────────────────────────────────
 
@@ -152,8 +152,8 @@ if (args.includes("--help") || args.includes("-h")) {
 
 // ── Dispatch ─────────────────────────────────────────────────────────
 
-// Auto-launch cmux for commands that need a multiplexer
-if (COMMANDS_NEEDING_MUX.has(command)) {
+// Set up the interactive startup path when available; headless still works.
+if (COMMANDS_USING_INTERACTIVE_STARTUP.has(command)) {
   await ensureMuxInteractiveOrDie(process.argv.slice(2));
 }
 

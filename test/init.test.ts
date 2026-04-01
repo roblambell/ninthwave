@@ -34,6 +34,7 @@ import {
 import type {
   CommandChecker,
   AuthChecker,
+  CmuxResolver,
   CommandPathResolver,
   AgentSelection,
 } from "../core/commands/setup.ts";
@@ -183,6 +184,16 @@ describe("detectMux", () => {
     const result = detectMux(deps);
 
     expect(result).toBe("cmux");
+  });
+
+  it("detects tmux when cmux is unavailable", () => {
+    const deps: InitDeps = {
+      commandExists: ((cmd: string) => cmd === "tmux") as CommandChecker,
+    };
+
+    const result = detectMux(deps);
+
+    expect(result).toBe("tmux");
   });
 
   it("returns null when no multiplexer is available", () => {
@@ -784,7 +795,9 @@ describe("initProject", () => {
     };
 
     try {
-      initProject(projectDir, bundleDir, deps);
+      initProject(projectDir, bundleDir, deps, {
+        cmuxResolver: (() => null) as CmuxResolver,
+      });
     } finally {
       console.log = origLog;
     }
@@ -1467,7 +1480,9 @@ describe("initProject -- prerequisite checking", () => {
     };
 
     try {
-      initProject(projectDir, bundleDir, deps);
+      initProject(projectDir, bundleDir, deps, {
+        cmuxResolver: (() => null) as CmuxResolver,
+      });
     } finally {
       console.log = origLog;
     }
@@ -1475,6 +1490,33 @@ describe("initProject -- prerequisite checking", () => {
     const output = logs.join("\n");
     expect(output).toContain("Checking prerequisites");
     expect(output).toContain("gh");
+    expect(output).toContain("headless works by default");
+    expect(output).toContain("brew install tmux");
+    expect(output).toContain("brew install --cask manaflow-ai/cmux/cmux");
+  });
+
+  it("prints headless-first summary when no interactive backend is detected", () => {
+    const projectDir = setupTempRepo();
+    const bundleDir = createFakeBundle(projectDir + "-bundle-parent");
+
+    const logs: string[] = [];
+    const origLog = console.log;
+    console.log = (...args: unknown[]) => logs.push(args.join(" "));
+
+    const deps: InitDeps = {
+      commandExists: ((cmd: string) => cmd === "gh") as CommandChecker,
+      getEnv: () => undefined,
+    };
+
+    try {
+      initProject(projectDir, bundleDir, deps);
+    } finally {
+      console.log = origLog;
+    }
+
+    const output = logs.join("\n");
+    expect(output).toContain("Interactive backend: headless default");
+    expect(output).toContain("install cmux or tmux for interactive sessions");
   });
 
   it("uses opts.commandExists for prerequisite checks", () => {
