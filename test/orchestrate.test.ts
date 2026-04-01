@@ -28,6 +28,7 @@ import {
   waitForCompletionKey,
   formatArmingBanner,
   waitForArmingKey,
+  shouldShowStartupArmingWindow,
   ARMING_WINDOW_MS,
   LOG_BUFFER_MAX,
   type LogEntry,
@@ -71,6 +72,8 @@ function makeWorkItem(id: string, deps: string[] = []): WorkItem {
     repoAlias: "",
     rawText: `## ${id}\nTest item`,
     filePaths: [],
+    testPlan: "",
+    bootstrap: false,
   };
 }
 
@@ -3668,6 +3671,78 @@ describe("orchestrateLoop watch mode", () => {
     expect(scanCount).toBeGreaterThan(0);
   });
 
+  it("starts the first discovered item when watch begins empty", async () => {
+    const orch = new Orchestrator({ wipLimit: 1, mergeStrategy: "auto" });
+    const logs: LogEntry[] = [];
+    const launchCalls: string[] = [];
+    let discovered = false;
+
+    const deps: OrchestrateLoopDeps = {
+      buildSnapshot: (o): PollSnapshot => {
+        const item = o.getItem("E-1-1");
+        if (!item) return { items: [], readyIds: [] };
+        if (item.state === "queued" || item.state === "ready") {
+          return { items: [], readyIds: [item.id] };
+        }
+        if (item.state === "launching") {
+          return { items: [{ id: item.id, workerAlive: true }], readyIds: [] };
+        }
+        if (item.state === "implementing") {
+          return {
+            items: [{ id: item.id, prNumber: 11, prState: "open", ciStatus: "pass" }],
+            readyIds: [],
+          };
+        }
+        if (item.state === "reviewing") {
+          return {
+            items: [{
+              id: item.id,
+              prNumber: 11,
+              prState: "open",
+              ciStatus: "pass",
+              reviewVerdict: {
+                verdict: "approve" as const,
+                summary: "OK",
+                blockingCount: 0,
+                nonBlockingCount: 0,
+                architectureScore: 8,
+                codeQualityScore: 9,
+                performanceScore: 7,
+                testCoverageScore: 8,
+                unresolvedDecisions: 0,
+                criticalGaps: 0,
+                confidence: 9,
+              },
+            }],
+            readyIds: [],
+          };
+        }
+        return { items: [], readyIds: [] };
+      },
+      sleep: () => Promise.resolve(),
+      log: (entry) => logs.push(entry),
+      actionDeps: mockActionDeps({
+        launchSingleItem: vi.fn((workItem) => {
+          launchCalls.push(workItem.id);
+          return { worktreePath: "/tmp/test/item-empty-watch", workspaceRef: `workspace:${workItem.id}` };
+        }),
+      }),
+      scanWorkItems: () => {
+        discovered = true;
+        return [makeWorkItem("E-1-1")];
+      },
+    };
+
+    await orchestrateLoop(orch, defaultCtx, deps, { watch: true, maxIterations: 50 });
+
+    expect(discovered).toBe(true);
+    expect(launchCalls).toEqual(["E-1-1"]);
+    expect(orch.getItem("E-1-1")?.state).toBe("done");
+
+    const watchNewLog = logs.find((l) => l.event === "watch_new_items");
+    expect(watchNewLog?.newIds).toEqual(["E-1-1"]);
+  });
+
   it("watch mode default interval is 30 seconds", async () => {
     const orch = new Orchestrator({ wipLimit: 2, mergeStrategy: "auto" });
     orch.addItem(makeWorkItem("D-1-1"));
@@ -4137,6 +4212,12 @@ describe("parseWatchArgs", () => {
     const result = parseWatchArgs(["--items", "A-1"]);
     expect(result.bypassEnabled).toBe(false);
     expect(result.mergeStrategy).toBe("manual");
+  });
+
+  it("parses --future-only-startup and enables watch mode", () => {
+    const result = parseWatchArgs(["--future-only-startup"]);
+    expect(result.futureOnlyStartup).toBe(true);
+    expect(result.watchMode).toBe(true);
   });
 
   it("--no-review sets skipReview=true", () => {
@@ -5170,6 +5251,16 @@ describe("waitForArmingKey", () => {
     // Now press Enter to resolve
     emit("\r");
     expect(await promise).toBe("local");
+  });
+});
+
+describe("shouldShowStartupArmingWindow", () => {
+  it("skips the arming window for future-only startup", () => {
+    expect(shouldShowStartupArmingWindow(true, false, true)).toBe(false);
+  });
+
+  it("shows the arming window for normal local startup", () => {
+    expect(shouldShowStartupArmingWindow(true, false, false)).toBe(true);
   });
 });
 

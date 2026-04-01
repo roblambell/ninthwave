@@ -25,6 +25,44 @@ function makeOrch(): Orchestrator {
 }
 
 describe("scenario: watch mode", () => {
+  it("starts the first newly discovered item when the queue begins empty", async () => {
+    const fakeGh = new FakeGitHub();
+    const fakeMux = new FakeMux();
+    const orch = makeOrch();
+
+    const actionDeps = buildActionDeps(fakeGh, fakeMux);
+    const loopDeps = buildLoopDeps(fakeGh, fakeMux, actionDeps);
+
+    const launchOrder: string[] = [];
+    const origLaunch = actionDeps.launchSingleItem;
+    actionDeps.launchSingleItem = vi.fn((item, wd, wtd, pr, ai, bb) => {
+      launchOrder.push(item.id);
+      return (origLaunch as Function)(item, wd, wtd, pr, ai, bb);
+    });
+
+    loopDeps.scanWorkItems = vi.fn(() => [makeWorkItem("W-0")]);
+    loopDeps.sleep = async () => {
+      const orchItem = orch.getItem("W-0");
+      if (orchItem?.state === "implementing" && !fakeGh.getPR("ninthwave/W-0")) {
+        completeItem("W-0", fakeGh, orch);
+      }
+    };
+
+    await orchestrateLoop(orch, defaultCtx, loopDeps, {
+      maxIterations: 60,
+      watch: true,
+    });
+
+    expect(orch.getItem("W-0")?.state).toBe("done");
+    expect(launchOrder).toEqual(["W-0"]);
+
+    const watchWaitLog = loopDeps.__logs.find((l) => l.event === "watch_mode_waiting");
+    expect(watchWaitLog).toBeDefined();
+
+    const watchNewLog = loopDeps.__logs.find((l) => l.event === "watch_new_items");
+    expect(watchNewLog?.newIds).toEqual(["W-0"]);
+  });
+
   it("initial items complete, scanWorkItems returns new items, new items proceed to done", async () => {
     const fakeGh = new FakeGitHub();
     const fakeMux = new FakeMux();

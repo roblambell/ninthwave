@@ -100,6 +100,10 @@ function makeWorkItem(id: string, deps: string[] = []): WorkItem {
     status: "open",
     filePath: "",
     repoAlias: "",
+    rawText: `## ${id}\nTest item`,
+    filePaths: [],
+    testPlan: "",
+    bootstrap: false,
   };
 }
 
@@ -859,6 +863,14 @@ describe("formatStatusTable", () => {
     const table = stripAnsi(formatStatusTable([], 80));
     expect(table).toContain("No active items");
     expect(table).toContain("ninthwave list --ready");
+  });
+
+  it("renders armed watch empty state for future-only startup", () => {
+    const table = stripAnsi(formatStatusTable([], 80, undefined, false, { emptyState: "watch-armed" }));
+    expect(table).toContain("local watch is armed");
+    expect(table).toContain("Waiting for new work items");
+    expect(table).toContain("start automatically");
+    expect(table).not.toContain("ninthwave list --ready");
   });
 
   it("renders items in the table", () => {
@@ -1854,6 +1866,14 @@ describe("buildStatusLayout", () => {
     // Header should show no-items message
     const headerText = layout.headerLines.map(stripAnsi).join("\n");
     expect(headerText).toContain("No active items");
+  });
+
+  it("shows armed waiting copy in empty full-screen layout", () => {
+    const layout = buildStatusLayout([], 80, undefined, false, { emptyState: "watch-armed" });
+    const headerText = layout.headerLines.map(stripAnsi).join("\n");
+    expect(headerText).toContain("local watch is armed");
+    expect(headerText).toContain("Waiting for new work items");
+    expect(headerText).not.toContain("ninthwave list --ready");
   });
 
   it("includes unified progress in footer", () => {

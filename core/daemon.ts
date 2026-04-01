@@ -79,6 +79,8 @@ export interface DaemonState {
   updatedAt: string;
   statusPaneRef?: string | null;
   wipLimit?: number;
+  /** Alternate empty-state copy for armed watch sessions. */
+  emptyState?: "watch-armed";
   /** Operator identity (git email of the human running this daemon). */
   operatorId?: string;
   items: DaemonStateItem[];
@@ -541,7 +543,7 @@ export function serializeOrchestratorState(
   items: OrchestratorItem[],
   pid: number,
   startedAt: string,
-  extras?: { statusPaneRef?: string | null; wipLimit?: number; operatorId?: string },
+  extras?: { statusPaneRef?: string | null; wipLimit?: number; operatorId?: string; emptyState?: "watch-armed" },
 ): DaemonState {
   return {
     pid,

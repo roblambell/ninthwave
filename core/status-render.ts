@@ -38,6 +38,8 @@ export interface ScheduleWorkerInfo {
   startedAt: string;
 }
 
+export type EmptyStateMode = "watch-armed";
+
 export interface ViewOptions {
   showBlockerDetail?: boolean;
   sessionStartedAt?: string;
@@ -61,6 +63,8 @@ export interface ViewOptions {
   scheduleWorkers?: ScheduleWorkerInfo[];
   /** Number of items where GitHub API returned errors. When > 0, a warning is shown in the footer. */
   apiErrorCount?: number;
+  /** Alternate empty-state copy for watch flows that are already armed. */
+  emptyState?: EmptyStateMode;
 }
 
 /**
@@ -478,8 +482,9 @@ export function formatTelemetrySuffix(item: StatusItem): string {
     }
   }
 
-  // Show preserved worktree path for stuck items so users know where to find partial work
-  if (item.state === "stuck" && item.worktreePath) {
+  // Show preserved worktree path for stuck/failed items so users know where to find partial work
+  const rawState = item.state as string;
+  if ((rawState === "stuck" || item.state === "ci-failed") && item.worktreePath) {
     parts.push(`worktree: ${item.worktreePath}`);
   }
 
@@ -580,6 +585,25 @@ export function formatSummary(items: StatusItem[]): string {
   }
 
   return `  ${DIM}Total: ${parts.join(", ")}${RESET}`;
+}
+
+function buildEmptyStateLines(viewOptions?: ViewOptions): string[] {
+  if (viewOptions?.emptyState === "watch-armed") {
+    return [
+      `  ${DIM}No active items yet -- local watch is armed${RESET}`,
+      "",
+      `  ${DIM}Waiting for new work items...${RESET}`,
+      `  ${DIM}The first ready item will start automatically.${RESET}`,
+    ];
+  }
+
+  return [
+    `  ${DIM}No active items${RESET}`,
+    "",
+    `  ${DIM}To get started:${RESET}`,
+    `    ${DIM}ninthwave list --ready${RESET}     ${DIM}Show available TODOs${RESET}`,
+    `    ${DIM}ninthwave start <ID>${RESET}       ${DIM}Start working on an item${RESET}`,
+  ];
 }
 
 /**
@@ -876,11 +900,7 @@ export function formatStatusTable(
   lines.push("");
 
   if (items.length === 0) {
-    lines.push(`  ${DIM}No active items${RESET}`);
-    lines.push("");
-    lines.push(`  ${DIM}To get started:${RESET}`);
-    lines.push(`    ${DIM}ninthwave list --ready${RESET}     ${DIM}Show available TODOs${RESET}`);
-    lines.push(`    ${DIM}ninthwave start <ID>${RESET}       ${DIM}Start working on an item${RESET}`);
+    lines.push(...buildEmptyStateLines(opts));
     return lines.join("\n");
   }
 
@@ -1294,11 +1314,7 @@ export function buildStatusLayout(
   if (items.length === 0) {
     headerLines.push(`${BOLD}Ninthwave${RESET}`);
     headerLines.push("");
-    headerLines.push(`  ${DIM}No active items${RESET}`);
-    headerLines.push("");
-    headerLines.push(`  ${DIM}To get started:${RESET}`);
-    headerLines.push(`    ${DIM}ninthwave list --ready${RESET}     ${DIM}Show available TODOs${RESET}`);
-    headerLines.push(`    ${DIM}ninthwave start <ID>${RESET}       ${DIM}Start working on an item${RESET}`);
+    headerLines.push(...buildEmptyStateLines(viewOptions));
     return { headerLines, itemLines: [], footerLines };
   }
 

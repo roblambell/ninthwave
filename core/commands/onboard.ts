@@ -398,6 +398,10 @@ export async function cmdNoArgs(
     watchArgs.push("--watch");
   }
 
+  if (result.futureOnly) {
+    watchArgs.push("--future-only-startup");
+  }
+
   // Review mode → CLI flags
   if (result.reviewMode === "all") {
     watchArgs.push("--review-external");

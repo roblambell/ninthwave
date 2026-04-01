@@ -323,7 +323,7 @@ export async function cmdStatusWatch(
 function gatherStatusItems(
   worktreeDir: string,
   projectRoot: string,
-): { items: StatusItem[]; wipLimit: number | undefined; sessionStartedAt?: string } {
+): { items: StatusItem[]; wipLimit: number | undefined; sessionStartedAt?: string; viewOptions?: ViewOptions } {
   // Fast path: read state file (written by orchestrator in both daemon and interactive mode)
   const daemonState = readStateFile(projectRoot);
   const daemonPid = isDaemonRunning(projectRoot);
@@ -339,6 +339,7 @@ function gatherStatusItems(
         items: items.map((i) => ({ ...i })), // copy to avoid mutation
         wipLimit: daemonState.wipLimit,
         sessionStartedAt: daemonState.startedAt,
+        ...(daemonState.emptyState ? { viewOptions: { emptyState: daemonState.emptyState } } : {}),
       };
     }
   }
@@ -425,7 +426,11 @@ export function renderStatus(worktreeDir: string, projectRoot: string, flat: boo
       const termWidth = getTerminalWidth();
       // Merge sessionStartedAt from daemon state into viewOptions so metrics
       // (session duration, throughput) display actual values instead of "-".
-      const mergedOpts = { ...viewOptions, sessionStartedAt: daemonState.startedAt };
+      const mergedOpts = {
+        ...viewOptions,
+        sessionStartedAt: daemonState.startedAt,
+        ...(daemonState.emptyState ? { emptyState: daemonState.emptyState } : {}),
+      };
       lines.push(formatStatusTable(items, termWidth, daemonState.wipLimit, flat, mergedOpts));
 
       const agoStr = formatAge(stateAgeMs) + " ago";

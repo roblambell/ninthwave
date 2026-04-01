@@ -21,6 +21,7 @@ export interface ParsedWatchArgs {
   fixForward: boolean;
   skipReview: boolean;
   watchMode: boolean;
+  futureOnlyStartup: boolean;
   noWatch: boolean;
   watchIntervalSecs?: number;
   jsonFlag: boolean;
@@ -50,6 +51,7 @@ export function parseWatchArgs(args: string[]): ParsedWatchArgs {
   let fixForward = true;
   let skipReview = false;
   let watchMode = false;
+  let futureOnlyStartup = false;
   let noWatch = false;
   let watchIntervalSecs: number | undefined;
   let jsonFlag = false;
@@ -155,6 +157,11 @@ export function parseWatchArgs(args: string[]): ParsedWatchArgs {
         watchMode = true;
         i += 1;
         break;
+      case "--future-only-startup":
+        futureOnlyStartup = true;
+        watchMode = true;
+        i += 1;
+        break;
       case "--no-watch":
         noWatch = true;
         i += 1;
@@ -214,7 +221,7 @@ export function parseWatchArgs(args: string[]): ParsedWatchArgs {
     itemIds, mergeStrategy, wipLimitOverride, pollIntervalOverride, frictionDir,
     daemonMode, isDaemonChild, clickupListId, remoteFlag,
     reviewAutoFix, reviewExternal, reviewWipLimit,
-    fixForward, skipReview, watchMode, noWatch, watchIntervalSecs,
+    fixForward, skipReview, watchMode, futureOnlyStartup, noWatch, watchIntervalSecs,
     jsonFlag, skipPreflight, crewCode, connectMode, crewPort, crewUrl, crewName,
     bypassEnabled, toolOverride,
   };

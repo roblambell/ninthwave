@@ -530,6 +530,7 @@ describe("cmdNoArgs", () => {
     });
 
     expect(watchArgs).toContain("--watch");
+    expect(watchArgs).toContain("--future-only-startup");
     expect(watchArgs).not.toContain("--items");
   });
 

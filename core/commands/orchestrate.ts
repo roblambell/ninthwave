@@ -367,7 +367,7 @@ export function renderTuiPanelFrame(
 /** Options for runTUI -- the reusable TUI lifecycle runner. */
 export interface RunTUIOptions {
   /** Provide status items and optional wip limit for each render cycle. */
-  getItems: () => { items: StatusItem[]; wipLimit?: number; sessionStartedAt?: string };
+  getItems: () => { items: StatusItem[]; wipLimit?: number; sessionStartedAt?: string; viewOptions?: ViewOptions };
   /** Provide log entries for the log panel. If omitted, logBuffer is empty. */
   getLogEntries?: () => PanelLogEntry[];
   /** Poll interval in ms (default: 2000). */
@@ -438,6 +438,7 @@ export async function runTUI(opts: RunTUIOptions): Promise<void> {
     if (data.sessionStartedAt) {
       tuiState.viewOptions.sessionStartedAt = data.sessionStartedAt;
     }
+    tuiState.viewOptions.emptyState = data.viewOptions?.emptyState;
     // Refresh log entries from provider
     if (getLogEntries) {
       const entries = getLogEntries();
@@ -959,6 +960,14 @@ export const ARMING_WINDOW_MS = 4000;
 
 /** User intent chosen during the arming window. */
 export type StartupIntent = "local" | "share" | "join" | "paused";
+
+export function shouldShowStartupArmingWindow(
+  tuiMode: boolean,
+  hasExplicitCollabIntent: boolean,
+  futureOnlyStartup: boolean,
+): boolean {
+  return tuiMode && !hasExplicitCollabIntent && !futureOnlyStartup;
+}
 
 /**
  * Format the arming window banner lines for the TUI.
@@ -2013,6 +2022,7 @@ export async function cmdOrchestrate(
   } = parsed;
   let toolOverride = parsedToolOverride;
   let watchMode = parsed.watchMode;
+  let futureOnlyStartup = parsed.futureOnlyStartup;
   let crewCode = parsed.crewCode;
   let crewUrl = parsed.crewUrl;
   let connectMode = parsed.connectMode;
@@ -2157,6 +2167,7 @@ export async function cmdOrchestrate(
     }
     itemIds = result.itemIds;
     watchMode = watchMode || result.allSelected || result.futureOnly === true;
+    futureOnlyStartup = futureOnlyStartup || result.futureOnly === true;
     // Local-first: merge strategy, WIP, and review mode use CLI-parsed values
     // (which default to manual, computed WIP, and reviews off).
     // The interactive flow no longer prompts for these.
@@ -2511,6 +2522,7 @@ export async function cmdOrchestrate(
   const initialState = serializeOrchestratorState(orch.getAllItems(), process.pid, daemonStartedAt, {
     wipLimit,
     operatorId,
+    ...(futureOnlyStartup ? { emptyState: "watch-armed" as const } : {}),
   });
   writeStateFile(projectRoot, initialState);
 
@@ -2527,6 +2539,7 @@ export async function cmdOrchestrate(
       mergeStrategy: orch.config.mergeStrategy,
       collaborationMode: "local",
       reviewMode: orch.config.skipReview ? "off" : "ninthwave-prs",
+      ...(futureOnlyStartup ? { emptyState: "watch-armed" as const } : {}),
     },
     mergeStrategy: orch.config.mergeStrategy,
     bypassEnabled: orch.config.bypassEnabled,
@@ -2634,6 +2647,7 @@ export async function cmdOrchestrate(
         statusPaneRef: null,
         wipLimit,
         operatorId,
+        ...(tuiState.viewOptions.emptyState ? { emptyState: tuiState.viewOptions.emptyState } : {}),
       });
       writeStateFile(projectRoot, state);
     } catch {
@@ -2818,7 +2832,7 @@ export async function cmdOrchestrate(
   // Renders an initial TUI frame with a startup banner overlay.
   // Defaults to local after ARMING_WINDOW_MS; J/S/P/Enter resolve immediately.
   const hasExplicitCollabIntent = !!(crewCode || connectMode);
-  if (tuiMode && !hasExplicitCollabIntent) {
+  if (shouldShowStartupArmingWindow(tuiMode, hasExplicitCollabIntent, futureOnlyStartup)) {
     // Render initial TUI frame so the status table is visible behind the banner
     const initialItems = orch.getAllItems();
     try {

@@ -29,9 +29,9 @@ import {
   type TreeNode,
   type ViewOptions,
 } from "../core/commands/status.ts";
-import type { DaemonState } from "../core/daemon.ts";
+import { stateFilePath, userStateDir, type DaemonState } from "../core/daemon.ts";
 import { mkdtempSync, mkdirSync, writeFileSync, rmSync } from "fs";
-import { join } from "path";
+import { dirname, join } from "path";
 import { tmpdir } from "os";
 
 // Strip ANSI escape codes, CSI sequences, and OSC 8 hyperlinks for content assertions
@@ -560,6 +560,34 @@ describe("renderStatus", () => {
       expect(result).toContain("Ninthwave");
     } finally {
       rmSync(tmpDir, { recursive: true, force: true });
+    }
+  });
+
+  it("renders armed watch empty state from fresh daemon state", () => {
+    const tmpDir = mkdtempSync(join(tmpdir(), "nw-status-state-test-"));
+    const worktreeDir = join(tmpDir, ".ninthwave", ".worktrees");
+    const statePath = stateFilePath(tmpDir);
+    const now = new Date().toISOString();
+
+    mkdirSync(worktreeDir, { recursive: true });
+    mkdirSync(dirname(statePath), { recursive: true });
+    writeFileSync(statePath, JSON.stringify({
+      pid: 123,
+      startedAt: now,
+      updatedAt: now,
+      wipLimit: 4,
+      emptyState: "watch-armed",
+      items: [],
+    } satisfies DaemonState));
+
+    try {
+      const output = stripAnsi(renderStatus(worktreeDir, tmpDir));
+      expect(output).toContain("local watch is armed");
+      expect(output).toContain("Waiting for new work items");
+      expect(output).not.toContain("ninthwave list --ready");
+    } finally {
+      rmSync(tmpDir, { recursive: true, force: true });
+      rmSync(userStateDir(tmpDir), { recursive: true, force: true });
     }
   });
 
