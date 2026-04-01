@@ -1,5 +1,22 @@
 # Changelog
 
+## [0.3.9] - 2026-04-01
+
+### Added
+- add future-only empty queue startup (H-STUI-2) (#464)
+- add queue-safe inbox messaging for workers (#462)
+- add live controls for collaboration, reviews, merge, and WIP (H-LFRC-4) (#460)
+- add claim-gated arming window and ephemeral collaboration start (H-LFRC-3) (#459)
+- persist operator WIP preference and runtime WIP updates (H-LFRC-2) (#458)
+
+### Changed
+- reorder no-args empty queue startup (H-STUI-1) (#463)
+- remove telemetry flag from shared sessions
+- make startup selection local-first by default (#457)
+
+### Fixed
+- stop tracking runtime prompt file
+
 ## [0.3.8] - 2026-03-30
 
 ### Added
