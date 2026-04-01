@@ -36,6 +36,19 @@ ninthwave selects the AI tool interactively:
 
 The selection is persisted to `.ninthwave/config.json` as `ai_tool`.
 
+### Backend selection
+
+Copilot workers use the same backend-selection flow as every other ninthwave tool integration:
+
+- `Auto` -- default; stay on your current cmux/tmux session when present, otherwise prefer installed tmux, then cmux, else headless
+- `tmux` -- explicit tmux, with headless fallback if tmux is unavailable
+- `cmux` -- explicit cmux, with headless fallback if cmux is unavailable
+- `headless` -- detached, programmatic execution with no attachable mux workspace
+
+Your startup choice is saved as `backend_mode` and becomes the next startup default. For one-off runs, `NINTHWAVE_MUX=tmux|cmux|headless` overrides the saved default and normal auto-detection.
+
+`tmux` and `cmux` are interactive/attachable backends. `headless` is the right choice when you want non-interactive programmatic execution.
+
 ### Prompt delivery
 
 Copilot CLI receives its initial prompt differently from Claude Code and OpenCode. Because multiline prompts can break when piped through terminal multiplexers, ninthwave writes the full prompt to a temporary data file under its own state directory and launches Copilot with an **inline shell command**:
@@ -64,7 +77,7 @@ No executable launcher script is created.
 | **Launch** | Inline shell command runs inside the selected backend |
 | **Prompt delivery** | Embedded in the launch command via `-i` (interactive) or `-p` (headless) |
 | **Working** | Copilot CLI operates normally -- reads/writes files, runs commands |
-| **Idle** | Worker waits for orchestrator messages via `cmux send` |
+| **Idle** | Worker stays reachable through the selected backend (`tmux`, `cmux`, or detached headless runtime) |
 | **Cleanup** | `ninthwave clean-single` tears down the workspace |
 
 ## Differences from Claude Code
@@ -109,17 +122,18 @@ No executable launcher script is created.
 **Possible causes:**
 - **State dir permissions** -- The prompt file is written under `~/.ninthwave/projects/{slug}/tmp/`. Verify your user can write there.
 - **Copilot CLI not installed** -- The inline launch command calls `exec copilot ...`. If the binary isn't available, the session will exit silently.
-- **Multiplexer issues** -- Verify cmux or tmux is running: `nw doctor`
+- **Backend mismatch** -- If you expected an attachable session, verify tmux or cmux is installed with `nw doctor`, or force a one-off choice with `NINTHWAVE_MUX=tmux`, `NINTHWAVE_MUX=cmux`, or `NINTHWAVE_MUX=headless`
 
 ### Session exits immediately
 
-**Symptom:** The cmux/tmux workspace opens and closes right away.
+**Symptom:** The tmux/cmux workspace opens and closes right away, or a run falls back to headless unexpectedly.
 
 **Fix:**
 1. Check that `copilot` is installed and authenticated
 2. Try the interactive form manually: `copilot --agent=ninthwave-implementer --allow-all -i "hello"`
 3. Try the headless form manually: `copilot -p "hello" --agent=ninthwave-implementer --allow-all-tools --allow-all-paths --allow-all-urls --no-ask-user`
-4. Check cmux/tmux logs for error output
+4. If you only need a non-interactive run, try `NINTHWAVE_MUX=headless nw ...`
+5. Check tmux/cmux logs for error output if you were targeting an interactive backend
 
 ### Init doesn't detect Copilot
 

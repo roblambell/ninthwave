@@ -38,11 +38,22 @@ Scale horizontally with tasks brokered by [ninthwave.sh](https://ninthwave.sh) (
 brew install ninthwave-sh/tap/ninthwave
 ```
 
-Requires [gh](https://cli.github.com) and a terminal multiplexer: [tmux](https://github.com/tmux/tmux/wiki) or [cmux](https://cmux.com) (recommended!).
+Requires [gh](https://cli.github.com). Interactive backends are optional: install [tmux](https://github.com/tmux/tmux/wiki) or [cmux](https://cmux.com) if you want attachable terminal sessions, or run headless by default.
 
 ## Getting started
 
-Just run `nw` inside tmux, cmux, or with [iTerm2 tmux integration](docs/iterm2.md).
+Run `nw`, then choose a backend on the startup settings screen:
+
+- `Auto` -- default; stay on your current cmux/tmux session when present, otherwise prefer installed tmux, then cmux, else headless
+- `tmux` -- use tmux explicitly, or fall back to headless if tmux is unavailable
+- `cmux` -- use cmux explicitly, or fall back to headless if cmux is unavailable
+- `headless` -- skip multiplexers and run detached for programmatic/non-interactive use
+
+`tmux` and `cmux` are attachable interactive backends. `headless` is the non-interactive backend.
+
+Your choice is saved as `backend_mode` and becomes the next startup default. For one-off overrides, set `NINTHWAVE_MUX=tmux|cmux|headless`; that takes precedence over the saved default and normal auto-detection.
+
+If you prefer tmux tabs in iTerm2, see [iTerm2 tmux integration](docs/iterm2.md).
 
 After item selection (and AI tool selection when multiple tools are configured), `nw` shows a single startup settings screen before the live status UI. That screen is the pre-status control surface for merge strategy, reviews, collaboration mode, WIP limit, and backend selection.
 

@@ -12,7 +12,7 @@ There are two ways onboarding runs:
 | `nw init` | User explicitly runs init | Yes by default, `--yes` for non-interactive | `core/commands/init.ts` → `cmdInit()` |
 | `nw init --global` | User wants global skills only | Minimal | `core/commands/setup.ts` → `setupGlobal()` |
 
-Both paths converge on the same `initProject()` function for the actual setup work. The difference is that `nw` (no-args) wraps it in an interactive guided flow with multiplexer/AI tool selection and session launch.
+Both paths converge on the same `initProject()` function for the actual setup work. The difference is that `nw` (no-args) wraps it in an interactive guided flow with AI tool selection, setup, and startup settings (including backend selection) before orchestration begins.
 
 The queue mental model is intentional: `/decompose` (or manual file creation) populates `.ninthwave/work/`, `nw` works through that live queue, and completed work is looked up through merged PRs, `nw history`, `nw logs`, or git history rather than retained in a `done` lane under `.ninthwave/work/`.
 
@@ -36,7 +36,7 @@ flowchart TD
     I -->|Yes| J["Live status view<br/><code>cmdStatusWatch()</code>"]
     I -->|No| K[Display items summary]
     K --> L{Mode prompt}
-    L -->|Orchestrate| M["Item selection + merge strategy + WIP limit<br/>→ <code>runInteractiveFlow()</code> → orchestration"]
+    L -->|Orchestrate| M["Item selection + merge strategy + WIP limit + backend<br/>→ <code>runInteractiveFlow()</code> → orchestration"]
     L -->|Launch subset| N["Item selection<br/>→ <code>cmdRunItems()</code>"]
     L -->|Quit| O[Exit]
 
@@ -51,7 +51,7 @@ flowchart TD
 
 ## 2. Interactive Onboarding Flow
 
-When `onboard()` runs (first-run via `nw` no-args), it guides the user through tool detection and project setup before launching a session.
+When `onboard()` runs (first-run via `nw` no-args), it guides the user through tool detection and project setup. After that, the regular startup settings flow takes over and the user chooses how to launch orchestration.
 
 ```mermaid
 sequenceDiagram
@@ -59,26 +59,12 @@ sequenceDiagram
     participant O as onboard()
     participant D as Detection
     participant I as initProject()
-    participant M as Multiplexer
+    participant S as Startup settings
+    participant B as Backend
 
     O->>U: Welcome to ninthwave
 
-    Note over O,D: Step 2: Multiplexer detection
-    O->>D: detectInstalledMuxes()
-    D-->>O: [cmux] or []
-
-    alt No multiplexer found
-        O->>U: Install cmux and re-run
-        Note over O: Return (bail)
-    else One found
-        O->>U: Found cmux. Use it? [Y/n]
-        U-->>O: Y
-    else Multiple found
-        O->>U: Choose [1-N]
-        U-->>O: selection
-    end
-
-    Note over O,D: Step 3: AI tool detection
+    Note over O,D: Step 2: AI tool detection
     O->>D: detectInstalledAITools()
     D-->>O: [claude, opencode, ...] or []
 
@@ -93,9 +79,9 @@ sequenceDiagram
         U-->>O: selection
     end
 
-    Note over O,I: Step 4: Project setup
+    Note over O,I: Step 3: Project setup
     O->>I: initProject(projectDir, bundleDir)
-    Note over I: Auto-detect → config → scaffold
+    Note over I: Auto-detect → optional backend warning → scaffold
     I-->>O: DetectionResult
 
     alt Monorepo detected
@@ -103,11 +89,16 @@ sequenceDiagram
         U-->>O: Y
     end
 
-    Note over O,M: Step 5: Launch session
-    O->>M: cmux new-workspace --cwd projectDir --command claude
-    M-->>O: workspace:123
-    O->>M: cmux send --workspace workspace:123 "Welcome message"
-    O->>U: You're all set!
+    Note over O,S: Step 4: Startup settings
+    O->>S: runInteractiveFlow()
+    S->>U: Choose items, merge strategy, WIP limit, and backend
+    U-->>S: Auto | tmux | cmux | headless
+    Note over S: Selection is saved as backend_mode for next startup
+    Note over S: NINTHWAVE_MUX can override a single launch
+
+    Note over S,B: Step 5: Start orchestration
+    S->>B: Launch workers in selected backend
+    B-->>U: tmux/cmux session or detached headless workers
 ```
 
 **Source:** `core/commands/onboard.ts:229-391`
@@ -197,7 +188,7 @@ flowchart TD
 |---|---|---|---|
 | CI provider | `.github/workflows/*.{yml,yaml}` exists | `ci_provider` | `.ninthwave/config` |
 | Test command | `package.json` scripts: `test:ci` > `test` > first `test*` | `test_command` | `.ninthwave/config` |
-| Multiplexer | `which cmux` succeeds | `MUX` | `.ninthwave/config` |
+| Interactive backend | `which cmux`, else `which tmux` | *(none persisted by init)* | detection summary only |
 | AI tools | `.claude/`, `.opencode/`, `.github/copilot-instructions.md`, `.github/agents/` | `AI_TOOLS` | `.ninthwave/config` |
 | Repo type | `package.json` workspaces or `pnpm-workspace.yaml` | `REPO_TYPE` | `.ninthwave/config` |
 | Workspace config | Resolve workspace globs → packages list, detect turbo | *(structured)* | `.ninthwave/config.json` |
@@ -372,7 +363,7 @@ Non-interactive. Skips agent selection prompt -- auto-selects all discovered age
 Global-only mode. Creates `~/.claude/skills/` managed copies and returns. No `.ninthwave/` directory, no project agent files, no repo `.gitignore` changes, no project setup.
 
 ### `nw` (no args, first run)
-Interactive guided onboarding. Detects multiplexer and AI tool, runs `initProject()`, then launches a session in the multiplexer with a welcome message. Only triggers when `.ninthwave/` does not exist.
+Interactive guided onboarding. Detects an AI tool, runs `initProject()`, then drops into the normal startup settings flow where the user can choose `Auto`, `tmux`, `cmux`, or `headless`. Only triggers when `.ninthwave/` does not exist.
 
 ---
 
@@ -405,12 +396,13 @@ Running `nw init` multiple times is safe:
 
 ## 12. Prerequisite Checks
 
-Init checks for external tools but **never aborts** -- warnings only.
+Init checks for external tools but **never aborts** -- warnings only. `gh` is required for PR workflows; interactive backends are optional because headless works by default.
 
 | Tool | Check | Install Command | Purpose |
 |---|---|---|---|
 | `gh` | `which gh` | `brew install gh` | GitHub PR operations |
-| `cmux` | `which cmux` | `brew install --cask manaflow-ai/cmux/cmux` | Terminal multiplexer for parallel sessions |
+| `tmux` *(optional)* | `which tmux` | `brew install tmux` | Attachable interactive backend |
+| `cmux` *(optional)* | `which cmux` | `brew install --cask manaflow-ai/cmux/cmux` | Attachable interactive backend with richer macOS UI |
 | `gh auth` | `gh auth status` | `gh auth login` | GitHub authentication (only checked if `gh` is present) |
 
 **Source:** `core/commands/setup.ts:103-159`
