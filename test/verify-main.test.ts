@@ -940,18 +940,29 @@ describe("executeCleanForwardFixer action", () => {
   });
 });
 
-// ── AGENT_SOURCES includes forward-fixer.md ─────────────────────────────
+// ── Discovered canonical agents include orchestration prompts ─────────────
 
-describe("AGENT_SOURCES includes forward-fixer", () => {
+describe("AGENT_SOURCES includes canonical orchestration agents", () => {
   it("forward-fixer.md is in AGENT_SOURCES", async () => {
     const { AGENT_SOURCES } = await import("../core/commands/setup.ts");
     expect(AGENT_SOURCES).toContain("forward-fixer.md");
+  });
+
+  it("rebaser.md is in AGENT_SOURCES", async () => {
+    const { AGENT_SOURCES } = await import("../core/commands/setup.ts");
+    expect(AGENT_SOURCES).toContain("rebaser.md");
   });
 
   it("forward-fixer.md has description in AGENT_DESCRIPTIONS", async () => {
     const { AGENT_DESCRIPTIONS } = await import("../core/commands/setup.ts");
     expect(AGENT_DESCRIPTIONS["forward-fixer.md"]).toBeDefined();
     expect(AGENT_DESCRIPTIONS["forward-fixer.md"]).toContain("fix-forward");
+  });
+
+  it("rebaser.md has description in AGENT_DESCRIPTIONS", async () => {
+    const { AGENT_DESCRIPTIONS } = await import("../core/commands/setup.ts");
+    expect(AGENT_DESCRIPTIONS["rebaser.md"]).toBeDefined();
+    expect(AGENT_DESCRIPTIONS["rebaser.md"]).toContain("rebase");
   });
 });
 

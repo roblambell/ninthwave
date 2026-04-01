@@ -10,6 +10,7 @@ import {
   mkdirSync,
   writeFileSync,
   readFileSync,
+  readdirSync,
   copyFileSync,
   cpSync,
   rmSync,
@@ -224,22 +225,64 @@ export function isSelfHosting(projectDir: string, bundleDir: string): boolean {
   return resolve(projectDir) === resolve(bundleDir);
 }
 
-const SKILLS = ["work", "decompose"];
+export interface CanonicalBundleSources {
+  instructionFile: string | null;
+  skills: string[];
+  agents: string[];
+}
+
+function readSortedDir(dir: string): string[] {
+  try {
+    return readdirSync(dir).sort((a, b) => a.localeCompare(b));
+  } catch {
+    return [];
+  }
+}
+
+export function discoverSkillSources(bundleDir: string): string[] {
+  return readSortedDir(join(bundleDir, "skills")).filter((name) =>
+    existsSync(join(bundleDir, "skills", name, "SKILL.md")),
+  );
+}
+
+export function discoverAgentSources(bundleDir: string): string[] {
+  return readSortedDir(join(bundleDir, "agents")).filter((name) =>
+    name.endsWith(".md") && existsSync(join(bundleDir, "agents", name)),
+  );
+}
+
+export function discoverCanonicalBundleSources(
+  bundleDir: string,
+): CanonicalBundleSources {
+  return {
+    instructionFile: existsSync(join(bundleDir, "CLAUDE.md")) ? "CLAUDE.md" : null,
+    skills: discoverSkillSources(bundleDir),
+    agents: discoverAgentSources(bundleDir),
+  };
+}
+
+const DEFAULT_CANONICAL_BUNDLE_SOURCES: CanonicalBundleSources = (() => {
+  try {
+    return discoverCanonicalBundleSources(getBundleDir());
+  } catch {
+    return { instructionFile: null, skills: [], agents: [] };
+  }
+})();
+
+export const INSTRUCTION_SOURCE = DEFAULT_CANONICAL_BUNDLE_SOURCES.instructionFile;
+export const SKILL_SOURCES = DEFAULT_CANONICAL_BUNDLE_SOURCES.skills;
 
 // ── Agent configuration ──────────────────────────────────────────────
 
 /** Agent source files available in the bundle's agents/ directory. */
-export const AGENT_SOURCES = [
-  "implementer.md",
-  "reviewer.md",
-  "forward-fixer.md",
-];
+export const AGENT_SOURCES = DEFAULT_CANONICAL_BUNDLE_SOURCES.agents;
 
 /** Human-readable descriptions for each agent file. */
 export const AGENT_DESCRIPTIONS: Record<string, string> = {
   "implementer.md": "implementation agent for batch TODO processing",
   "reviewer.md": "PR code review agent",
   "forward-fixer.md": "post-merge CI failure diagnosis and fix-forward agent",
+  "rebaser.md": "branch rebase agent for stacked and drifted PRs",
 };
 
 /** AI tool target directories where agent symlinks are created -- derived from AI_TOOL_PROFILES. */
@@ -282,16 +325,6 @@ export function detectProjectTools(
   }
 
   return detected;
-}
-
-/**
- * Discover available agent source files in the bundle's agents/ directory.
- * Only returns agents that actually exist on disk.
- */
-export function discoverAgentSources(bundleDir: string): string[] {
-  return AGENT_SOURCES.filter((f) =>
-    existsSync(join(bundleDir, "agents", f)),
-  );
 }
 
 // ── Copy plan ────────────────────────────────────────────────────────
@@ -412,6 +445,7 @@ export function createSkillSymlinks(
   bundleDir: string,
 ): void {
   mkdirSync(skillsDir, { recursive: true });
+  const skills = discoverSkillSources(bundleDir);
 
   // Always compute relative paths so symlinks survive directory moves/renames
   const linkTarget = (skill: string): string => {
@@ -419,7 +453,7 @@ export function createSkillSymlinks(
     return relative(skillsDir, absTarget);
   };
 
-  for (const skill of SKILLS) {
+  for (const skill of skills) {
     const skillSource = join(bundleDir, "skills", skill);
     if (!existsSync(skillSource)) continue;
 
@@ -448,8 +482,9 @@ export function copySkillFiles(
   bundleDir: string,
 ): void {
   mkdirSync(skillsDir, { recursive: true });
+  const skills = discoverSkillSources(bundleDir);
 
-  for (const skill of SKILLS) {
+  for (const skill of skills) {
     const skillSource = join(bundleDir, "skills", skill);
     if (!existsSync(skillSource)) continue;
 
@@ -603,4 +638,3 @@ export async function interactiveAgentSelection(
 
   return selection;
 }
-

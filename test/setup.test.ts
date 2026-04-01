@@ -21,6 +21,8 @@ import {
   checkPrerequisites,
   createNwSymlink,
   isSelfHosting,
+  discoverCanonicalBundleSources,
+  discoverSkillSources,
   detectProjectTools,
   discoverAgentSources,
   buildCopyPlan,
@@ -70,6 +72,16 @@ function createFakeBundle(dir: string): string {
     join(bundleDir, "agents", "reviewer.md"),
     "# Reviewer Agent\n",
   );
+  writeFileSync(
+    join(bundleDir, "agents", "forward-fixer.md"),
+    "# Forward Fixer Agent\n",
+  );
+  writeFileSync(
+    join(bundleDir, "agents", "rebaser.md"),
+    "# Rebaser Agent\n",
+  );
+
+  writeFileSync(join(bundleDir, "CLAUDE.md"), "# Bundle instructions\n");
 
   // Create VERSION file
   writeFileSync(join(bundleDir, "VERSION"), "0.1.0\n");
@@ -260,6 +272,7 @@ describe("agent configuration", () => {
   it("includes all agent source files", () => {
     expect(AGENT_SOURCES).toContain("implementer.md");
     expect(AGENT_SOURCES).toContain("reviewer.md");
+    expect(AGENT_SOURCES).toContain("rebaser.md");
   });
 
   it("has descriptions for all agent sources", () => {
@@ -363,6 +376,35 @@ describe("detectProjectTools", () => {
 
 // --- discoverAgentSources ---
 
+describe("discoverCanonicalBundleSources", () => {
+  it("reads CLAUDE.md, skills, and agents from the bundle", () => {
+    const projectDir = setupTempRepo();
+    const bundleDir = createFakeBundle(projectDir + "-bundle-parent");
+
+    const sources = discoverCanonicalBundleSources(bundleDir);
+
+    expect(sources.instructionFile).toBe("CLAUDE.md");
+    expect(sources.skills).toEqual(["decompose", "work"]);
+    expect(sources.agents).toContain("implementer.md");
+    expect(sources.agents).toContain("reviewer.md");
+    expect(sources.agents).toContain("forward-fixer.md");
+    expect(sources.agents).toContain("rebaser.md");
+  });
+});
+
+describe("discoverSkillSources", () => {
+  it("discovers newly added skills from SKILL.md files", () => {
+    const projectDir = setupTempRepo();
+    const bundleDir = createFakeBundle(projectDir + "-bundle-parent");
+
+    const extraSkillDir = join(bundleDir, "skills", "brainstorm");
+    mkdirSync(extraSkillDir, { recursive: true });
+    writeFileSync(join(extraSkillDir, "SKILL.md"), "# brainstorm\n");
+
+    expect(discoverSkillSources(bundleDir)).toContain("brainstorm");
+  });
+});
+
 describe("discoverAgentSources", () => {
   it("discovers all agent files in bundle", () => {
     const projectDir = setupTempRepo();
@@ -372,6 +414,8 @@ describe("discoverAgentSources", () => {
 
     expect(agents).toContain("implementer.md");
     expect(agents).toContain("reviewer.md");
+    expect(agents).toContain("forward-fixer.md");
+    expect(agents).toContain("rebaser.md");
   });
 
   it("only returns agents that exist on disk", () => {
@@ -385,6 +429,30 @@ describe("discoverAgentSources", () => {
 
     expect(agents).toContain("implementer.md");
     expect(agents).not.toContain("reviewer.md");
+  });
+
+  it("discovers newly added agent files without updating a static list", () => {
+    const projectDir = setupTempRepo();
+    const bundleDir = createFakeBundle(projectDir + "-bundle-parent");
+
+    writeFileSync(join(bundleDir, "agents", "custom-agent.md"), "# Custom Agent\n");
+
+    expect(discoverAgentSources(bundleDir)).toContain("custom-agent.md");
+  });
+});
+
+describe("copySkillFiles", () => {
+  it("copies newly discovered skills from the bundle", () => {
+    const projectDir = setupTempRepo();
+    const bundleDir = createFakeBundle(projectDir + "-bundle-parent");
+
+    const extraSkillDir = join(bundleDir, "skills", "brainstorm");
+    mkdirSync(extraSkillDir, { recursive: true });
+    writeFileSync(join(extraSkillDir, "SKILL.md"), "# brainstorm\n");
+
+    copySkillFiles(join(projectDir, ".claude/skills"), bundleDir);
+
+    expect(existsSync(join(projectDir, ".claude/skills", "brainstorm", "SKILL.md"))).toBe(true);
   });
 });
 
@@ -840,4 +908,3 @@ describe("isSelfHosting", () => {
 
 
 // --- setupProject with agentSelection ---
-

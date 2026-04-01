@@ -93,6 +93,12 @@ function createFakeBundle(dir: string): string {
     join(bundleDir, "agents", "forward-fixer.md"),
     "# Verifier Agent\n",
   );
+  writeFileSync(
+    join(bundleDir, "agents", "rebaser.md"),
+    "# Rebaser Agent\n",
+  );
+
+  writeFileSync(join(bundleDir, "CLAUDE.md"), "# Bundle instructions\n");
 
   // Create VERSION file
   writeFileSync(join(bundleDir, "VERSION"), "0.1.0\n");
@@ -1509,6 +1515,27 @@ describe("initProject -- agent selection", () => {
     expect(existsSync(join(projectDir, ".claude/agents/reviewer.md"))).toBe(true);
     expect(existsSync(join(projectDir, ".opencode/agents/reviewer.md"))).toBe(true);
     expect(existsSync(join(projectDir, ".github/agents/ninthwave-reviewer.agent.md"))).toBe(true);
+    expect(existsSync(join(projectDir, ".claude/agents/rebaser.md"))).toBe(true);
+    expect(existsSync(join(projectDir, ".opencode/agents/rebaser.md"))).toBe(true);
+    expect(existsSync(join(projectDir, ".github/agents/ninthwave-rebaser.agent.md"))).toBe(true);
+  });
+
+  it("installs newly discovered bundle agents by default", () => {
+    const projectDir = setupTempRepo();
+    const bundleDir = createFakeBundle(projectDir + "-bundle-parent");
+
+    writeFileSync(join(bundleDir, "agents", "custom-agent.md"), "# Custom Agent\n");
+
+    const deps: InitDeps = {
+      commandExists: (() => false) as CommandChecker,
+      getEnv: () => undefined,
+    };
+
+    initProject(projectDir, bundleDir, deps);
+
+    expect(existsSync(join(projectDir, ".claude/agents/custom-agent.md"))).toBe(true);
+    expect(existsSync(join(projectDir, ".opencode/agents/custom-agent.md"))).toBe(true);
+    expect(existsSync(join(projectDir, ".github/agents/ninthwave-custom-agent.agent.md"))).toBe(true);
   });
 
   it("uses opts.agentSelection when provided", () => {
