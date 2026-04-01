@@ -1074,6 +1074,97 @@ describe("runStartupSettingsScreen", () => {
     expect(result.cancelled).toBe(false);
     expect(result.mergeStrategy).toBe("auto");
   });
+
+  it("keeps title, footer, and the active row visible in a short terminal", async () => {
+    const { io, sendKey, getOutput } = createMockIO({ rows: 9, cols: 38 });
+
+    const resultPromise = runStartupSettingsScreen(io, {
+      summaryLines: [
+        "Items: A-1 A very long task title that should wrap across multiple viewport lines",
+        "AI tool: Claude Code round-robin with a second tool label that also wraps",
+      ],
+      defaultWipLimit: 4,
+    });
+
+    const activeLabels = ["Merge", "Reviews", "Collaboration", "WIP limit", "Backend"];
+
+    for (let i = 0; i < activeLabels.length; i++) {
+      const lines = getPlainFrameLines(getOutput());
+      expect(lines.length).toBeLessThanOrEqual(9);
+      expect(lines[0]).toContain("Start orchestration");
+      expect(lines.some((line) => line.includes("↑/↓ change row"))).toBe(true);
+      expect(lines.some((line) => line.includes(`> ${activeLabels[i]}`))).toBe(true);
+
+      if (i < activeLabels.length - 1) {
+        sendKey("\x1B[B");
+      }
+    }
+
+    sendKey("\r");
+
+    const result = await resultPromise;
+    expect(result.cancelled).toBe(false);
+    expect(result.mergeStrategy).toBe("manual");
+    expect(result.reviewMode).toBe("off");
+    expect(result.collaborationMode).toBe("local");
+    expect(result.wipLimit).toBe(4);
+    expect(result.backendMode).toBe("auto");
+  });
+
+  it("wraps long summaries and descriptions within the terminal viewport", async () => {
+    const summary = createMockIO({ rows: 10, cols: 32 });
+
+    const summaryPromise = runStartupSettingsScreen(summary.io, {
+      summaryLines: [
+        "Items: A-1 A very long task title that should wrap neatly inside the viewport",
+      ],
+      defaultWipLimit: 4,
+    });
+
+    const summaryLines = getPlainFrameLines(summary.getOutput());
+    expect(summaryLines.length).toBeLessThanOrEqual(10);
+    for (const line of summaryLines) {
+      expect(line.length).toBeLessThanOrEqual(32);
+    }
+    expect(summaryLines).toContain("  Items: A-1 A very long task");
+    expect(summaryLines).toContain("title that should wrap neatly");
+    expect(summaryLines).toContain("inside the viewport");
+
+    summary.sendKeys(["\r"]);
+
+    const summaryResult = await summaryPromise;
+    expect(summaryResult.cancelled).toBe(false);
+
+    const description = createMockIO({ rows: 12, cols: 32 });
+
+    const descriptionPromise = runStartupSettingsScreen(description.io, {
+      summaryLines: [],
+      defaultWipLimit: 4,
+      defaultSettings: {
+        backendMode: "headless",
+        mergeStrategy: "manual",
+        reviewMode: "off",
+        collaborationMode: "local",
+      },
+    });
+
+    description.sendKeys(["\x1B[B", "\x1B[B", "\x1B[B", "\x1B[B"]);
+
+    const lines = getPlainFrameLines(description.getOutput());
+    expect(lines.length).toBeLessThanOrEqual(12);
+    for (const line of lines) {
+      expect(line.length).toBeLessThanOrEqual(32);
+    }
+    expect(lines.some((line) => line.includes("> Backend"))).toBe(true);
+    expect(lines.some((line) => line.includes("Skip multiplexers and run"))).toBe(true);
+    expect(lines.some((line) => line.includes("headless directly in this"))).toBe(true);
+
+    description.sendKeys(["\r"]);
+
+    const result = await descriptionPromise;
+    expect(result.cancelled).toBe(false);
+    expect(result.backendMode).toBe("headless");
+  });
 });
 
 // ── Selection screen (composite) ────────────────────────────────────

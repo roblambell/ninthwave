@@ -39,6 +39,8 @@ function moveTo(row: number, col: number): string {
 // Clear from cursor to end of line
 const CLEAR_LINE = "\x1B[K";
 
+const ANSI_SEQUENCE_PATTERN = /^(?:\x1b\]8;[^\x07]*\x07|\x1b\[[0-9;]*[A-Za-z])/;
+
 // ── Types ───────────────────────────────────────────────────────────
 
 export interface WidgetIO {
@@ -59,12 +61,84 @@ export interface CheckboxItem {
 
 const CHECKBOX_LABEL_INDENT = " ".repeat(6);
 
+function wrapLineToWidth(line: string, maxWidth: number): string[] {
+  if (maxWidth <= 0) return [""];
+  if (line.length === 0) return [""];
+
+  const wrapped: string[] = [];
+  let segmentStart = 0;
+  let index = 0;
+  let visibleWidth = 0;
+  let lastWhitespaceBreak: { end: number; nextStart: number } | null = null;
+
+  while (index < line.length) {
+    const ansiMatch = line.slice(index).match(ANSI_SEQUENCE_PATTERN);
+    if (ansiMatch) {
+      index += ansiMatch[0].length;
+      continue;
+    }
+
+    const char = line[index]!;
+    if (char === "\n") {
+      wrapped.push(line.slice(segmentStart, index));
+      index += 1;
+      segmentStart = index;
+      visibleWidth = 0;
+      lastWhitespaceBreak = null;
+      continue;
+    }
+
+    if (char === " " || char === "\t") {
+      lastWhitespaceBreak = { end: index, nextStart: index + 1 };
+    }
+
+    visibleWidth += 1;
+    index += 1;
+
+    if (visibleWidth > maxWidth) {
+      if (lastWhitespaceBreak && lastWhitespaceBreak.end > segmentStart) {
+        wrapped.push(line.slice(segmentStart, lastWhitespaceBreak.end));
+        segmentStart = lastWhitespaceBreak.nextStart;
+        index = segmentStart;
+      } else {
+        const hardBreak = Math.max(segmentStart + 1, index - 1);
+        wrapped.push(line.slice(segmentStart, hardBreak));
+        segmentStart = hardBreak;
+        index = segmentStart;
+      }
+
+      visibleWidth = 0;
+      lastWhitespaceBreak = null;
+    }
+  }
+
+  wrapped.push(line.slice(segmentStart));
+  return wrapped.length > 0 ? wrapped : [""];
+}
+
 function truncateCheckboxLine(line: string, maxWidth: number): string {
   if (maxWidth <= 0) return "";
   const plain = stripAnsiForWidth(line);
   if (plain.length <= maxWidth) return line;
   if (maxWidth <= 3) return plain.slice(0, maxWidth);
-  return `${plain.slice(0, maxWidth - 3)}...`;
+  return `${wrapLineToWidth(line, maxWidth - 3)[0] ?? ""}...${RESET}`;
+}
+
+function clampActiveLineScrollOffset(
+  scrollOffset: number,
+  activeStartLine: number,
+  activeEndLine: number,
+  viewportHeight: number,
+  totalLines: number,
+): number {
+  if (activeStartLine < scrollOffset) {
+    scrollOffset = activeStartLine;
+  }
+  if (activeEndLine > scrollOffset + viewportHeight) {
+    scrollOffset = activeEndLine - viewportHeight;
+  }
+
+  return Math.max(0, Math.min(scrollOffset, Math.max(0, totalLines - viewportHeight)));
 }
 
 function wrapPlainLine(line: string, maxWidth: number): string[] {
@@ -228,11 +302,13 @@ export function runCheckboxList(
       const cursorEndLine = itemEndLines[cursor] ?? cursorStartLine + 1;
 
       // Clamp scroll to keep the active item fully visible, accounting for sublines.
-      if (cursorStartLine < scrollOffset) scrollOffset = cursorStartLine;
-      if (cursorEndLine > scrollOffset + viewportHeight) {
-        scrollOffset = cursorEndLine - viewportHeight;
-      }
-      scrollOffset = Math.max(0, Math.min(scrollOffset, Math.max(0, totalRenderedLines - viewportHeight)));
+      scrollOffset = clampActiveLineScrollOffset(
+        scrollOffset,
+        cursorStartLine,
+        cursorEndLine,
+        viewportHeight,
+        totalRenderedLines,
+      );
 
       let out = CURSOR_HOME;
 
@@ -746,7 +822,9 @@ export function runStartupSettingsScreen(
 ): Promise<StartupSettingsScreenResult> {
   return new Promise((resolve) => {
     const defaults = opts.defaultSettings ?? TUI_SETTINGS_DEFAULTS;
+    const settingRowCount = 5;
     let activeRow = 0;
+    let scrollOffset = 0;
     let mergeIndex = Math.max(
       0,
       STARTUP_MERGE_STRATEGY_OPTIONS.findIndex((option) => option.runtimeValue === defaults.mergeStrategy),
@@ -821,27 +899,67 @@ export function runStartupSettingsScreen(
     };
 
     const render = () => {
+      const rows = io.getRows();
       const cols = io.getCols();
-      let out = CURSOR_HOME;
+      const headerGap = rows >= 8 ? 1 : 0;
+      const footerGap = rows >= 6 ? 1 : 0;
+      const headerLines = 1 + headerGap;
+      const footerLines = 1 + footerGap;
+      const viewportHeight = Math.max(1, rows - headerLines - footerLines);
+      const bodyLines: string[] = [];
+      const rowStartLines: number[] = [];
+      const rowEndLines: number[] = [];
+      const summaryLines = (opts.summaryLines ?? []).flatMap((line) =>
+        wrapLineToWidth(`  ${stripAnsiForWidth(line)}`, cols),
+      );
+      const descriptionLines = wrapLineToWidth(activeDescription(), cols).map((line) => `${DIM}${line}${RESET}`);
 
-      out += `${BOLD}${opts.title ?? "Ninthwave · Start orchestration"}${RESET}${CLEAR_LINE}\n`;
-      out += `${CLEAR_LINE}\n`;
-
-      for (const line of opts.summaryLines ?? []) {
-        out += `  ${line.slice(0, cols + 80)}${CLEAR_LINE}\n`;
+      if (summaryLines.length > 0) {
+        bodyLines.push(...summaryLines, "");
       }
 
-      out += `${CLEAR_LINE}\n`;
-      out += `${renderChoiceRow("Merge", mergeValues(), activeRow === 0).slice(0, cols + 80)}${CLEAR_LINE}\n`;
-      out += `${renderChoiceRow("Reviews", reviewValues(), activeRow === 1).slice(0, cols + 80)}${CLEAR_LINE}\n`;
-      out += `${renderChoiceRow("Collaboration", collaborationValues(), activeRow === 2).slice(0, cols + 80)}${CLEAR_LINE}\n`;
-      out += `${renderChoiceRow("WIP limit", wipValues(), activeRow === 3).slice(0, cols + 80)}${CLEAR_LINE}\n`;
-      out += `${renderChoiceRow("Backend", backendValues(), activeRow === 4).slice(0, cols + 80)}${CLEAR_LINE}\n`;
-      out += `${CLEAR_LINE}\n`;
-      out += `${DIM}${activeDescription()}${RESET}${CLEAR_LINE}\n`;
-      out += `${CLEAR_LINE}\n`;
-      out += `${DIM}↑/↓ change row  ←/→ change value  Enter confirm  Esc cancel${RESET}${CLEAR_LINE}\n`;
-      out += `${CLEAR_LINE}`;
+      const choiceRows = [
+        renderChoiceRow("Merge", mergeValues(), activeRow === 0),
+        renderChoiceRow("Reviews", reviewValues(), activeRow === 1),
+        renderChoiceRow("Collaboration", collaborationValues(), activeRow === 2),
+        renderChoiceRow("WIP limit", wipValues(), activeRow === 3),
+        renderChoiceRow("Backend", backendValues(), activeRow === 4),
+      ];
+
+      for (let i = 0; i < choiceRows.length; i++) {
+        rowStartLines[i] = bodyLines.length;
+        bodyLines.push(truncateCheckboxLine(choiceRows[i]!, cols));
+        rowEndLines[i] = bodyLines.length;
+      }
+
+      bodyLines.push("", ...descriptionLines);
+      scrollOffset = clampActiveLineScrollOffset(
+        scrollOffset,
+        rowStartLines[activeRow] ?? 0,
+        rowEndLines[activeRow] ?? (rowStartLines[activeRow] ?? 0) + 1,
+        viewportHeight,
+        bodyLines.length,
+      );
+
+      const visibleBodyLines = bodyLines.slice(scrollOffset, scrollOffset + viewportHeight);
+      let out = CURSOR_HOME;
+
+      out += `${truncateCheckboxLine(`${BOLD}${opts.title ?? "Ninthwave · Start orchestration"}${RESET}`, cols)}${CLEAR_LINE}\n`;
+      if (headerGap) {
+        out += `${CLEAR_LINE}\n`;
+      }
+
+      for (const line of visibleBodyLines) {
+        out += `${truncateCheckboxLine(line, cols)}${CLEAR_LINE}\n`;
+      }
+      for (let i = visibleBodyLines.length; i < viewportHeight; i++) {
+        out += `${CLEAR_LINE}\n`;
+      }
+
+      out += `${truncateCheckboxLine(`${DIM}↑/↓ change row  ←/→ change value  Enter confirm  Esc cancel${RESET}`, cols)}${CLEAR_LINE}`;
+      if (footerGap) {
+        out += `\n${CLEAR_LINE}`;
+      }
 
       io.write(out);
     };
@@ -850,11 +968,11 @@ export function runStartupSettingsScreen(
       switch (key) {
         case "\x1B[A":
         case "k":
-          activeRow = (activeRow - 1 + 5) % 5;
+          activeRow = (activeRow - 1 + settingRowCount) % settingRowCount;
           break;
         case "\x1B[B":
         case "j":
-          activeRow = (activeRow + 1) % 5;
+          activeRow = (activeRow + 1) % settingRowCount;
           break;
         case "\x1B[D":
         case "h":
