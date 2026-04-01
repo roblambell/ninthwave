@@ -36,6 +36,7 @@ import {
   buildCopyPlan,
   executeCopyPlan,
   AGENT_TARGET_DIRS,
+  pruneManagedGeneratedEntries,
 } from "./setup.ts";
 import { AI_TOOL_PROFILES } from "../ai-tools.ts";
 
@@ -680,13 +681,18 @@ than average. Open a work item for anything that needs attention.
 
   // --- Skill files ---
   const skillsDir = join(projectDir, ".claude/skills");
-  copySkillFiles(skillsDir, bundleDir);
 
   // --- Agent files (copied into project for portability) ---
   const selection = agentSelection ?? {
     agents: canonicalSources.agents,
     toolDirs: [...AGENT_TARGET_DIRS],
   };
+  const pruned = pruneManagedGeneratedEntries(projectDir, bundleDir, selection);
+  for (const path of pruned) {
+    console.log(`  ${YELLOW}−${RESET} ${path} ${DIM}(pruned orphaned managed output)${RESET}`);
+  }
+
+  copySkillFiles(skillsDir, bundleDir);
   const plan = buildCopyPlan(projectDir, bundleDir, selection);
   executeCopyPlan(plan);
 

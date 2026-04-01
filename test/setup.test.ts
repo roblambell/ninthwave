@@ -26,6 +26,7 @@ import {
   discoverAgentSources,
   buildCopyPlan,
   executeCopyPlan,
+  pruneManagedGeneratedEntries,
   interactiveAgentSelection,
   AGENT_SOURCES,
   AGENT_TARGET_DIRS,
@@ -536,6 +537,26 @@ describe("buildCopyPlan", () => {
     expect(plan[0]!.status).toBe("replace");
   });
 
+  it("detects broken legacy symlinks as 'replace'", () => {
+    const projectDir = setupTempRepo();
+    const bundleDir = createFakeBundle(projectDir + "-bundle-parent");
+
+    const targetDir = join(projectDir, ".claude/agents");
+    mkdirSync(targetDir, { recursive: true });
+    const { symlinkSync: symlink } = require("fs");
+    symlink("../missing-agent.md", join(targetDir, "implementer.md"));
+
+    const selection: AgentSelection = {
+      agents: ["implementer.md"],
+      toolDirs: [AGENT_TARGET_DIRS[0]!],
+    };
+
+    const plan = buildCopyPlan(projectDir, bundleDir, selection);
+
+    expect(plan).toHaveLength(1);
+    expect(plan[0]!.status).toBe("replace");
+  });
+
   it("uses ninthwave- prefixed .agent.md suffix for GitHub Copilot target", () => {
     const projectDir = setupTempRepo();
     const bundleDir = createFakeBundle(projectDir + "-bundle-parent");
@@ -623,6 +644,31 @@ describe("executeCopyPlan", () => {
     expect(content).toBe("# Implementer Agent\n");
   });
 
+  it("replaces broken legacy symlinks with real files", () => {
+    const projectDir = setupTempRepo();
+    const bundleDir = createFakeBundle(projectDir + "-bundle-parent");
+
+    const targetDir = join(projectDir, ".claude/agents");
+    mkdirSync(targetDir, { recursive: true });
+    const { symlinkSync: symlink } = require("fs");
+    symlink("../missing-agent.md", join(targetDir, "implementer.md"));
+
+    const selection: AgentSelection = {
+      agents: ["implementer.md"],
+      toolDirs: [AGENT_TARGET_DIRS[0]!],
+    };
+
+    const plan = buildCopyPlan(projectDir, bundleDir, selection);
+    expect(plan[0]!.status).toBe("replace");
+
+    executeCopyPlan(plan);
+
+    const destPath = join(projectDir, ".claude/agents/implementer.md");
+    expect(lstatSync(destPath).isSymbolicLink()).toBe(false);
+    expect(lstatSync(destPath).isFile()).toBe(true);
+    expect(readFileSync(destPath, "utf-8")).toBe("# Implementer Agent\n");
+  });
+
   it("skips entries with status 'up-to-date'", () => {
     const projectDir = setupTempRepo();
     const bundleDir = createFakeBundle(projectDir + "-bundle-parent");
@@ -668,6 +714,47 @@ describe("executeCopyPlan", () => {
 
     const content = readFileSync(join(targetDir, "implementer.md"), "utf-8");
     expect(content).toBe("# Implementer Agent\n");
+  });
+});
+
+describe("pruneManagedGeneratedEntries", () => {
+  it("removes orphaned managed outputs while preserving unrelated files", () => {
+    const projectDir = setupTempRepo();
+    const bundleDir = createFakeBundle(projectDir + "-bundle-parent");
+
+    mkdirSync(join(projectDir, ".claude", "skills", "orphan-skill"), { recursive: true });
+    writeFileSync(join(projectDir, ".claude", "skills", "orphan-skill", "SKILL.md"), "# orphan\n");
+    mkdirSync(join(projectDir, ".claude", "agents"), { recursive: true });
+    writeFileSync(join(projectDir, ".claude", "agents", "orphan.md"), "# orphan\n");
+    mkdirSync(join(projectDir, ".opencode", "agents"), { recursive: true });
+    writeFileSync(join(projectDir, ".opencode", "agents", "orphan.md"), "# orphan\n");
+    mkdirSync(join(projectDir, ".github", "agents"), { recursive: true });
+    writeFileSync(join(projectDir, ".github", "agents", "ninthwave-orphan.agent.md"), "# orphan\n");
+    mkdirSync(join(projectDir, ".github", "workflows"), { recursive: true });
+    writeFileSync(join(projectDir, ".github", "workflows", "ci.yml"), "name: CI\n");
+    writeFileSync(join(projectDir, ".claude", "README.md"), "keep me\n");
+    const { symlinkSync: symlink } = require("fs");
+    symlink("../CLAUDE.md", join(projectDir, ".github", "copilot-instructions.md"));
+
+    const removed = pruneManagedGeneratedEntries(projectDir, bundleDir, {
+      agents: ["implementer.md"],
+      toolDirs: [...AGENT_TARGET_DIRS],
+    });
+
+    expect(removed).toEqual(expect.arrayContaining([
+      ".claude/skills/orphan-skill",
+      ".claude/agents/orphan.md",
+      ".opencode/agents/orphan.md",
+      ".github/agents/ninthwave-orphan.agent.md",
+      ".github/copilot-instructions.md",
+    ]));
+    expect(existsSync(join(projectDir, ".claude", "skills", "orphan-skill"))).toBe(false);
+    expect(existsSync(join(projectDir, ".claude", "agents", "orphan.md"))).toBe(false);
+    expect(existsSync(join(projectDir, ".opencode", "agents", "orphan.md"))).toBe(false);
+    expect(existsSync(join(projectDir, ".github", "agents", "ninthwave-orphan.agent.md"))).toBe(false);
+    expect(existsSync(join(projectDir, ".github", "copilot-instructions.md"))).toBe(false);
+    expect(existsSync(join(projectDir, ".github", "workflows", "ci.yml"))).toBe(true);
+    expect(existsSync(join(projectDir, ".claude", "README.md"))).toBe(true);
   });
 });
 

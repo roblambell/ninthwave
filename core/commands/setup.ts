@@ -291,6 +291,9 @@ export const AGENT_TARGET_DIRS = AI_TOOL_PROFILES.map((p) => ({
   tool: p.displayName,
 }));
 
+export const MANAGED_SKILLS_DIR = ".claude/skills";
+export const LEGACY_MANAGED_FILE_PATHS = [".github/copilot-instructions.md"] as const;
+
 /** Agent selection result: which agents to install and which tool directories to target. */
 export interface AgentSelection {
   /** Agent source filenames to install (e.g., ["implementer.md", "reviewer.md"]) */
@@ -438,13 +441,82 @@ export function executeCopyPlan(plan: CopyPlan[]): void {
 }
 
 /** Check if a path exists as a symlink (including broken symlinks). */
-function lstatExists(path: string): boolean {
+export function lstatExists(path: string): boolean {
   try {
     lstatSync(path);
     return true;
   } catch {
     return false;
   }
+}
+
+function removeManagedEntry(path: string): void {
+  rmSync(path, { recursive: true, force: true });
+}
+
+/**
+ * Prune legacy/orphaned generated outputs within ninthwave-managed target paths.
+ *
+ * Cleanup is intentionally narrow: only `.claude/skills/*`, selected agent target
+ * directories, and the legacy `.github/copilot-instructions.md` symlink are touched.
+ */
+export function pruneManagedGeneratedEntries(
+  projectDir: string,
+  bundleDir: string,
+  selection: AgentSelection,
+): string[] {
+  const expected = new Set<string>();
+  for (const skill of discoverSkillSources(bundleDir)) {
+    expected.add(`${MANAGED_SKILLS_DIR}/${skill}`);
+  }
+  for (const entry of buildCopyPlan(projectDir, bundleDir, selection)) {
+    expected.add(entry.displayPath);
+  }
+
+  const removed: string[] = [];
+  const managedRoots = new Set<string>([
+    MANAGED_SKILLS_DIR,
+    ...selection.toolDirs.map((toolDir) => toolDir.dir),
+  ]);
+
+  for (const root of managedRoots) {
+    const absRoot = join(projectDir, root);
+    if (!lstatExists(absRoot)) continue;
+
+    let stat;
+    try {
+      stat = lstatSync(absRoot);
+    } catch {
+      continue;
+    }
+    if (!stat.isDirectory()) continue;
+
+    for (const entry of readSortedDir(absRoot)) {
+      const displayPath = `${root}/${entry}`;
+      if (expected.has(displayPath)) continue;
+
+      removeManagedEntry(join(absRoot, entry));
+      removed.push(displayPath);
+    }
+  }
+
+  for (const legacyPath of LEGACY_MANAGED_FILE_PATHS) {
+    if (expected.has(legacyPath)) continue;
+
+    const absPath = join(projectDir, legacyPath);
+    if (!lstatExists(absPath)) continue;
+
+    try {
+      if (!lstatSync(absPath).isSymbolicLink()) continue;
+    } catch {
+      continue;
+    }
+
+    removeManagedEntry(absPath);
+    removed.push(legacyPath);
+  }
+
+  return removed;
 }
 
 /**

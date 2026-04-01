@@ -1854,6 +1854,56 @@ describe("initProject -- idempotency", () => {
       "set the timeout to the longest practical value available",
     );
   });
+
+  it("replaces broken symlinks and prunes orphaned managed outputs on rerun", () => {
+    const projectDir = setupTempRepo();
+    const bundleDir = createFakeBundle(projectDir + "-bundle-parent");
+
+    const deps: InitDeps = {
+      commandExists: (() => false) as CommandChecker,
+      getEnv: () => undefined,
+    };
+
+    initProject(projectDir, bundleDir, deps);
+
+    const { rmSync, symlinkSync } = require("fs");
+
+    rmSync(join(projectDir, ".claude", "skills", "work"), { recursive: true, force: true });
+    symlinkSync("../missing-skill", join(projectDir, ".claude", "skills", "work"));
+
+    rmSync(join(projectDir, ".claude", "agents", "implementer.md"), { recursive: true, force: true });
+    symlinkSync("../missing-agent.md", join(projectDir, ".claude", "agents", "implementer.md"));
+
+    mkdirSync(join(projectDir, ".claude", "skills", "orphan-skill"), { recursive: true });
+    writeFileSync(join(projectDir, ".claude", "skills", "orphan-skill", "SKILL.md"), "# orphan\n");
+    writeFileSync(join(projectDir, ".claude", "agents", "orphan.md"), "# orphan\n");
+    writeFileSync(join(projectDir, ".opencode", "agents", "orphan.md"), "# orphan\n");
+    writeFileSync(join(projectDir, ".github", "agents", "ninthwave-orphan.agent.md"), "# orphan\n");
+    symlinkSync("../CLAUDE.md", join(projectDir, ".github", "copilot-instructions.md"));
+    mkdirSync(join(projectDir, ".github", "workflows"), { recursive: true });
+    writeFileSync(join(projectDir, ".github", "workflows", "ci.yml"), "name: CI\n");
+
+    initProject(projectDir, bundleDir, deps);
+
+    expect(lstatSync(join(projectDir, ".claude", "skills", "work")).isDirectory()).toBe(true);
+    expect(lstatSync(join(projectDir, ".claude", "skills", "work")).isSymbolicLink()).toBe(false);
+    expect(readFileSync(join(projectDir, ".claude", "skills", "work", "SKILL.md"), "utf-8")).toBe(
+      "# work\n",
+    );
+
+    expect(lstatSync(join(projectDir, ".claude", "agents", "implementer.md")).isFile()).toBe(true);
+    expect(lstatSync(join(projectDir, ".claude", "agents", "implementer.md")).isSymbolicLink()).toBe(false);
+    expect(readFileSync(join(projectDir, ".claude", "agents", "implementer.md"), "utf-8")).toContain(
+      "set the timeout to the longest practical value available",
+    );
+
+    expect(existsSync(join(projectDir, ".claude", "skills", "orphan-skill"))).toBe(false);
+    expect(existsSync(join(projectDir, ".claude", "agents", "orphan.md"))).toBe(false);
+    expect(existsSync(join(projectDir, ".opencode", "agents", "orphan.md"))).toBe(false);
+    expect(existsSync(join(projectDir, ".github", "agents", "ninthwave-orphan.agent.md"))).toBe(false);
+    expect(existsSync(join(projectDir, ".github", "copilot-instructions.md"))).toBe(false);
+    expect(existsSync(join(projectDir, ".github", "workflows", "ci.yml"))).toBe(true);
+  });
 });
 
 // --- Merged flow: preserves existing files ---
