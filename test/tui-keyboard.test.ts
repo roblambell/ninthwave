@@ -336,7 +336,7 @@ describe("controls overlay number-key selection", () => {
     cleanup();
   });
 
-  it("key 9 sets bypass only when bypassEnabled", () => {
+  it("key 9 is a no-op when bypass is hidden", () => {
     const ac = new AbortController();
     const stdin = makeFakeStdin();
     const onStrategyChange = vi.fn();
@@ -349,10 +349,23 @@ describe("controls overlay number-key selection", () => {
     const cleanup = setupKeyboardShortcuts(ac, () => {}, stdin as any, state);
 
     stdin.emit("data", "9");
-    expect(state.mergeStrategy).toBe("manual"); // unchanged
+    expect(state.mergeStrategy).toBe("manual");
     expect(onStrategyChange).not.toHaveBeenCalled();
+    cleanup();
+  });
 
-    state.bypassEnabled = true;
+  it("key 9 sets bypass when bypassEnabled", () => {
+    const ac = new AbortController();
+    const stdin = makeFakeStdin();
+    const onStrategyChange = vi.fn();
+    const state = makeTuiState({
+      showControls: true,
+      mergeStrategy: "manual",
+      bypassEnabled: true,
+      onStrategyChange,
+    });
+    const cleanup = setupKeyboardShortcuts(ac, () => {}, stdin as any, state);
+
     stdin.emit("data", "9");
     expect(state.mergeStrategy).toBe("bypass");
     expect(onStrategyChange).toHaveBeenCalledWith("bypass");

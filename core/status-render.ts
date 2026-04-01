@@ -2462,12 +2462,9 @@ export function renderControlsOverlay(
   const mergeOptions: [string, MergeStrategy, string][] = [
     ["7", "manual", "Manual"],
     ["8", "auto", "Auto"],
-    ["9", "bypass", "Bypass"],
   ];
+  if (bypassEnabled) mergeOptions.push(["9", "bypass", "Bypass"]);
   const mergeLine = mergeOptions.map(([key, strat, label]) => {
-    if (strat === "bypass" && !bypassEnabled) {
-      return `${DIM}[${key}] ${label}${RESET}`;
-    }
     return strat === mergeStrategy
       ? `${BOLD}[${key}] ${strategyIndicator(strat)} ${label}${RESET}`
       : `${DIM}[${key}]${RESET} ${strategyIndicator(strat)} ${label}`;

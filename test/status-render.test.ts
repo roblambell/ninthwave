@@ -3817,13 +3817,20 @@ describe("renderControlsOverlay", () => {
     expect(text).toContain("All PRs");
   });
 
-  it("shows merge strategies with number keys", () => {
+  it("hides bypass merge strategy when bypassEnabled is false", () => {
     const lines = renderControlsOverlay(100, 40, baseOpts);
     const text = stripAnsi(lines.join("\n"));
     expect(text).toContain("[7]");
     expect(text).toContain("Manual");
     expect(text).toContain("[8]");
     expect(text).toContain("Auto");
+    expect(text).not.toContain("[9]");
+    expect(text).not.toContain("Bypass");
+  });
+
+  it("shows bypass merge strategy when bypassEnabled is true", () => {
+    const lines = renderControlsOverlay(100, 40, { ...baseOpts, bypassEnabled: true });
+    const text = stripAnsi(lines.join("\n"));
     expect(text).toContain("[9]");
     expect(text).toContain("Bypass");
   });
