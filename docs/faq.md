@@ -68,6 +68,8 @@ This checks all prerequisites, configuration, and connectivity. It will tell you
 
 A work item is a single unit of work sized for one PR (roughly 200-400 lines of code). It's a markdown file stored in `.ninthwave/work/` with a title, description, acceptance criteria, test plan, and dependency information.
 
+`.ninthwave/work/` is the live queue of open work, not a permanent tracker. Completed items disappear from that directory on purpose so it always answers "what is still open?" rather than mixing open and closed work together.
+
 Example filename: `1-auth--H-AUTH-1.md`
 
 The filename encodes priority (`1` = high), domain (`auth`), and a unique ID (`H-AUTH-1`). The ID format is `<Priority>-<Domain>-<Number>` where priority is C (critical), H (high), M (medium), or L (low).
@@ -79,6 +81,19 @@ Each work item file includes:
 - **Domain** -- logical grouping (e.g., auth, frontend, infra)
 - **Test plan** -- what tests the worker must write or verify
 - **Acceptance criteria** -- definition of done
+
+### Why do completed items disappear from `.ninthwave/work/`?
+
+Because `.ninthwave/work/` is an active queue, not a `done/` board. When a work item finishes, its PR removes the file so the queue stays focused on work that still needs attention.
+
+Retrospective lookup happens in the systems that already record completed work:
+
+- **GitHub PRs** -- review discussion, CI results, and merged diffs
+- **git history** -- the permanent code history
+- **`nw history <ID>`** -- the item's state transition timeline
+- **`nw logs`** -- orchestration events and failures
+
+If you don't see a finished item in `.ninthwave/work/`, that's the expected success case.
 
 ### What is the orchestrator?
 
@@ -217,6 +232,14 @@ nw list --ready      # Only items with no unmet dependencies
 nw deps H-AUTH-2     # Full dependency chain for an item
 ```
 
+**Item history and retrospective lookup:**
+
+```bash
+nw history H-AUTH-2  # State transition timeline for one item
+```
+
+Use merged PRs, `git log`, `nw history`, and `nw logs` when you want to look back at completed work. `.ninthwave/work/` only shows open work.
+
 **Orchestration logs:**
 
 ```bash
@@ -324,7 +347,7 @@ ninthwave is intentionally narrow in scope:
 - **Not an AI tool** -- it doesn't write code or make LLM calls. Workers (Claude Code, OpenCode, etc.) do the coding. ninthwave orchestrates.
 - **Not a CI/CD system** -- it monitors your existing CI (GitHub Actions, etc.) but doesn't replace it.
 - **Not a code review tool** -- it can dispatch review workers, but the review logic lives in agent prompts, not ninthwave.
-- **Not a project management system** -- `.ninthwave/work/` is a lightweight file-based queue, not a ticket tracker.
+- **Not a project management system** -- `.ninthwave/work/` is a lightweight file-based queue of open work, not a permanent ticket tracker.
 - **Not a compute platform** -- you own your compute, API keys, and billing. ninthwave runs on your machine.
 
 The orchestrator is a deterministic TypeScript state machine. It doesn't guess, hallucinate, or make judgment calls -- it follows rules. AI intelligence lives in the workers, not the orchestrator.
