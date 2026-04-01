@@ -15,7 +15,14 @@ import {
   type LogLevelFilter,
 } from "../core/tui-keyboard.ts";
 import type { MergeStrategy } from "../core/orchestrator.ts";
-import type { ViewOptions, PanelMode, LogEntry as PanelLogEntry } from "../core/status-render.ts";
+import {
+  buildStatusLayout,
+  getStatusVisibleLineRange,
+  type ViewOptions,
+  type PanelMode,
+  type StatusItem,
+  type LogEntry as PanelLogEntry,
+} from "../core/status-render.ts";
 import { EventEmitter } from "events";
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
@@ -60,6 +67,36 @@ function makeTuiState(overrides: Partial<TuiState> = {}): TuiState {
     savedLogScrollOffset: 0,
     ...overrides,
   };
+}
+
+function makeStatusItem(overrides: Partial<StatusItem> & Pick<StatusItem, "id">): StatusItem {
+  return {
+    ...overrides,
+    id: overrides.id,
+    title: overrides.title ?? overrides.id,
+    state: overrides.state ?? "implementing",
+    prNumber: overrides.prNumber ?? null,
+    ageMs: overrides.ageMs ?? 60_000,
+    repoLabel: overrides.repoLabel ?? "ninthwave",
+    dependencies: overrides.dependencies ?? [],
+  };
+}
+
+function makeStatusNavigationState(
+  items: StatusItem[],
+  overrides: Partial<TuiState> = {},
+  viewOptions: ViewOptions = { showBlockerDetail: true },
+): TuiState {
+  const statusLayout = buildStatusLayout(items, 100, undefined, false, viewOptions);
+  const selectableItemIds = statusLayout.visibleLayout?.selectableItemIds ?? [];
+  return makeTuiState({
+    panelMode: "status-only",
+    viewOptions,
+    statusLayout,
+    getItemCount: () => selectableItemIds.length,
+    getSelectedItemId: (index) => selectableItemIds[index],
+    ...overrides,
+  });
 }
 
 // ── Log ring buffer ──────────────────────────────────────────────────────────
@@ -280,25 +317,55 @@ describe("setupKeyboardShortcuts", () => {
     cleanup();
   });
 
-  it("Up/Down navigate items on the status page", () => {
+  it("Up/Down wrap through the visible selectable order on the status page", () => {
     const ac = new AbortController();
     const stdin = makeFakeStdin();
-    const state = makeTuiState({
-      panelMode: "status-only",
-      selectedIndex: 1,
-      getItemCount: () => 4,
+    const state = makeStatusNavigationState([
+      makeStatusItem({ id: "B-2", state: "queued", dependencies: ["A-1"] }),
+      makeStatusItem({ id: "C-3", state: "review" }),
+      makeStatusItem({ id: "A-1", state: "implementing" }),
+    ], {
+      selectedIndex: 0,
     });
     const cleanup = setupKeyboardShortcuts(ac, () => {}, stdin as any, state);
 
     stdin.emit("data", "\x1b[A");
-    expect(state.selectedIndex).toBe(0);
-    expect(state.logScrollOffset).toBe(0);
+    expect(state.selectedIndex).toBe(2);
+    expect(state.getSelectedItemId?.(state.selectedIndex ?? -1)).toBe("B-2");
 
     stdin.emit("data", "\x1b[B");
-    expect(state.selectedIndex).toBe(1);
-    expect(state.scrollOffset).toBe(1);
+    expect(state.selectedIndex).toBe(0);
+    expect(state.getSelectedItemId?.(state.selectedIndex ?? -1)).toBe("A-1");
 
     cleanup();
+  });
+
+  it("j/k use the same status-mode movement rules as arrow keys", () => {
+    const ac = new AbortController();
+    const arrowStdin = makeFakeStdin();
+    const vimStdin = makeFakeStdin();
+    const items = [
+      makeStatusItem({ id: "B-2", state: "queued", dependencies: ["A-1"] }),
+      makeStatusItem({ id: "C-3", state: "review" }),
+      makeStatusItem({ id: "A-1", state: "implementing" }),
+    ];
+    const arrowState = makeStatusNavigationState(items, { selectedIndex: 0 });
+    const vimState = makeStatusNavigationState(items, { selectedIndex: 0 });
+    const arrowCleanup = setupKeyboardShortcuts(ac, () => {}, arrowStdin as any, arrowState);
+    const vimCleanup = setupKeyboardShortcuts(ac, () => {}, vimStdin as any, vimState);
+
+    arrowStdin.emit("data", "\x1b[A");
+    vimStdin.emit("data", "k");
+    expect(vimState.selectedIndex).toBe(arrowState.selectedIndex);
+    expect(vimState.scrollOffset).toBe(arrowState.scrollOffset);
+
+    arrowStdin.emit("data", "\x1b[B");
+    vimStdin.emit("data", "j");
+    expect(vimState.selectedIndex).toBe(arrowState.selectedIndex);
+    expect(vimState.scrollOffset).toBe(arrowState.scrollOffset);
+
+    arrowCleanup();
+    vimCleanup();
   });
 
   it("Up/Down scroll logs on the logs page", () => {
@@ -336,6 +403,48 @@ describe("setupKeyboardShortcuts", () => {
     expect(state.logScrollOffset).toBe(1);
 
     cleanup();
+  });
+
+  it("status scrolling follows rendered line spans when blocker detail adds extra lines", () => {
+    const ac = new AbortController();
+    const stdin = makeFakeStdin();
+    const items = [
+      makeStatusItem({ id: "A-1", state: "implementing", dependencies: [] }),
+      ...Array.from({ length: 7 }, (_, index) => makeStatusItem({
+        id: `B-${index + 2}`,
+        state: "review",
+        dependencies: ["A-1"],
+      })),
+    ];
+    const originalRows = process.stdout.rows;
+    Object.defineProperty(process.stdout, "rows", { value: 12, configurable: true });
+    try {
+      const state = makeStatusNavigationState(items, {
+        selectedIndex: 0,
+        scrollOffset: 0,
+      });
+      const cleanup = setupKeyboardShortcuts(ac, () => {}, stdin as any, state);
+      try {
+        for (let i = 0; i < 7; i++) {
+          stdin.emit("data", "\x1b[B");
+        }
+
+        const selectedItemId = state.getSelectedItemId?.(state.selectedIndex ?? -1);
+        const span = state.statusLayout?.visibleLayout?.renderedLineSpans[selectedItemId ?? ""];
+        const visibleRange = getStatusVisibleLineRange(state.statusLayout!, process.stdout.rows ?? 24, state.scrollOffset);
+
+        expect(selectedItemId).toBe("B-8");
+        expect(span).toBeDefined();
+        expect(span!.startLineIndex).toBeGreaterThan(state.selectedIndex ?? 0);
+        expect(state.scrollOffset).toBeGreaterThan(state.selectedIndex ?? 0);
+        expect(span!.startLineIndex).toBeGreaterThanOrEqual(visibleRange.visibleStartLineIndex);
+        expect(span!.endLineIndex).toBeLessThanOrEqual(visibleRange.visibleEndLineIndex);
+      } finally {
+        cleanup();
+      }
+    } finally {
+      Object.defineProperty(process.stdout, "rows", { value: originalRows, configurable: true });
+    }
   });
 });
 

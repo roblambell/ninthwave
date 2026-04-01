@@ -5,12 +5,14 @@
 import type { MergeStrategy } from "./orchestrator.ts";
 import type { LogEntry } from "./types.ts";
 import {
+  type FrameLayout,
   type ViewOptions,
   type PanelMode,
   type LogEntry as PanelLogEntry,
   getTerminalHeight,
   clampScrollOffset,
   detailOverlayMaxScroll,
+  scrollStatusItemIntoView,
 } from "./status-render.ts";
 import {
   TUI_SETTINGS_ROWS,
@@ -132,6 +134,8 @@ export interface TuiState {
   savedLogScrollOffset?: number;
   /** Total content lines in the current detail overlay (set by render loop for clamping). */
   detailContentLines?: number;
+  /** Most recent status layout rendered for status-mode navigation/scroll alignment. */
+  statusLayout?: FrameLayout | null;
   /** Called after a debounced merge strategy change is applied. */
   onStrategyChange?: (strategy: MergeStrategy) => void;
   /** Called when the user cycles panel mode via Tab (for preference persistence). */
@@ -335,6 +339,36 @@ export function setupKeyboardShortcuts(
     queueStrategyChange(newStrategy);
   };
 
+  const moveStatusSelection = (delta: -1 | 1) => {
+    if (!tuiState) return;
+
+    const selectableItemIds = tuiState.statusLayout?.visibleLayout?.selectableItemIds;
+    const count = selectableItemIds?.length ?? tuiState.getItemCount?.() ?? 0;
+    if (count <= 0) return;
+
+    const currentIndex = Math.max(0, Math.min(tuiState.selectedIndex ?? 0, count - 1));
+    const nextIndex = (currentIndex + delta + count) % count;
+    tuiState.selectedIndex = nextIndex;
+
+    const selectedItemId = selectableItemIds?.[nextIndex] ?? tuiState.getSelectedItemId?.(nextIndex);
+    if (selectedItemId && tuiState.statusLayout) {
+      tuiState.scrollOffset = scrollStatusItemIntoView(
+        tuiState.statusLayout,
+        getTerminalHeight(),
+        tuiState.scrollOffset,
+        selectedItemId,
+        delta,
+      );
+      return;
+    }
+
+    if (delta < 0) {
+      tuiState.scrollOffset = Math.min(tuiState.scrollOffset, nextIndex);
+    } else {
+      tuiState.scrollOffset = nextIndex;
+    }
+  };
+
   const onData = (key: string) => {
     // q still exits immediately (discoverable via ? help overlay)
     if (key === "q") {
@@ -480,11 +514,7 @@ export function setupKeyboardShortcuts(
         } else if (tuiState.panelMode === "logs-only") {
           tuiState.logScrollOffset = Math.max(0, tuiState.logScrollOffset - 1);
         } else {
-          if ((tuiState.selectedIndex ?? 0) > 0) {
-            tuiState.selectedIndex = (tuiState.selectedIndex ?? 0) - 1;
-          }
-          // Scroll follows selection: keep selected item in view
-          tuiState.scrollOffset = Math.min(tuiState.scrollOffset, tuiState.selectedIndex ?? 0);
+          moveStatusSelection(-1);
         }
         break;
       }
@@ -496,13 +526,7 @@ export function setupKeyboardShortcuts(
         } else if (tuiState.panelMode === "logs-only") {
           tuiState.logScrollOffset += 1;
         } else {
-          const maxIdx = (tuiState.getItemCount?.() ?? 0) - 1;
-          const curIdx = tuiState.selectedIndex ?? 0;
-          if (curIdx < maxIdx) {
-            tuiState.selectedIndex = curIdx + 1;
-          }
-          // Scroll follows selection: ensure selected item stays visible
-          tuiState.scrollOffset = tuiState.selectedIndex ?? 0;
+          moveStatusSelection(1);
         }
         break;
       }
@@ -521,7 +545,7 @@ export function setupKeyboardShortcuts(
         } else if (tuiState.panelMode === "logs-only") {
           tuiState.logScrollOffset += 1;
         } else {
-          handled = false;
+          moveStatusSelection(1);
         }
         break;
       case "k": // Scroll up (detail overlay or log panel)
@@ -530,7 +554,7 @@ export function setupKeyboardShortcuts(
         } else if (tuiState.panelMode === "logs-only") {
           tuiState.logScrollOffset = Math.max(0, tuiState.logScrollOffset - 1);
         } else {
-          handled = false;
+          moveStatusSelection(-1);
         }
         break;
       case "l": { // Cycle log level filter (info -> warn -> error -> all)
@@ -594,8 +618,9 @@ export function setupKeyboardShortcuts(
   const onResize = () => {
     if (tuiState) {
       const termRows = getTerminalHeight();
-      const viewportHeight = Math.max(1, termRows - 10); // approximate
-      tuiState.scrollOffset = clampScrollOffset(tuiState.scrollOffset, 999, viewportHeight);
+      const viewportHeight = Math.max(1, termRows - 10); // approximate fallback
+      const itemLineCount = tuiState.statusLayout?.itemLines.length ?? 999;
+      tuiState.scrollOffset = clampScrollOffset(tuiState.scrollOffset, itemLineCount, viewportHeight);
       // Also clamp log scroll offset on resize
       const filtered = filterLogsByLevel(tuiState.logBuffer, tuiState.logLevelFilter);
       tuiState.logScrollOffset = clampScrollOffset(tuiState.logScrollOffset, filtered.length, viewportHeight);

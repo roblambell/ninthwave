@@ -81,6 +81,7 @@ import {
 } from "../daemon.ts";
 import type { TokenUsage } from "../crew.ts";
 import {
+  buildVisibleStatusLayoutMetadata,
   formatStatusTable,
   mapDaemonItemState,
   getTerminalWidth,
@@ -427,11 +428,11 @@ export function orchestratorItemsToStatusItems(
 
 export function getSelectedItemId(items: StatusItem[], index: number): string | undefined {
   if (index < 0) return undefined;
-  return items[index]?.id;
+  return buildVisibleStatusLayoutMetadata(items).selectableItemIds[index];
 }
 
 export function getItemCount(items: StatusItem[]): number {
-  return items.length;
+  return buildVisibleStatusLayoutMetadata(items).selectableItemIds.length;
 }
 
 /**
@@ -546,6 +547,7 @@ export function renderTuiPanelFrame(
         tuiState.panelMode, statusItems, filteredLogs, termWidth, termRows,
         { wipLimit, viewOptions: fullScreenViewOptions, logScrollOffset: tuiState.logScrollOffset, statusScrollOffset: tuiState.scrollOffset, selectedIndex: tuiState.selectedIndex },
       );
+      tuiState.statusLayout = panelLayout.statusPanel;
       const frameLines = renderPanelFrame(panelLayout, termRows, termWidth, tuiState.scrollOffset);
       const content = frameLines.join("\n");
       write(content.replace(/\n/g, "\x1B[K\n") + "\x1B[K");
@@ -567,6 +569,7 @@ export function renderTuiPanelFrame(
         selectedIndex: tuiState.selectedIndex,
       },
     );
+    tuiState.statusLayout = panelLayout.statusPanel;
     const frameLines = renderPanelFrame(panelLayout, termRows, termWidth, tuiState.scrollOffset);
     const content = frameLines.join("\n");
     write(content.replace(/\n/g, "\x1B[K\n") + "\x1B[K");
@@ -631,6 +634,7 @@ export async function runTUI(opts: RunTUIOptions): Promise<void> {
     detailScrollOffset: 0,
     detailContentLines: 0,
     savedLogScrollOffset: 0,
+    statusLayout: null,
     getSelectedItemId: (index: number) => {
       const data = getItems();
       return getSelectedItemId(data.items, index);
@@ -710,6 +714,7 @@ export async function runTUI(opts: RunTUIOptions): Promise<void> {
           selectedIndex: tuiState.selectedIndex,
         },
       );
+      tuiState.statusLayout = panelLayout.statusPanel;
       const frameLines = renderPanelFrame(panelLayout, termRows, termWidth, tuiState.scrollOffset);
       const content = frameLines.join("\n");
       write(content.replace(/\n/g, "\x1B[K\n") + "\x1B[K");
@@ -2851,6 +2856,7 @@ export async function cmdOrchestrate(
     detailScrollOffset: 0,
     detailContentLines: 0,
     savedLogScrollOffset: 0,
+    statusLayout: null,
     getSelectedItemId: (index: number) => {
       const items = orchestratorItemsToStatusItems(lastTuiItems, getRemoteItemSnapshots(), orch.config.maxTimeoutExtensions, lastTuiHeartbeats);
       return getSelectedItemId(items, index);

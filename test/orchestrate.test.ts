@@ -1067,16 +1067,16 @@ describe("TUI item selection helpers", () => {
     expect(getItemCount(items)).toBe(3);
   });
 
-  it("getSelectedItemId returns queued item ids at the correct indices", () => {
+  it("getSelectedItemId follows visible selectable order, including queued items", () => {
     const items = [
-      makeStatusItem({ id: "H-TI-1", state: "implementing" }),
-      makeStatusItem({ id: "H-TI-2", state: "queued" }),
+      makeStatusItem({ id: "H-TI-2", state: "queued", dependencies: ["H-TI-1"] }),
       makeStatusItem({ id: "H-TI-3", state: "review" }),
+      makeStatusItem({ id: "H-TI-1", state: "implementing" }),
     ];
 
     expect(getSelectedItemId(items, 0)).toBe("H-TI-1");
-    expect(getSelectedItemId(items, 1)).toBe("H-TI-2");
-    expect(getSelectedItemId(items, 2)).toBe("H-TI-3");
+    expect(getSelectedItemId(items, 1)).toBe("H-TI-3");
+    expect(getSelectedItemId(items, 2)).toBe("H-TI-2");
     expect(getSelectedItemId(items, 3)).toBeUndefined();
   });
 });
@@ -2982,11 +2982,11 @@ describe("setupKeyboardShortcuts", () => {
     (stdin as any)._emit("data", "\x1b[A"); // Up
     expect(tuiState.selectedIndex).toBe(0);
 
-    (stdin as any)._emit("data", "\x1b[A"); // Up at top -- stays at 0
-    expect(tuiState.selectedIndex).toBe(0);
+    (stdin as any)._emit("data", "\x1b[A"); // Up at top -- wraps to bottom
+    expect(tuiState.selectedIndex).toBe(4);
   });
 
-  it("Down arrow clamps selectedIndex to max items", () => {
+  it("Down arrow wraps selectedIndex at the bottom", () => {
     const ac = new AbortController();
     const stdin = mockStdin();
     const tuiState: TuiState = {
@@ -3010,7 +3010,7 @@ describe("setupKeyboardShortcuts", () => {
     setupKeyboardShortcuts(ac, () => {}, stdin, tuiState);
 
     (stdin as any)._emit("data", "\x1b[B"); // Down -- already at max
-    expect(tuiState.selectedIndex).toBe(1); // stays clamped
+    expect(tuiState.selectedIndex).toBe(0);
   });
 
   it("Escape does nothing when no help and no detail open", () => {
@@ -5193,7 +5193,7 @@ describe("log panel scroll (j/k/G keys)", () => {
     }
 
     const origRows = process.stdout.rows;
-    process.stdout.rows = 40;
+    Object.defineProperty(process.stdout, "rows", { value: 40, configurable: true });
     try {
       const tuiState = baseTuiState({
         logBuffer: entries,
@@ -5209,7 +5209,7 @@ describe("log panel scroll (j/k/G keys)", () => {
       const expectedOffset = Math.max(0, entries.length - 30);
       expect(tuiState.logScrollOffset).toBe(expectedOffset);
     } finally {
-      process.stdout.rows = origRows;
+      Object.defineProperty(process.stdout, "rows", { value: origRows, configurable: true });
     }
   });
 });

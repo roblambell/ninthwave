@@ -1808,6 +1808,82 @@ export function clampScrollOffset(
   return Math.max(0, Math.min(scrollOffset, maxOffset));
 }
 
+export interface StatusVisibleLineRange {
+  clampedOffset: number;
+  visibleStartLineIndex: number;
+  visibleEndLineIndex: number;
+  viewportHeight: number;
+  effectiveViewportHeight: number;
+  queuePinned: boolean;
+}
+
+export function getStatusVisibleLineRange(
+  layout: FrameLayout,
+  termRows: number,
+  scrollOffset: number,
+): StatusVisibleLineRange {
+  const { headerLines, itemLines, footerLines, queueStartIndex, visibleLayout } = layout;
+  const baseViewport = Math.max(1, termRows - headerLines.length - footerLines.length);
+  const maxOffset = Math.max(0, itemLines.length - baseViewport);
+  const hasScrollUp = scrollOffset > 0;
+  const hasScrollDown = scrollOffset < maxOffset && itemLines.length > baseViewport;
+  const scrollIndicatorLines = (hasScrollUp ? 1 : 0) + (hasScrollDown ? 1 : 0);
+  const viewportHeight = Math.max(1, termRows - headerLines.length - footerLines.length - scrollIndicatorLines);
+  const clampedOffset = clampScrollOffset(scrollOffset, itemLines.length, viewportHeight);
+
+  const queuedCount = visibleLayout?.queueItemCount
+    ?? (queueStartIndex != null ? itemLines.length - queueStartIndex : 0);
+  const needsQueuePin = queueStartIndex != null && queuedCount > 0;
+  const queuePinned = needsQueuePin && queueStartIndex! >= clampedOffset + viewportHeight;
+  const effectiveViewportHeight = queuePinned
+    ? Math.max(1, viewportHeight - 1)
+    : viewportHeight;
+
+  return {
+    clampedOffset,
+    visibleStartLineIndex: clampedOffset,
+    visibleEndLineIndex: clampedOffset + effectiveViewportHeight - 1,
+    viewportHeight,
+    effectiveViewportHeight,
+    queuePinned,
+  };
+}
+
+export function scrollStatusItemIntoView(
+  layout: FrameLayout,
+  termRows: number,
+  scrollOffset: number,
+  itemId: string,
+  direction: -1 | 1,
+): number {
+  const span = layout.visibleLayout?.renderedLineSpans[itemId];
+  if (!span) return scrollOffset;
+
+  const currentRange = getStatusVisibleLineRange(layout, termRows, scrollOffset);
+  if (span.startLineIndex >= currentRange.visibleStartLineIndex
+    && span.endLineIndex <= currentRange.visibleEndLineIndex) {
+    return currentRange.clampedOffset;
+  }
+
+  const visibleOffsets = new Set<number>();
+  const maxCandidate = Math.max(0, layout.itemLines.length - 1);
+  for (let candidate = 0; candidate <= maxCandidate; candidate++) {
+    const candidateRange = getStatusVisibleLineRange(layout, termRows, candidate);
+    if (span.startLineIndex >= candidateRange.visibleStartLineIndex
+      && span.endLineIndex <= candidateRange.visibleEndLineIndex) {
+      visibleOffsets.add(candidateRange.clampedOffset);
+    }
+  }
+
+  const orderedOffsets = [...visibleOffsets].sort((a, b) => a - b);
+  if (orderedOffsets.length === 0) return currentRange.clampedOffset;
+  if (direction > 0) {
+    return orderedOffsets.find((offset) => offset >= currentRange.clampedOffset) ?? orderedOffsets[0]!;
+  }
+  return [...orderedOffsets].reverse().find((offset) => offset <= currentRange.clampedOffset)
+    ?? orderedOffsets[orderedOffsets.length - 1]!;
+}
+
 /**
  * Render a full-screen frame from a FrameLayout, slicing item lines to fit
  * the viewport between pinned header and footer. Adds scroll indicators
@@ -1823,30 +1899,16 @@ export function renderFullScreenFrame(
 ): string[] {
   const { headerLines, itemLines, footerLines, queueStartIndex, visibleLayout } = layout;
 
-  // Reserve space for scroll indicators (1 line each when needed)
-  const hasScrollUp = scrollOffset > 0;
-  const maxOffset = Math.max(0, itemLines.length - Math.max(1, termRows - headerLines.length - footerLines.length));
-  const hasScrollDown = scrollOffset < maxOffset && itemLines.length > (termRows - headerLines.length - footerLines.length);
-
   // Check if we need a pinned queue summary (queue exists but is entirely below the fold)
   const queuedCount = visibleLayout?.queueItemCount
     ?? (queueStartIndex != null ? itemLines.length - queueStartIndex : 0);
-  const needsQueuePin = queueStartIndex != null && queuedCount > 0;
-
-  const scrollIndicatorLines = (hasScrollUp ? 1 : 0) + (hasScrollDown ? 1 : 0);
-  const viewportHeight = Math.max(1, termRows - headerLines.length - footerLines.length - scrollIndicatorLines);
 
   // Clamp scroll offset
-  const clampedOffset = clampScrollOffset(scrollOffset, itemLines.length, viewportHeight);
-
-  // Determine if queue is entirely scrolled off
-  const viewEnd = clampedOffset + viewportHeight;
-  const queueScrolledOff = needsQueuePin && queueStartIndex! >= viewEnd;
+  const visibleRange = getStatusVisibleLineRange(layout, termRows, scrollOffset);
+  const clampedOffset = visibleRange.clampedOffset;
 
   // If queue is scrolled off, reserve 1 line for the pinned queue summary
-  const effectiveViewport = queueScrolledOff
-    ? Math.max(1, viewportHeight - 1)
-    : viewportHeight;
+  const effectiveViewport = visibleRange.effectiveViewportHeight;
 
   // Re-slice with effective viewport
   const visibleItems = itemLines.slice(clampedOffset, clampedOffset + effectiveViewport);
@@ -1863,13 +1925,13 @@ export function renderFullScreenFrame(
   output.push(...visibleItems);
 
   // Pinned queue summary when queue is below the fold
-  if (queueScrolledOff) {
+  if (visibleRange.queuePinned) {
     output.push(formatQueueSummary(queuedCount));
   }
 
   // Scroll-down indicator
   const hiddenBelow = Math.max(0, itemLines.length - clampedOffset - effectiveViewport);
-  if (hiddenBelow > 0 && !queueScrolledOff) {
+  if (hiddenBelow > 0 && !visibleRange.queuePinned) {
     output.push(`  ${DIM}↓ ${hiddenBelow} more below${RESET}`);
   }
 
@@ -2092,6 +2154,7 @@ export function renderPanelFrame(
       itemLines: statusPanel.itemLines,
       footerLines,
       queueStartIndex: statusPanel.queueStartIndex,
+      visibleLayout: statusPanel.visibleLayout,
     };
     const frame = renderFullScreenFrame(fullLayout, termRows, termCols, statusScrollOffset);
     return padToHeight(frame, termRows);
