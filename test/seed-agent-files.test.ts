@@ -15,6 +15,11 @@ function makeTmpDir(): string {
   return mkdtempSync(join(tmpdir(), "nw-seed-test-"));
 }
 
+function writeAgentFile(hubRoot: string, filename: string, content = "# Agent\n"): void {
+  mkdirSync(join(hubRoot, "agents"), { recursive: true });
+  writeFileSync(join(hubRoot, "agents", filename), content);
+}
+
 /** Create a mock run function that simulates git show results. */
 function mockRun(
   results: Record<string, RunResult>,
@@ -161,6 +166,8 @@ describe("seedAgentFiles", () => {
     const worktree = makeTmpDir();
     const remoteContent = "# Implementer agent\nFrom remote";
 
+    writeAgentFile(hubRoot, "implementer.md");
+
     const deps = createDeps({
       run: vi.fn((_cmd: string, args: string[]) => {
         const showArg = args.find((a: string) => a.startsWith("origin/main:"));
@@ -191,10 +198,10 @@ describe("seedAgentFiles", () => {
     const localContent = "# Implementer agent\nFrom local";
 
     // Create all three agent files locally
-    mkdirSync(join(hubRoot, "agents"), { recursive: true });
-    writeFileSync(join(hubRoot, "agents", "implementer.md"), localContent);
-    writeFileSync(join(hubRoot, "agents", "reviewer.md"), localContent);
-    writeFileSync(join(hubRoot, "agents", "forward-fixer.md"), localContent);
+    writeAgentFile(hubRoot, "implementer.md", localContent);
+    writeAgentFile(hubRoot, "reviewer.md", localContent);
+    writeAgentFile(hubRoot, "forward-fixer.md", localContent);
+    writeAgentFile(hubRoot, "rebaser.md", localContent);
 
     const deps = createDeps({
       run: vi.fn(() => ({
@@ -258,6 +265,8 @@ describe("seedAgentFiles", () => {
     const existingContent = "# Pre-existing agent file";
     const remoteContent = "# Remote agent file";
 
+    writeAgentFile(hubRoot, "implementer.md");
+
     // Pre-create the file in the worktree
     mkdirSync(join(worktree, ".claude/agents"), { recursive: true });
     writeFileSync(join(worktree, ".claude/agents/implementer.md"), existingContent);
@@ -287,8 +296,7 @@ describe("seedAgentFiles", () => {
     const worktree = makeTmpDir();
     const localContent = "# Local-only agent";
 
-    mkdirSync(join(hubRoot, "agents"), { recursive: true });
-    writeFileSync(join(hubRoot, "agents", "implementer.md"), localContent);
+    writeAgentFile(hubRoot, "implementer.md", localContent);
     // reviewer and forward-fixer don't exist anywhere
 
     // Git show fails for everything
@@ -320,6 +328,8 @@ describe("seedAgentFiles", () => {
     const worktree = makeTmpDir();
     const remoteContent = "# Implementer from remote";
 
+    writeAgentFile(hubRoot, "implementer.md");
+
     const deps = createDeps({
       run: vi.fn((_cmd: string, args: string[]) => {
         const showArg = args.find((a: string) => a.startsWith("origin/main:"));
@@ -337,6 +347,31 @@ describe("seedAgentFiles", () => {
     const ghAgent = join(worktree, ".github/agents/ninthwave-implementer.agent.md");
     expect(existsSync(ghAgent)).toBe(true);
     expect(readFileSync(ghAgent, "utf-8")).toBe(remoteContent);
+
+    rmSync(hubRoot, { recursive: true, force: true });
+    rmSync(worktree, { recursive: true, force: true });
+  });
+
+  it("seeds newly discovered agent files from the hub bundle", () => {
+    const hubRoot = makeTmpDir();
+    const worktree = makeTmpDir();
+    const customContent = "# Custom agent\nFrom local";
+
+    writeAgentFile(hubRoot, "custom-agent.md", customContent);
+
+    const deps = createDeps({
+      run: vi.fn(() => ({
+        stdout: "",
+        stderr: "fatal: not found",
+        exitCode: 128,
+      })) as any,
+    });
+
+    const seeded = seedAgentFiles(worktree, hubRoot, deps);
+
+    expect(seeded).toContain(join(".claude/agents", "custom-agent.md"));
+    expect(seeded).toContain(join(".github/agents", "ninthwave-custom-agent.agent.md"));
+    expect(readFileSync(join(worktree, ".claude/agents/custom-agent.md"), "utf-8")).toBe(customContent);
 
     rmSync(hubRoot, { recursive: true, force: true });
     rmSync(worktree, { recursive: true, force: true });

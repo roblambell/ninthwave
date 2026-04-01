@@ -32,7 +32,7 @@ import {
   setupGlobal,
   interactiveAgentSelection,
   detectProjectTools,
-  discoverAgentSources,
+  discoverCanonicalBundleSources,
   buildCopyPlan,
   executeCopyPlan,
   AGENT_TARGET_DIRS,
@@ -621,6 +621,8 @@ function scaffold(
   bundleDir: string,
   agentSelection?: AgentSelection,
 ): void {
+  const canonicalSources = discoverCanonicalBundleSources(bundleDir);
+
   // --- .ninthwave/ directory ---
   mkdirSync(join(projectDir, ".ninthwave"), { recursive: true });
 
@@ -682,7 +684,7 @@ than average. Open a work item for anything that needs attention.
 
   // --- Agent files (copied into project for portability) ---
   const selection = agentSelection ?? {
-    agents: discoverAgentSources(bundleDir),
+    agents: canonicalSources.agents,
     toolDirs: [...AGENT_TARGET_DIRS],
   };
   const plan = buildCopyPlan(projectDir, bundleDir, selection);
@@ -831,10 +833,11 @@ export async function cmdInit(args: string[] = []): Promise<void> {
   if (autoYes || !isTTY) {
     // Non-interactive: all agents to all detected tools (or all tools if none detected)
     const detectedTools = detectProjectTools(projectDir);
+    const canonicalSources = discoverCanonicalBundleSources(bundleDir);
     const toolDirs =
       detectedTools.length > 0 ? detectedTools : [...AGENT_TARGET_DIRS];
     agentSelection = {
-      agents: discoverAgentSources(bundleDir),
+      agents: canonicalSources.agents,
       toolDirs,
     };
   } else {

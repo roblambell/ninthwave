@@ -5,10 +5,7 @@ import { join, dirname } from "path";
 import { run, GIT_TIMEOUT } from "./shell.ts";
 import { info as defaultInfo } from "./output.ts";
 import { agentFileTargets } from "./ai-tools.ts";
-import { AGENT_SOURCES } from "./commands/setup.ts";
-
-/** Agent files to seed into worktrees -- derived from AI_TOOL_PROFILES. */
-const AGENT_FILES = agentFileTargets(AGENT_SOURCES);
+import { discoverAgentSources } from "./commands/setup.ts";
 
 /** Parse the configured LLM model from YAML frontmatter. */
 export function parseAgentModel(content: string): string | null {
@@ -93,8 +90,9 @@ export function seedAgentFiles(
   deps: SeedAgentFilesDeps = defaultSeedDeps,
 ): string[] {
   const seeded: string[] = [];
+  const agentFiles = agentFileTargets(discoverAgentSources(hubRoot));
 
-  for (const agent of AGENT_FILES) {
+  for (const agent of agentFiles) {
     const sourceContent = readAgentFileContent(hubRoot, agent.source, deps);
     if (!sourceContent) continue;
     const baseName = agent.source.replace(/\.md$/, "");
