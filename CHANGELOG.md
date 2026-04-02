@@ -1,5 +1,111 @@
 # Changelog
 
+## [0.3.10] - 2026-04-02
+
+### Added
+- add paused overlay guidance (#562)
+- add pause runtime and TUI controls (H-TPAU-1) (#559)
+- surface codex in onboarding and diagnostics (M-CDX-4) (#556)
+- generate managed Codex artifacts (H-CDX-2) (#553)
+- compose codex worker prompts (H-CDX-3) (#554)
+- add codex tool profile primitives (H-CDX-1) (#549)
+- surface passive update notice in TUI footer (H-UPN-2) (#543)
+- add passive update-check core (H-UPN-1) (#540)
+- honor runtime backend choices (H-BES-3) (#527)
+- add backend choice to startup flow (H-BES-2) (#525)
+- wire live collaboration controls (H-COL-4) (#523)
+- add backend preference resolver (H-BES-1) (#521)
+- track repair PR history on canonical items (H-PMR-2) (#519)
+- route watch runtime controls via protocol (M-TRS-4) (#520)
+- split foreground watch operator/engine (H-TRS-3) (#518)
+- render collaboration details in controls overlay (M-COL-3) (#514)
+- add live collaboration input state (H-COL-2) (#511)
+- replace startup confirm with settings screen (H-TUI-2) (#501)
+- convert runtime controls to arrow navigation (H-TUI-3) (#500)
+- add shared TUI settings foundation (H-TUI-1) (#497)
+- wire headless mux launch dispatch (H-RSH-6) (#492)
+- add headless adapter fallback (H-RSH-4) (#491)
+- add buildHeadlessCmd to AI tool profiles (H-RSH-5) (#490)
+- re-evaluate review-pending merges (H-TI-6) (#483)
+- add config cleanup work items
+- add post-merge status work items
+- replace split TUI with two-page layout (H-TI-5) (#480)
+- debounce merge strategy switching (H-TI-4) (#478)
+- allow queued item navigation in TUI (H-TI-3) (#477)
+- add Shift+Tab footer hint (H-TI-1) (#476)
+- show worker progress in status views
+- persist remote crew state in status views (M-CRS-3) (#473)
+- consume broker crew state in live TUI (H-CRS-2) (#471)
+- make detail overlay a scrollable inspection surface (M-STUI-6) (#472)
+- fast PR detection via heartbeat --pr flag
+- add stronger status-page layout rules for active, queued, and mode details (M-STUI-4) (#469)
+- enter watch directly from future-only flow (H-STUI-3) (#468)
+
+### Changed
+- narrow instruction artifact ownership (H-INS-1) (#552)
+- persist rebase recovery state (H-RRR-2) (#547)
+- rename internal work item terminology (M-WQ-5) (#541)
+- align CLI/TUI work item copy (M-WQ-2) (#535)
+- extract shared watch engine runner (H-TRS-2) (#516)
+- unify managed copy generation (H-SG-2) (#495)
+- canonicalize bundle source discovery (H-SG-1) (#494)
+- simplify launch flow (H-RSH-3) (#489)
+- gut worker-health helpers (H-RSH-2) (#488)
+- strip mux send-message adapters (H-RSH-1) (#487)
+- drop ai_tools from project config (M-CFG-3) (#486)
+- use user tool memory for startup flows (H-CFG-2) (#485)
+- move AI tool memory to user config (H-CFG-1) (#482)
+- carry work item snippets into status detail (M-STUI-5) (#470)
+- rewrite reviewer prompt for conventional comments (H-CC-2) (#467)
+- align review verdict counts with conventional comments (H-CC-1) (#466)
+
+### Fixed
+- bypass codex worker permission prompts
+- block stale stacked PR merges
+- align help overlay copy and render assertions (M-TMU-2) (#555)
+- route worker inbox notifications to live worktrees (H-RRR-4) (#557)
+- retry stale rebase requests (H-RRR-3) (#551)
+- make help a true modal (H-TMU-1) (#550)
+- keep startup settings viewport pinned (H-TUW-2) (#546)
+- remove merged work items during merge completion (H-SRP-4) (#545)
+- keep rebase status truthful (H-RRR-1) (#544)
+- clamp confirm summary overflow (M-TUW-3) (#542)
+- make checkbox picker rows width-safe and line-aware (H-TUW-1) (#539)
+- validate headless tool commands (M-BES-5) (#533)
+- make muxes optional for headless mode (M-BES-4) (#532)
+- make status and cleanup token-aware (H-SRP-3) (#531)
+- block startup replay for merged items (H-SRP-2) (#530)
+- add durable work item lineage tokens (H-SRP-1) (#524)
+- remove duplicate startup arming flow (H-MSU-2) (#528)
+- hold repair completion until verification passes (H-PMR-3) (#526)
+- surface interactive engine startup failures
+- re-enter repair PRs into canonical flow (H-PMR-1) (#517)
+- clarify merge strategy visuals and copy (H-MSU-1) (#515)
+- preserve TUI selection by item id (H-STN-3) (#513)
+- instrument interactive watch stalls (H-TRS-1) (#512)
+- use visible ids for status TUI navigation (H-STN-2) (#510)
+- align startup collaboration with local-first flow (M-COL-5) (#509)
+- queue CD and release workflows
+- extract visible status order metadata (H-STN-1) (#507)
+- make collaboration local-first by default (H-COL-1) (#508)
+- hold merged items until verification can run (H-PMV-2) (#505)
+- show TUI countdowns through 0s (M-TUI-4) (#504)
+- inline fullscreen live mode indicator (M-TUI-5) (#503)
+- preserve merged verification recovery (H-PMV-1) (#499)
+- align Copilot launch and generated agents (H-COP-1) (#498)
+- prune legacy generated init artifacts (M-SG-3) (#496)
+- preserve PR recovery state after restart (H-PRR-1) (#493)
+- classify GitHub polling warnings and avoid footer clipping
+- preserve PR state during transient GitHub errors
+- rescan for new work during active watch runs
+- render post-merge verifying and done in status table (H-PS-1) (#484)
+- align post-merge verifying display (H-PS-2) (#481)
+- add arming window countdown
+- hide unavailable bypass control (H-TI-2) (#475)
+- harden inbox wait interruptions
+- sync stacked PR comments and review state
+- run CI for stacked PR base changes
+
 ## [0.3.9] - 2026-04-01
 
 ### Added
