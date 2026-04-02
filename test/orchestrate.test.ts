@@ -1581,6 +1581,108 @@ describe("reconstructState", () => {
     require("fs").rmSync(tmpDir, { recursive: true, force: true });
   });
 
+  it("restores a saved workspaceRef when the exact live workspace still exists", () => {
+    const orch = new Orchestrator();
+    orch.addItem(makeWorkItem("H-DF-SAVED-1"));
+    orch.getItem("H-DF-SAVED-1")!.reviewCompleted = true;
+
+    const tmpDir = join(require("os").tmpdir(), `nw-reconstruct-test-saved-${Date.now()}`);
+    const wtDir = join(tmpDir, ".ninthwave", ".worktrees");
+    const wtPath = join(wtDir, "ninthwave-H-DF-SAVED-1");
+    require("fs").mkdirSync(wtPath, { recursive: true });
+
+    const daemonState: DaemonState = {
+      pid: 1,
+      startedAt: "2026-04-02T10:00:00.000Z",
+      updatedAt: "2026-04-02T10:00:00.000Z",
+      items: [{
+        id: "H-DF-SAVED-1",
+        title: "Saved workspace ref",
+        state: "implementing",
+        prNumber: null,
+        ciFailCount: 0,
+        retryCount: 0,
+        workspaceRef: "workspace:41",
+        worktreePath: wtPath,
+        lastTransition: "2026-04-02T10:00:00.000Z",
+      }],
+    };
+
+    const fakeMux = {
+      type: "cmux" as const,
+      isAvailable: () => true,
+      diagnoseUnavailable: () => "not available",
+      launchWorkspace: () => null,
+      splitPane: () => null,
+      sendMessage: () => true,
+      writeInbox: () => {},
+      readScreen: () => "",
+      listWorkspaces: () =>
+        "  workspace:41  ✳ unrelated title without item id",
+      closeWorkspace: () => true,
+    };
+
+    const result = reconstructState(orch, tmpDir, wtDir, fakeMux, () => null, daemonState);
+
+    const item = orch.getItem("H-DF-SAVED-1")!;
+    expect(result.unresolvedImplementations).toEqual([]);
+    expect(item.state).toBe("implementing");
+    expect(item.workspaceRef).toBe("workspace:41");
+
+    require("fs").rmSync(tmpDir, { recursive: true, force: true });
+  });
+
+  it("falls back to item-id rediscovery when the saved workspaceRef changed", () => {
+    const orch = new Orchestrator();
+    orch.addItem(makeWorkItem("H-DF-SAVED-2"));
+    orch.getItem("H-DF-SAVED-2")!.reviewCompleted = true;
+
+    const tmpDir = join(require("os").tmpdir(), `nw-reconstruct-test-fallback-${Date.now()}`);
+    const wtDir = join(tmpDir, ".ninthwave", ".worktrees");
+    const wtPath = join(wtDir, "ninthwave-H-DF-SAVED-2");
+    require("fs").mkdirSync(wtPath, { recursive: true });
+
+    const daemonState: DaemonState = {
+      pid: 1,
+      startedAt: "2026-04-02T10:00:00.000Z",
+      updatedAt: "2026-04-02T10:00:00.000Z",
+      items: [{
+        id: "H-DF-SAVED-2",
+        title: "Fallback workspace ref",
+        state: "implementing",
+        prNumber: null,
+        ciFailCount: 0,
+        retryCount: 0,
+        workspaceRef: "workspace:stale",
+        worktreePath: wtPath,
+        lastTransition: "2026-04-02T10:00:00.000Z",
+      }],
+    };
+
+    const fakeMux = {
+      type: "cmux" as const,
+      isAvailable: () => true,
+      diagnoseUnavailable: () => "not available",
+      launchWorkspace: () => null,
+      splitPane: () => null,
+      sendMessage: () => true,
+      writeInbox: () => {},
+      readScreen: () => "",
+      listWorkspaces: () =>
+        "  workspace:44  ✳ H-DF-SAVED-2: recovered by item id",
+      closeWorkspace: () => true,
+    };
+
+    const result = reconstructState(orch, tmpDir, wtDir, fakeMux, () => null, daemonState);
+
+    const item = orch.getItem("H-DF-SAVED-2")!;
+    expect(result.unresolvedImplementations).toEqual([]);
+    expect(item.state).toBe("implementing");
+    expect(item.workspaceRef).toBe("workspace:44");
+
+    require("fs").rmSync(tmpDir, { recursive: true, force: true });
+  });
+
   it("recovers workspaceRef from live tmux workspaces during reconstruction", () => {
     const orch = new Orchestrator();
     orch.addItem(makeWorkItem("H-TM-3"));
@@ -1615,7 +1717,7 @@ describe("reconstructState", () => {
     require("fs").rmSync(tmpDir, { recursive: true, force: true });
   });
 
-  it("leaves workspaceRef undefined when no matching workspace found", () => {
+  it("surfaces unresolved implementation workers when no live workspace is discoverable", () => {
     const orch = new Orchestrator();
     orch.addItem(makeWorkItem("H-DF-2"));
     orch.getItem("H-DF-2")!.reviewCompleted = true;
@@ -1624,6 +1726,23 @@ describe("reconstructState", () => {
     const wtDir = join(tmpDir, ".ninthwave", ".worktrees");
     const wtPath = join(wtDir, "ninthwave-H-DF-2");
     require("fs").mkdirSync(wtPath, { recursive: true });
+
+    const daemonState: DaemonState = {
+      pid: 1,
+      startedAt: "2026-04-02T10:00:00.000Z",
+      updatedAt: "2026-04-02T10:00:00.000Z",
+      items: [{
+        id: "H-DF-2",
+        title: "Unresolved workspace ref",
+        state: "implementing",
+        prNumber: null,
+        ciFailCount: 0,
+        retryCount: 0,
+        workspaceRef: "workspace:stale",
+        worktreePath: wtPath,
+        lastTransition: "2026-04-02T10:00:00.000Z",
+      }],
+    };
 
     // Mock mux with no matching workspaces
     const fakeMux = {
@@ -1639,12 +1758,18 @@ describe("reconstructState", () => {
       closeWorkspace: () => true,
     };
 
-    const noopCheckPr = () => null;
-    reconstructState(orch, tmpDir, wtDir, fakeMux, noopCheckPr);
+    const result = reconstructState(orch, tmpDir, wtDir, fakeMux, () => null, daemonState);
 
     const item = orch.getItem("H-DF-2")!;
     expect(item.state).toBe("implementing");
     expect(item.workspaceRef).toBeUndefined();
+    expect(result.unresolvedImplementations).toEqual([
+      {
+        itemId: "H-DF-2",
+        worktreePath: wtPath,
+        savedWorkspaceRef: "workspace:stale",
+      },
+    ]);
 
     require("fs").rmSync(tmpDir, { recursive: true, force: true });
   });

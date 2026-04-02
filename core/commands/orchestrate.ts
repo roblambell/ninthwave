@@ -4142,7 +4142,23 @@ export async function cmdOrchestrate(
   // Reconstruct state from disk + GitHub (crash recovery)
   // Pass saved daemon state so counters (ciFailCount, retryCount) survive restarts
   const savedDaemonState = readStateFile(projectRoot);
-  reconstructState(orch, projectRoot, worktreeDir, mux, undefined, savedDaemonState);
+  const reconstruction = reconstructState(orch, projectRoot, worktreeDir, mux, undefined, savedDaemonState);
+  for (const unresolved of reconstruction.unresolvedImplementations) {
+    const item = orch.getItem(unresolved.itemId);
+    if (!item) continue;
+
+    item.workspaceRef = undefined;
+    orch.hydrateState(unresolved.itemId, "ready");
+    log({
+      ts: new Date().toISOString(),
+      level: "warn",
+      event: "restart_recovery_unresolved_worker",
+      itemId: unresolved.itemId,
+      worktreePath: unresolved.worktreePath,
+      ...(unresolved.savedWorkspaceRef ? { savedWorkspaceRef: unresolved.savedWorkspaceRef } : {}),
+      message: `No live workspace found for ${unresolved.itemId}; relaunching from existing worktree`,
+    });
+  }
 
   // Select AI tool(s) (interactive prompt when multiple tools installed)
   const isInteractive = !isDaemonChild && !daemonMode && process.stdin.isTTY === true;
