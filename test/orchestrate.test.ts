@@ -42,6 +42,8 @@ import {
   createWatchEngineRunner,
   createDetachedDaemonEngineRunner,
   createInteractiveChildEngineRunner,
+  initializeWatchRuntimeFiles,
+  cleanupWatchRuntimeFiles,
   bootstrapTuiUpdateNotice,
   renderTuiPanelFrameFromStatusItems,
   runTuiStartupPreparation,
@@ -6408,6 +6410,90 @@ describe("shared engine wrappers", () => {
       totalBlocking: 2_500,
     });
     expect(detached.snapshotPollIntervals).toEqual([1200, 800]);
+  });
+});
+
+describe("watch runtime state lifecycle", () => {
+  it("preserves restart state across clean shutdown until the next startup", () => {
+    const tmpDir = mkdtempSync(join(tmpdir(), "nw-watch-runtime-state-"));
+    const firstItem: OrchestratorItem = {
+      id: "RST-1",
+      workItem: makeWorkItem("RST-1"),
+      state: "implementing",
+      prNumber: undefined,
+      lastTransition: "2026-04-01T10:00:00Z",
+      ciFailCount: 0,
+      retryCount: 0,
+    };
+    const secondItem: OrchestratorItem = {
+      id: "RST-2",
+      workItem: makeWorkItem("RST-2"),
+      state: "queued",
+      prNumber: undefined,
+      lastTransition: "2026-04-01T11:00:00Z",
+      ciFailCount: 0,
+      retryCount: 0,
+    };
+
+    try {
+      const firstState = serializeOrchestratorState([firstItem], 1111, "2026-04-01T10:00:00Z");
+      initializeWatchRuntimeFiles(tmpDir, firstState, 1111);
+
+      expect(readStateFile(tmpDir)).toEqual(firstState);
+      expect(existsSync(pidFilePath(tmpDir))).toBe(true);
+
+      cleanupWatchRuntimeFiles(tmpDir);
+
+      expect(existsSync(pidFilePath(tmpDir))).toBe(false);
+      expect(readStateFile(tmpDir)).toEqual(firstState);
+
+      const secondState = serializeOrchestratorState([secondItem], 2222, "2026-04-01T11:00:00Z");
+      initializeWatchRuntimeFiles(tmpDir, secondState, 2222);
+
+      expect(readStateFile(tmpDir)).toEqual(secondState);
+      expect(readStateFile(tmpDir)?.items.map((item) => item.id)).toEqual(["RST-2"]);
+    } finally {
+      rmSync(tmpDir, { recursive: true, force: true });
+      rmSync(userStateDir(tmpDir), { recursive: true, force: true });
+    }
+  });
+
+  it("replaces any preexisting restart snapshot instead of mixing old and new items", () => {
+    const tmpDir = mkdtempSync(join(tmpdir(), "nw-watch-runtime-replace-"));
+    const oldItem: OrchestratorItem = {
+      id: "OLD-1",
+      workItem: makeWorkItem("OLD-1"),
+      state: "implementing",
+      prNumber: 41,
+      lastTransition: "2026-04-01T09:00:00Z",
+      ciFailCount: 1,
+      retryCount: 0,
+    };
+    const newItem: OrchestratorItem = {
+      id: "NEW-1",
+      workItem: makeWorkItem("NEW-1"),
+      state: "launching",
+      prNumber: undefined,
+      lastTransition: "2026-04-01T12:00:00Z",
+      ciFailCount: 0,
+      retryCount: 0,
+    };
+
+    try {
+      writeStateFile(tmpDir, serializeOrchestratorState([oldItem], 9999, "2026-04-01T09:00:00Z"));
+
+      const freshState = serializeOrchestratorState([newItem], 1234, "2026-04-01T12:00:00Z");
+      initializeWatchRuntimeFiles(tmpDir, freshState, 1234);
+
+      const restored = readStateFile(tmpDir);
+      expect(restored).not.toBeNull();
+      expect(restored).toEqual(freshState);
+      expect(restored?.items.map((item) => item.id)).toEqual(["NEW-1"]);
+      expect(restored?.items.some((item) => item.id === "OLD-1")).toBe(false);
+    } finally {
+      rmSync(tmpDir, { recursive: true, force: true });
+      rmSync(userStateDir(tmpDir), { recursive: true, force: true });
+    }
   });
 });
 

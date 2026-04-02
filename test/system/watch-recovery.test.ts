@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it } from "vitest";
 import { spawnSync } from "child_process";
-import { rmSync } from "fs";
+import { existsSync, rmSync } from "fs";
 import { join } from "path";
 import type { DaemonState } from "../../core/daemon.ts";
 import {
@@ -144,7 +144,9 @@ describe("system: watch recovery", () => {
       });
       await harness.waitForExit(processHandle, 10_000);
 
-      expect(harness.readOrchestratorState()).toBeNull();
+      const persistedState = harness.readOrchestratorState();
+      expect(persistedState?.items.find((entry) => entry.id === "H-WRR-1")?.state).toBe("implementing");
+      expect(existsSync(join(harness.stateDir, "orchestrator.pid"))).toBe(false);
 
       const restarted = startRecoveryChild(harness, env);
       try {
