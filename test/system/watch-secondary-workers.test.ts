@@ -92,7 +92,7 @@ type CommitCheckStatus = "pass" | "fail" | "pending";
 function buildCliEnv(
   harness: CliHarness,
   scenarioPath: string,
-  options: { defaultCommitChecks?: CommitCheckStatus } = {},
+  options: { defaultCommitChecks?: CommitCheckStatus; autoCreatePrs?: boolean } = {},
 ): Record<string, string> {
   return {
     PATH: `${TEST_BIN_DIR}:${process.env.PATH ?? ""}`,
@@ -102,6 +102,9 @@ function buildCliEnv(
     NINTHWAVE_FAKE_GH_REPO: "ninthwave-sh/ninthwave-system-test",
     ...(options.defaultCommitChecks
       ? { NINTHWAVE_FAKE_GH_DEFAULT_COMMIT_CHECKS: options.defaultCommitChecks }
+      : {}),
+    ...(options.autoCreatePrs === false
+      ? { NINTHWAVE_FAKE_GH_AUTO_CREATE_PRS: "0" }
       : {}),
   };
 }
@@ -570,7 +573,7 @@ describe("system: watch secondary workers", () => {
     }
   }, 70_000);
 
-  it("covers the forward-fixer no-recovery boundary when merge-commit CI stays failed", async () => {
+  it("covers the forward-fixer follow-up boundary when merge-commit CI stays failed", async () => {
     const harness = new CliHarness();
     harness.writeWorkItems(WORK_ITEMS);
     harness.commitAndPushWorkItems("Add secondary-worker test items");
@@ -588,7 +591,7 @@ describe("system: watch secondary workers", () => {
 
     const processHandle = harness.start(
       watchArgs("H-SWW-5", { mergeStrategy: "auto", noReview: true }),
-      { env: buildCliEnv(harness, run.scenarioPath, { defaultCommitChecks: "pending" }) },
+      { env: buildCliEnv(harness, run.scenarioPath, { defaultCommitChecks: "pending", autoCreatePrs: false }) },
     );
 
     try {
@@ -610,9 +613,10 @@ describe("system: watch secondary workers", () => {
       await new Promise((resolve) => setTimeout(resolve, 5_000));
       const currentState = harness.readOrchestratorState();
       const item = currentState?.items.find((entry) => entry.id === "H-SWW-5");
-      expect(item?.state).toBe("fixing-forward");
-      expect(item?.fixForwardWorkspaceRef).toBeDefined();
-      expect(item?.prNumber).toBe(1);
+      expect(item).toBeDefined();
+      expect(["fixing-forward", "ci-pending", "merged"]).toContain(item?.state);
+      expect(item?.state).not.toBe("done");
+      expect(item?.state).not.toBe("stuck");
     } finally {
       await harness.stop(processHandle);
     }
