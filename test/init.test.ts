@@ -230,6 +230,16 @@ describe("detectAITools", () => {
     expect(result).toContain("opencode");
   });
 
+  it("detects Codex from managed .codex/agents artifacts", () => {
+    const projectDir = setupTempRepo();
+    mkdirSync(join(projectDir, ".codex", "agents"), { recursive: true });
+    writeFileSync(join(projectDir, ".codex", "agents", "ninthwave-implementer.toml"), 'name = "ninthwave-implementer"\n');
+
+    const result = detectAITools(projectDir);
+
+    expect(result).toContain("codex");
+  });
+
   it("detects Copilot from .github/copilot-instructions.md", () => {
     const projectDir = setupTempRepo();
     mkdirSync(join(projectDir, ".github"), { recursive: true });
@@ -1706,6 +1716,41 @@ describe("initProject -- agent selection", () => {
         expect(lstatSync(filePath).isSymbolicLink()).toBe(false);
       }
     }
+  });
+
+  it("writes managed Codex artifacts without creating root AGENTS.md", () => {
+    const projectDir = setupTempRepo();
+    const bundleDir = createFakeBundle(projectDir + "-bundle-parent");
+
+    const deps: InitDeps = {
+      commandExists: (() => false) as CommandChecker,
+      getEnv: () => undefined,
+    };
+
+    initProject(projectDir, bundleDir, deps);
+
+    const codexAgentPath = join(projectDir, ".codex/agents/ninthwave-implementer.toml");
+    expect(existsSync(codexAgentPath)).toBe(true);
+    expect(readFileSync(codexAgentPath, "utf-8")).toContain('name = "ninthwave-implementer"');
+    expect(readFileSync(codexAgentPath, "utf-8")).toContain('developer_instructions = ');
+    expect(existsSync(join(projectDir, "AGENTS.md"))).toBe(false);
+  });
+
+  it("does not overwrite an existing root AGENTS.md when writing Codex artifacts", () => {
+    const projectDir = setupTempRepo();
+    const bundleDir = createFakeBundle(projectDir + "-bundle-parent");
+
+    const deps: InitDeps = {
+      commandExists: (() => false) as CommandChecker,
+      getEnv: () => undefined,
+    };
+
+    writeFileSync(join(projectDir, "AGENTS.md"), "# User-owned Codex instructions\n");
+
+    initProject(projectDir, bundleDir, deps);
+
+    expect(readFileSync(join(projectDir, "AGENTS.md"), "utf-8")).toBe("# User-owned Codex instructions\n");
+    expect(existsSync(join(projectDir, ".codex/agents/ninthwave-implementer.toml"))).toBe(true);
   });
 });
 

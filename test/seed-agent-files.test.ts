@@ -6,7 +6,8 @@ import { join } from "path";
 import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, existsSync, rmSync } from "fs";
 import { tmpdir } from "os";
 import type { SeedAgentFilesDeps } from "../core/agent-files.ts";
-import { readAgentFileContent, seedAgentFiles } from "../core/agent-files.ts";
+import { readAgentFileContent, seedAgentFiles, syncCopilotInstructionsFromClaude } from "../core/agent-files.ts";
+import { renderAgentArtifact } from "../core/ai-tools.ts";
 import type { RunResult } from "../core/types.ts";
 
 // ── Helpers ──────────────────────────────────────────────────────────
@@ -187,6 +188,11 @@ describe("seedAgentFiles", () => {
     const claudeAgent = join(worktree, ".claude/agents/implementer.md");
     expect(existsSync(claudeAgent)).toBe(true);
     expect(readFileSync(claudeAgent, "utf-8")).toBe(remoteContent);
+    const codexAgent = join(worktree, ".codex/agents/ninthwave-implementer.toml");
+    expect(existsSync(codexAgent)).toBe(true);
+    expect(readFileSync(codexAgent, "utf-8")).toBe(
+      renderAgentArtifact("implementer.md", remoteContent, { suffix: ".toml" }).content,
+    );
 
     rmSync(hubRoot, { recursive: true, force: true });
     rmSync(worktree, { recursive: true, force: true });
@@ -219,6 +225,39 @@ describe("seedAgentFiles", () => {
     const claudeAgent = join(worktree, ".claude/agents/implementer.md");
     expect(existsSync(claudeAgent)).toBe(true);
     expect(readFileSync(claudeAgent, "utf-8")).toBe(localContent);
+    const codexAgent = join(worktree, ".codex/agents/ninthwave-implementer.toml");
+    expect(existsSync(codexAgent)).toBe(true);
+    expect(readFileSync(codexAgent, "utf-8")).toBe(
+      renderAgentArtifact("implementer.md", localContent, { suffix: ".toml" }).content,
+    );
+
+    rmSync(hubRoot, { recursive: true, force: true });
+    rmSync(worktree, { recursive: true, force: true });
+  });
+
+  it("preserves user-owned non-ninthwave Codex files while seeding managed ones", () => {
+    const hubRoot = makeTmpDir();
+    const worktree = makeTmpDir();
+    const localContent = "# Implementer agent\nFrom local";
+
+    writeAgentFile(hubRoot, "implementer.md", localContent);
+    mkdirSync(join(worktree, ".codex", "agents"), { recursive: true });
+    writeFileSync(join(worktree, ".codex", "agents", "custom.toml"), 'name = "custom"\n');
+
+    const deps = createDeps({
+      run: vi.fn(() => ({
+        stdout: "",
+        stderr: "fatal: not found",
+        exitCode: 128,
+      })) as any,
+    });
+
+    seedAgentFiles(worktree, hubRoot, deps);
+
+    expect(readFileSync(join(worktree, ".codex", "agents", "custom.toml"), "utf-8")).toBe(
+      'name = "custom"\n',
+    );
+    expect(existsSync(join(worktree, ".codex", "agents", "ninthwave-implementer.toml"))).toBe(true);
 
     rmSync(hubRoot, { recursive: true, force: true });
     rmSync(worktree, { recursive: true, force: true });

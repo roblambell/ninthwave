@@ -4,7 +4,7 @@ import { existsSync, mkdirSync, readFileSync, writeFileSync } from "fs";
 import { join } from "path";
 import { run, GIT_TIMEOUT } from "./shell.ts";
 import { info as defaultInfo } from "./output.ts";
-import { agentFileTargets, agentTargetFilename } from "./ai-tools.ts";
+import { agentFileTargets, renderAgentArtifact } from "./ai-tools.ts";
 import { discoverAgentSources, detectManagedCopyStatus, writeManagedCopy } from "./commands/setup.ts";
 
 /** Parse the configured LLM model from YAML frontmatter. */
@@ -97,13 +97,14 @@ export function seedAgentFiles(
     if (!sourceContent) continue;
 
     for (const target of agent.targets) {
-      const filename = agentTargetFilename(agent.source, target);
+      const rendered = renderAgentArtifact(agent.source, sourceContent, target);
+      const filename = rendered.filename;
       const destPath = join(worktreePath, target.dir, filename);
 
-      const status = detectManagedCopyStatus(destPath, sourceContent);
+      const status = detectManagedCopyStatus(destPath, rendered.content);
       if (status === "up-to-date") continue;
 
-      writeManagedCopy(destPath, sourceContent);
+      writeManagedCopy(destPath, rendered.content);
       seeded.push(join(target.dir, filename));
     }
   }

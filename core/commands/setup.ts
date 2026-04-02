@@ -27,7 +27,7 @@ import {
   confirmPrompt as defaultConfirmPrompt,
 } from "../prompt.ts";
 import type { CheckboxChoice, CheckboxPromptFn, ConfirmPromptFn } from "../prompt.ts";
-import { AI_TOOL_PROFILES, agentTargetFilename } from "../ai-tools.ts";
+import { AI_TOOL_PROFILES, agentTargetFilename, renderAgentArtifact } from "../ai-tools.ts";
 
 /**
  * Resolve the absolute path to a command on PATH.
@@ -338,8 +338,8 @@ export interface CopyPlan {
   displayPath: string;
   /** Absolute destination path where the file will be written */
   linkPath: string;
-  /** Absolute source path in the bundle to copy from */
-  sourcePath: string;
+  /** Fully rendered file content to write at the destination */
+  content: string;
   /** Status of the managed copy destination. */
   status: ManagedCopyStatus;
 }
@@ -397,13 +397,13 @@ export function buildCopyPlan(
 
     for (const target of selection.toolDirs) {
       const targetDir = join(projectDir, target.dir);
-      const filename = agentTargetFilename(agentFile, target);
+      const rendered = renderAgentArtifact(agentFile, readFileSync(agentSource, "utf-8"), target);
+      const filename = rendered.filename;
       const linkPath = join(targetDir, filename);
       const displayPath = `${target.dir}/${filename}`;
-      const sourceContent = readFileSync(agentSource, "utf-8");
-      const status = detectManagedCopyStatus(linkPath, sourceContent);
+      const status = detectManagedCopyStatus(linkPath, rendered.content);
 
-      plan.push({ displayPath, linkPath, sourcePath: agentSource, status });
+      plan.push({ displayPath, linkPath, content: rendered.content, status });
     }
   }
 
@@ -420,8 +420,7 @@ export function executeCopyPlan(plan: CopyPlan[]): void {
       continue;
     }
 
-    const sourceContent = readFileSync(entry.sourcePath, "utf-8");
-    const status = writeManagedCopy(entry.linkPath, sourceContent);
+    const status = writeManagedCopy(entry.linkPath, entry.content);
 
     if (status === "replace") {
       console.log(
@@ -464,7 +463,7 @@ function buildOwnedEntryPredicates(
   const canonicalAgents = discoverAgentSources(bundleDir);
   for (const toolDir of selection.toolDirs) {
     const ownedEntries = new Set(canonicalAgents.map((agent) => agentTargetFilename(agent, toolDir)));
-    if (toolDir.dir === ".github/agents") {
+    if (toolDir.suffix === ".toml" || toolDir.suffix === ".agent.md") {
       predicates.set(toolDir.dir, (entry) =>
         ownedEntries.has(entry) || (entry.startsWith("ninthwave-") && entry.endsWith(toolDir.suffix))
       );

@@ -14,7 +14,7 @@ import {
   readlinkSync,
 } from "fs";
 import { setupTempRepo, cleanupTempRepos } from "./helpers.ts";
-import { agentTargetFilename } from "../core/ai-tools.ts";
+import { agentTargetFilename, renderAgentArtifact } from "../core/ai-tools.ts";
 import {
   setupGlobal,
   copySkillFiles,
@@ -323,6 +323,17 @@ describe("detectProjectTools", () => {
     expect(tools[0]!.tool).toBe("OpenCode");
   });
 
+  it("detects Codex from managed .codex/agents artifacts", () => {
+    const projectDir = setupTempRepo();
+    mkdirSync(join(projectDir, ".codex", "agents"), { recursive: true });
+    writeFileSync(join(projectDir, ".codex", "agents", "ninthwave-implementer.toml"), "name = \"ninthwave-implementer\"\n");
+
+    const tools = detectProjectTools(projectDir);
+
+    expect(tools).toHaveLength(1);
+    expect(tools[0]!.tool).toBe("Codex CLI");
+  });
+
   it("detects .github/copilot-instructions.md", () => {
     const projectDir = setupTempRepo();
     mkdirSync(join(projectDir, ".github"), { recursive: true });
@@ -574,6 +585,26 @@ describe("buildCopyPlan", () => {
     expect(plan[0]!.displayPath).toBe(".github/agents/ninthwave-implementer.agent.md");
   });
 
+  it("renders Codex copy-plan entries as ninthwave-managed TOML artifacts", () => {
+    const projectDir = setupTempRepo();
+    const bundleDir = createFakeBundle(projectDir + "-bundle-parent");
+
+    const selection: AgentSelection = {
+      agents: ["implementer.md"],
+      toolDirs: [AGENT_TARGET_DIRS.find((target) => target.dir === ".codex/agents")!],
+    };
+
+    const expectedContent = renderAgentArtifact("implementer.md", "# Implementer Agent\n", { suffix: ".toml" }).content;
+    mkdirSync(join(projectDir, ".codex", "agents"), { recursive: true });
+    writeFileSync(join(projectDir, ".codex", "agents", "ninthwave-implementer.toml"), expectedContent);
+
+    const plan = buildCopyPlan(projectDir, bundleDir, selection);
+
+    expect(plan).toHaveLength(1);
+    expect(plan[0]!.displayPath).toBe(".codex/agents/ninthwave-implementer.toml");
+    expect(plan[0]!.status).toBe("up-to-date");
+  });
+
   it("creates cross-product of agents × tools", () => {
     const projectDir = setupTempRepo();
     const bundleDir = createFakeBundle(projectDir + "-bundle-parent");
@@ -733,6 +764,9 @@ describe("pruneManagedGeneratedEntries", () => {
     writeFileSync(join(projectDir, ".claude", "agents", "orphan.md"), "# orphan\n");
     mkdirSync(join(projectDir, ".opencode", "agents"), { recursive: true });
     writeFileSync(join(projectDir, ".opencode", "agents", "orphan.md"), "# orphan\n");
+    mkdirSync(join(projectDir, ".codex", "agents"), { recursive: true });
+    writeFileSync(join(projectDir, ".codex", "agents", "ninthwave-orphan.toml"), 'name = "ninthwave-orphan"\n');
+    writeFileSync(join(projectDir, ".codex", "agents", "custom.toml"), 'name = "custom"\n');
     mkdirSync(join(projectDir, ".github", "agents"), { recursive: true });
     writeFileSync(join(projectDir, ".github", "agents", "ninthwave-orphan.agent.md"), "# orphan\n");
     mkdirSync(join(projectDir, ".github", "workflows"), { recursive: true });
@@ -749,11 +783,14 @@ describe("pruneManagedGeneratedEntries", () => {
     });
 
     expect(removed).toEqual(expect.arrayContaining([
+      ".codex/agents/ninthwave-orphan.toml",
       ".github/agents/ninthwave-orphan.agent.md",
     ]));
     expect(existsSync(join(projectDir, ".claude", "skills", "orphan-skill"))).toBe(true);
     expect(existsSync(join(projectDir, ".claude", "agents", "orphan.md"))).toBe(true);
     expect(existsSync(join(projectDir, ".opencode", "agents", "orphan.md"))).toBe(true);
+    expect(existsSync(join(projectDir, ".codex", "agents", "ninthwave-orphan.toml"))).toBe(false);
+    expect(existsSync(join(projectDir, ".codex", "agents", "custom.toml"))).toBe(true);
     expect(existsSync(join(projectDir, ".github", "agents", "ninthwave-orphan.agent.md"))).toBe(false);
     expect(existsSync(join(projectDir, "CLAUDE.md"))).toBe(true);
     expect(existsSync(join(projectDir, "AGENTS.md"))).toBe(true);
@@ -890,8 +927,8 @@ describe("interactiveAgentSelection", () => {
       for (const target of AGENT_TARGET_DIRS) {
         const targetDir = join(projectDir, target.dir);
         mkdirSync(targetDir, { recursive: true });
-        const filename = agentTargetFilename(agent, target);
-        writeFileSync(join(targetDir, filename), canonicalContent);
+        const artifact = renderAgentArtifact(agent, canonicalContent, target);
+        writeFileSync(join(targetDir, artifact.filename), artifact.content);
       }
     }
 
