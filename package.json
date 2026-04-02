@@ -6,6 +6,7 @@
   "scripts": {
     "test": "bun test --smol --bail test/",
     "test:watch": "bun test --smol --watch test/",
+    "smoke:compiled-orchestrate-startup": "bun test --smol --bail test/smoke/compiled-orchestrate-startup.test.ts",
     "build": "bun build --compile core/cli.ts --outfile dist/ninthwave",
     "build:darwin-arm64": "bun build --compile --target=bun-darwin-arm64 core/cli.ts --outfile dist/ninthwave-darwin-arm64",
     "build:darwin-x64": "bun build --compile --target=bun-darwin-x64 core/cli.ts --outfile dist/ninthwave-darwin-x64",

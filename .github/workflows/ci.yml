@@ -22,8 +22,8 @@ jobs:
       - run: bun install
       - name: Build binary
         run: bun run build
-      - name: Smoke test — verify binary runs
-        run: ./dist/ninthwave version
+      - name: Smoke test — packaged orchestration startup
+        run: bun run smoke:compiled-orchestrate-startup
 
   gate:
     name: CI Gate
