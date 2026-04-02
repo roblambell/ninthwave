@@ -1610,6 +1610,35 @@ describe("launchAiSession agentName", () => {
     ).toThrow("Unknown AI tool: my-custom-tool. Supported: claude, opencode, codex, copilot");
     expect(mockMux.launchWorkspace).not.toHaveBeenCalled();
   });
+
+  it("passes shared launch override context through launchAiSession", () => {
+    const mockMux = createMockMux();
+    const repo = setupTempRepo();
+    const promptFile = join(repo, "prompt.txt");
+    writeFileSync(promptFile, "test prompt");
+
+    launchAiSession("claude", repo, "T-1", "Test", promptFile, mockMux, {
+      agentName: "ninthwave-reviewer",
+      launchOverride: {
+        command: "/bin/echo",
+        args: ["deterministic-launch"],
+      },
+    });
+
+    const launchCall = mockMux.launchWorkspace.mock.calls[0]!;
+    expect(launchCall).toBeDefined();
+    const cmd = launchCall[1] as string;
+    expect(cmd).toContain("NINTHWAVE_LAUNCH_TOOL='claude'");
+    expect(cmd).toContain("NINTHWAVE_LAUNCH_MODE='launch'");
+    expect(cmd).toContain("NINTHWAVE_LAUNCH_AGENT='ninthwave-reviewer'");
+    expect(cmd).toContain(`NINTHWAVE_LAUNCH_PROMPT_FILE='${promptFile}'`);
+    expect(cmd).toMatch(/NINTHWAVE_LAUNCH_STATE_DIR='[^']+'/);
+    expect(cmd).toContain("NINTHWAVE_LAUNCH_ITEM_ID='T-1'");
+    expect(cmd).toContain(`NINTHWAVE_LAUNCH_PROJECT_ROOT='${repo}'`);
+    expect(cmd).toContain("NINTHWAVE_LAUNCH_WORKSPACE_NAME='T-1 Test'");
+    expect(cmd).toContain("exec '/bin/echo' 'deterministic-launch'");
+    expect(cmd).not.toContain("exec claude");
+  });
 });
 
 describe("launchSingleItem agentName default", () => {
@@ -1801,6 +1830,28 @@ describe("launchReviewWorker", () => {
     }
   });
 
+  it("keeps reviewer tool, prompt, and repo context unchanged when no override is set", async () => {
+    const mockMux = createMockMux();
+    const deps = createMockLaunchDeps();
+    const repo = setupTempRepo();
+
+    await captureOutput(() => {
+      const res = launchReviewWorker(77, "H-RVW-CTX", "off", repo, "opencode", mockMux, {}, deps);
+      expect(res).not.toBeNull();
+    });
+
+    const launchCall = mockMux.launchWorkspace.mock.calls[0]!;
+    const cmd = launchCall[1] as string;
+    expect(cmd).toContain('exec opencode --agent ninthwave-reviewer --prompt "$PROMPT"');
+
+    const promptPath = join(repo, ".ninthwave", ".worktrees", "review-H-RVW-CTX", ".ninthwave", ".prompt");
+    const prompt = readFileSync(promptPath, "utf-8");
+    expect(prompt).toContain("YOUR_REVIEW_PR: 77");
+    expect(prompt).toContain("YOUR_REVIEW_ITEM_ID: H-RVW-CTX");
+    expect(prompt).toContain(`PROJECT_ROOT: ${join(repo, ".ninthwave", ".worktrees", "review-H-RVW-CTX")}`);
+    expect(prompt).toContain(`REPO_ROOT: ${repo}`);
+  });
+
   it("returns null when fetch fails in direct mode", async () => {
     const mockMux = createMockMux();
     const deps = createMockLaunchDeps();
@@ -1911,6 +1962,65 @@ describe("launchRebaserWorker", () => {
     const cmd = launchCall[1] as string;
     expect(cmd).toContain(`--agent=${runtimeAgentNameForTool("copilot", "ninthwave-rebaser")}`);
     expect(cmd).toContain("exec copilot");
+  });
+
+  it("keeps rebaser tool, prompt, and worktree context unchanged when no override is set", async () => {
+    const mockMux = createMockMux();
+    const repo = setupTempRepo();
+    const worktreePath = join(repo, ".ninthwave", ".worktrees", "ninthwave-H-RB-CTX");
+    mkdirSync(worktreePath, { recursive: true });
+
+    await captureOutput(() => {
+      const result = launchRebaserWorker(23, "H-RB-CTX", repo, "claude", mockMux);
+      expect(result).not.toBeNull();
+    });
+
+    const launchCall = mockMux.launchWorkspace.mock.calls[0]!;
+    const cmd = launchCall[1] as string;
+    expect(cmd).toContain("--agent ninthwave-rebaser");
+
+    const prompt = readFileSync(join(worktreePath, ".ninthwave", ".prompt"), "utf-8");
+    expect(prompt).toContain("YOUR_REBASE_ITEM_ID: H-RB-CTX");
+    expect(prompt).toContain("YOUR_REBASE_PR: 23");
+    expect(prompt).toContain(`PROJECT_ROOT: ${worktreePath}`);
+  });
+});
+
+describe("launchForwardFixerWorker no override context", () => {
+  afterEach(() => {
+    cleanupTempRepos();
+  });
+
+  it("keeps forward-fixer tool, prompt, and state context unchanged when no override is set", async () => {
+    const mockMux = createMockMux();
+    const deps = createMockLaunchDeps();
+    const repo = setupTempRepo();
+
+    await captureOutput(() => {
+      const result = launchForwardFixerWorker(
+        "H-FWD-CTX",
+        "merge-sha-456",
+        repo,
+        "claude",
+        mockMux,
+        { defaultBranch: "develop" },
+        deps,
+      );
+      expect(result).not.toBeNull();
+    });
+
+    const launchCall = mockMux.launchWorkspace.mock.calls[0]!;
+    const cmd = launchCall[1] as string;
+    expect(cmd).toContain("--agent ninthwave-forward-fixer");
+
+    const prompt = readFileSync(
+      join(repo, ".ninthwave", ".worktrees", "ninthwave-fix-forward-H-FWD-CTX", ".ninthwave", ".prompt"),
+      "utf-8",
+    );
+    expect(prompt).toContain("YOUR_VERIFY_ITEM_ID: H-FWD-CTX");
+    expect(prompt).toContain("YOUR_VERIFY_MERGE_SHA: merge-sha-456");
+    expect(prompt).toContain(`REPO_ROOT: ${repo}`);
+    expect(prompt).toContain("REPO_DEFAULT_BRANCH: develop");
   });
 });
 

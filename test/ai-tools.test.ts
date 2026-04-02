@@ -357,6 +357,53 @@ describe("claude profile buildHeadlessCmd", () => {
 // ── buildLaunchCmd: opencode ──────────────────────────────────────────────────
 
 describe("opencode profile buildLaunchCmd", () => {
+  it("keeps the default interactive command byte-for-byte when no override is set", () => {
+    const profile = getToolProfile("opencode");
+    const now = vi.spyOn(Date, "now").mockReturnValue(1_700_000_000_000);
+
+    try {
+      const result = profile.buildLaunchCmd(stubOpts({ id: "H-X-OVERRIDE" }), stubDeps("OPENCODE PROMPT"));
+      expect(result.cmd).toBe(
+        `export OPENCODE_PERMISSION='{"$schema":"https://opencode.ai/config.json","permission":"allow"}'` +
+        ` && PROMPT=$(cat '/fake/state/tmp/nw-prompt-H-X-OVERRIDE-1700000000000')` +
+        ` && rm -f '/fake/state/tmp/nw-prompt-H-X-OVERRIDE-1700000000000'` +
+        ` && exec opencode --agent ninthwave-implementer --prompt "$PROMPT"`,
+      );
+    } finally {
+      now.mockRestore();
+    }
+  });
+
+  it("replaces the interactive provider command with the shared launch override contract", () => {
+    const profile = getToolProfile("opencode");
+    const deps = stubDeps("OPENCODE PROMPT");
+    const result = profile.buildLaunchCmd(
+      stubOpts({
+        agentName: "ninthwave-reviewer",
+        launchOverride: {
+          command: "/bin/echo",
+          args: ["deterministic-launch"],
+          env: { NINTHWAVE_TEST_OVERRIDE: "1" },
+        },
+      }),
+      deps,
+    );
+
+    expect(result.cmd).toContain("NINTHWAVE_TEST_OVERRIDE='1'");
+    expect(result.cmd).toContain("NINTHWAVE_LAUNCH_TOOL='opencode'");
+    expect(result.cmd).toContain("NINTHWAVE_LAUNCH_MODE='launch'");
+    expect(result.cmd).toContain("NINTHWAVE_LAUNCH_AGENT='ninthwave-reviewer'");
+    expect(result.cmd).toContain("NINTHWAVE_LAUNCH_PROMPT_FILE='/fake/.ninthwave/.prompt'");
+    expect(result.cmd).toContain("NINTHWAVE_LAUNCH_STATE_DIR='/fake/state'");
+    expect(result.cmd).toContain("NINTHWAVE_LAUNCH_ITEM_ID='H-TEST-1'");
+    expect(result.cmd).toContain("NINTHWAVE_LAUNCH_PROJECT_ROOT='/fake/project'");
+    expect(result.cmd).toContain("NINTHWAVE_LAUNCH_WORKSPACE_NAME='test-ws'");
+    expect(result.cmd).toContain("exec '/bin/echo' 'deterministic-launch'");
+    expect(result.cmd).not.toContain("exec opencode");
+    expect(deps.readFileSync).not.toHaveBeenCalled();
+    expect(deps.writeFileSync).not.toHaveBeenCalled();
+  });
+
   it("returns an inline shell command (no .sh script file)", () => {
     const profile = getToolProfile("opencode");
     const result = profile.buildLaunchCmd(stubOpts({ id: "H-X-1" }), stubDeps());
@@ -427,6 +474,28 @@ describe("opencode profile buildLaunchCmd", () => {
 // ── buildHeadlessCmd: opencode ────────────────────────────────────────────────
 
 describe("opencode profile buildHeadlessCmd", () => {
+  it("replaces the headless provider command with the shared launch override contract", () => {
+    const profile = getToolProfile("opencode");
+    const deps = stubDeps("OPENCODE PROMPT");
+    const result = profile.buildHeadlessCmd(
+      stubOpts({
+        launchOverride: {
+          command: "/bin/echo",
+          args: ["deterministic-headless"],
+        },
+      }),
+      deps,
+    );
+
+    expect(result.cmd).toContain("NINTHWAVE_LAUNCH_TOOL='opencode'");
+    expect(result.cmd).toContain("NINTHWAVE_LAUNCH_MODE='headless'");
+    expect(result.cmd).toContain("NINTHWAVE_LAUNCH_AGENT='ninthwave-implementer'");
+    expect(result.cmd).toContain("exec '/bin/echo' 'deterministic-headless'");
+    expect(result.cmd).not.toContain("exec opencode run");
+    expect(deps.readFileSync).not.toHaveBeenCalled();
+    expect(deps.writeFileSync).not.toHaveBeenCalled();
+  });
+
   it("returns empty initialPrompt", () => {
     const profile = getToolProfile("opencode");
     const result = profile.buildHeadlessCmd(stubOpts(), stubDeps());
