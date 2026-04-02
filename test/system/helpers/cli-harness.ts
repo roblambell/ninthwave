@@ -1,7 +1,13 @@
-import { existsSync, mkdirSync, readFileSync } from "fs";
-import { spawnSync, type SpawnSyncOptions } from "child_process";
+import { existsSync, mkdirSync, readFileSync, realpathSync } from "fs";
+import {
+  spawn,
+  spawnSync,
+  type ChildProcessWithoutNullStreams,
+  type SpawnSyncOptions,
+} from "child_process";
 import { join } from "path";
 import { HeadlessAdapter } from "../../../core/headless.ts";
+import type { DaemonState } from "../../../core/daemon.ts";
 import {
   launchForwardFixerWorker,
   launchRebaserWorker,
@@ -33,6 +39,15 @@ export interface CliRunResult {
   exitCode: number;
 }
 
+export interface CliProcessHandle {
+  child: ChildProcessWithoutNullStreams;
+  stdout: string;
+  stderr: string;
+  exitCode: number | null;
+  closed: boolean;
+  exited: Promise<number | null>;
+}
+
 function encodeHeadlessRef(ref: string): string {
   return encodeURIComponent(stripHeadlessWorkspaceRef(ref));
 }
@@ -45,11 +60,11 @@ export class CliHarness {
   readonly stateDir: string;
 
   constructor(projectRoot = setupTempRepoWithRemote(), homeDir = setupTempDir("nw-system-home-")) {
-    this.projectRoot = projectRoot;
+    this.projectRoot = realpathSync(projectRoot);
     this.homeDir = homeDir;
-    this.workDir = join(projectRoot, ".ninthwave", "work");
-    this.worktreeDir = join(projectRoot, ".ninthwave", ".worktrees");
-    this.stateDir = resolveProjectStateDir(projectRoot, homeDir);
+    this.workDir = join(this.projectRoot, ".ninthwave", "work");
+    this.worktreeDir = join(this.projectRoot, ".ninthwave", ".worktrees");
+    this.stateDir = resolveProjectStateDir(this.projectRoot, homeDir);
 
     mkdirSync(this.worktreeDir, { recursive: true });
     mkdirSync(this.stateDir, { recursive: true });
@@ -93,6 +108,41 @@ export class CliHarness {
     };
   }
 
+  start(
+    args: string[],
+    options: { env?: Record<string, string>; stdin?: string } = {},
+  ): CliProcessHandle {
+    const child = spawn("bun", ["run", CLI_PATH, ...args], {
+      cwd: this.projectRoot,
+      env: this.env(options.env),
+      stdio: ["pipe", "pipe", "pipe"],
+    });
+    child.stdin.end(options.stdin ?? "");
+
+    const handle: CliProcessHandle = {
+      child,
+      stdout: "",
+      stderr: "",
+      exitCode: null,
+      closed: false,
+      exited: new Promise<number | null>((resolve) => {
+        child.stdout.on("data", (chunk: string | Buffer) => {
+          handle.stdout += chunk.toString();
+        });
+        child.stderr.on("data", (chunk: string | Buffer) => {
+          handle.stderr += chunk.toString();
+        });
+        child.on("close", (code) => {
+          handle.exitCode = code;
+          handle.closed = true;
+          resolve(code);
+        });
+      }),
+    };
+
+    return handle;
+  }
+
   withHomeDir<T>(fn: () => T): T {
     const originalHome = process.env.HOME;
     process.env.HOME = this.homeDir;
@@ -107,6 +157,114 @@ export class CliHarness {
     return new HeadlessAdapter(this.projectRoot, {
       sleep: (ms: number) => Bun.sleepSync(Math.min(ms, 100)),
     });
+  }
+
+  orchestratorStatePath(): string {
+    return join(this.stateDir, "orchestrator.state.json");
+  }
+
+  orchestratorLogPath(): string {
+    return join(this.stateDir, "orchestrator.log");
+  }
+
+  readOrchestratorState(): DaemonState | null {
+    const path = this.orchestratorStatePath();
+    if (!existsSync(path)) return null;
+    return JSON.parse(readFileSync(path, "utf-8")) as DaemonState;
+  }
+
+  readOrchestratorLog(): string {
+    const path = this.orchestratorLogPath();
+    return existsSync(path) ? readFileSync(path, "utf-8") : "";
+  }
+
+  async waitForProcessOutput(
+    handle: CliProcessHandle,
+    pattern: string | RegExp,
+    options: { stream?: "stdout" | "stderr"; timeoutMs?: number } = {},
+  ): Promise<string> {
+    const stream = options.stream ?? "stdout";
+    return waitFor(() => {
+      const text = handle[stream];
+      if (!text) return false;
+      if (typeof pattern === "string") return text.includes(pattern) ? text : false;
+      return pattern.test(text) ? text : false;
+    }, {
+      timeoutMs: options.timeoutMs,
+      description: `${stream} to match ${String(pattern)}`,
+    });
+  }
+
+  async waitForExit(
+    handle: CliProcessHandle,
+    timeoutMs = 5_000,
+  ): Promise<number | null> {
+    await waitFor(async () => {
+      if (handle.closed) return true;
+      return false;
+    }, {
+      timeoutMs,
+      description: "CLI process exit",
+    });
+    return handle.exitCode;
+  }
+
+  async stop(
+    handle: CliProcessHandle,
+    signal: NodeJS.Signals = "SIGINT",
+    timeoutMs = 5_000,
+  ): Promise<number | null> {
+    if (handle.exitCode !== null) return handle.exitCode;
+    handle.child.kill(signal);
+    try {
+      return await this.waitForExit(handle, timeoutMs);
+    } catch {
+      handle.child.kill("SIGKILL");
+      return await handle.exited;
+    }
+  }
+
+  async waitForOrchestratorState<T>(
+    predicate: (state: DaemonState) => T | false | null | undefined,
+    timeoutMs = 5_000,
+  ): Promise<T> {
+    return waitFor(() => {
+      const state = this.readOrchestratorState();
+      if (!state) return false;
+      return predicate(state);
+    }, {
+      timeoutMs,
+      description: "orchestrator state",
+    });
+  }
+
+  commitAndPushWorkItems(message = "Add work item files"): void {
+    const addResult = spawnSync("git", ["add", ".ninthwave/work"], {
+      cwd: this.projectRoot,
+      encoding: "utf-8",
+      stdio: ["pipe", "pipe", "pipe"],
+    });
+    if (addResult.status !== 0) {
+      throw new Error(addResult.stderr || "git add failed");
+    }
+
+    const commitResult = spawnSync("git", ["commit", "-m", message, "--quiet"], {
+      cwd: this.projectRoot,
+      encoding: "utf-8",
+      stdio: ["pipe", "pipe", "pipe"],
+    });
+    if (commitResult.status !== 0) {
+      throw new Error(commitResult.stderr || "git commit failed");
+    }
+
+    const pushResult = spawnSync("git", ["push", "origin", "main", "--quiet"], {
+      cwd: this.projectRoot,
+      encoding: "utf-8",
+      stdio: ["pipe", "pipe", "pipe"],
+    });
+    if (pushResult.status !== 0) {
+      throw new Error(pushResult.stderr || "git push failed");
+    }
   }
 
   launchHeadlessItem(

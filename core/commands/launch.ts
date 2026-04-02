@@ -58,6 +58,33 @@ import { seedAgentFiles } from "../agent-files.ts";
 import { cleanStaleBranchForReuse } from "../branch-cleanup.ts";
 import type { WorkItem } from "../types.ts";
 
+export const TEST_LAUNCH_OVERRIDE_COMMAND_ENV = "NINTHWAVE_TEST_LAUNCH_COMMAND";
+export const TEST_LAUNCH_OVERRIDE_ARGS_ENV = "NINTHWAVE_TEST_LAUNCH_ARGS";
+
+function resolveTestLaunchOverride(
+  env: Record<string, string | undefined> = process.env,
+): LaunchOverride | undefined {
+  const command = env[TEST_LAUNCH_OVERRIDE_COMMAND_ENV]?.trim();
+  if (!command) return undefined;
+
+  const rawArgs = env[TEST_LAUNCH_OVERRIDE_ARGS_ENV]?.trim();
+  if (!rawArgs) return { command };
+
+  try {
+    const parsed = JSON.parse(rawArgs);
+    if (!Array.isArray(parsed) || !parsed.every((entry) => typeof entry === "string")) {
+      throw new Error("must be a JSON string array");
+    }
+    return { command, args: parsed };
+  } catch (error) {
+    throw new Error(
+      `Invalid ${TEST_LAUNCH_OVERRIDE_ARGS_ENV}: ${
+        error instanceof Error ? error.message : String(error)
+      }`,
+    );
+  }
+}
+
 /**
  * Sanitize a title for safe shell interpolation.
  * Uses an allowlist: only [a-zA-Z0-9 _-] are kept; everything else becomes _.
@@ -117,7 +144,8 @@ export function launchAiSession(
   const projectRoot = options.projectRoot ?? worktreePath;
   const stateDir = userStateDir(projectRoot);
   const buildCmd = mux.type === "headless" ? profile.buildHeadlessCmd : profile.buildLaunchCmd;
-  const { cmd } = buildCmd({ wsName, projectRoot, agentName, promptFile, id, stateDir, launchOverride: options.launchOverride }, deps);
+  const launchOverride = options.launchOverride ?? resolveTestLaunchOverride();
+  const { cmd } = buildCmd({ wsName, projectRoot, agentName, promptFile, id, stateDir, launchOverride }, deps);
 
   const wsRef = mux.launchWorkspace(worktreePath, cmd, id);
   if (!wsRef) {

@@ -33,6 +33,7 @@ exit_code="0"
 heartbeat_progress=""
 heartbeat_label=""
 heartbeat_pr_number=""
+sleep_ms="0"
 
 if [ -n "${scenario_file}" ] && [ -f "${scenario_file}" ]; then
   while IFS= read -r line || [ -n "${line}" ]; do
@@ -44,6 +45,9 @@ if [ -n "${scenario_file}" ] && [ -f "${scenario_file}" ]; then
         ;;
       exitCode=*)
         exit_code="${line#exitCode=}"
+        ;;
+      sleepMs=*)
+        sleep_ms="${line#sleepMs=}"
         ;;
       stdout=*)
         printf '%s\n' "${line#stdout=}"
@@ -69,6 +73,10 @@ if [ -n "${scenario_file}" ] && [ -f "${scenario_file}" ]; then
         ;;
     esac
   done < "${scenario_file}"
+fi
+
+if [ "${sleep_ms}" -gt 0 ] 2>/dev/null; then
+  sleep "$(awk "BEGIN { printf \"%.3f\", ${sleep_ms} / 1000 }")"
 fi
 
 if [ -n "${heartbeat_progress}" ] && [ -n "${NINTHWAVE_LAUNCH_ITEM_ID:-}" ]; then
