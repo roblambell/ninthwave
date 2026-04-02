@@ -172,7 +172,7 @@ function makeOrchestratorItem(id: string, state: OrchestratorItem["state"] = "im
 describe("stateColor", () => {
   it("returns a string for every valid state", () => {
     const states: ItemState[] = [
-      "merged", "verifying", "done", "bootstrapping", "implementing", "rebasing", "ci-failed", "ci-pending",
+      "merged", "verifying", "done", "blocked", "bootstrapping", "implementing", "rebasing", "ci-failed", "ci-pending",
       "review", "in-progress", "queued",
     ];
     for (const state of states) {
@@ -183,6 +183,9 @@ describe("stateColor", () => {
     expect(stateColor("verifying")).toBe(CYAN);
     expect(stateColor("done")).toBe(GREEN);
   });
+  it("returns YELLOW for blocked", () => {
+    expect(stateColor("blocked")).toBe(YELLOW);
+  });
   it("returns YELLOW for rebasing", () => {
     // rebasing shares the same color as bootstrapping/implementing/in-progress
     expect(stateColor("rebasing")).toBe(stateColor("implementing"));
@@ -192,6 +195,9 @@ describe("stateColor", () => {
 describe("stateIcon", () => {
   it("returns the verifying icon", () => {
     expect(stateIcon("verifying")).toBe("◌");
+  });
+  it("returns the blocked icon", () => {
+    expect(stateIcon("blocked")).toBe("⧗");
   });
   it("returns the checkmark for done", () => {
     expect(stateIcon("done")).toBe("✓");
@@ -207,7 +213,7 @@ describe("stateIcon", () => {
   });
   it("returns a string for every valid state", () => {
     const states: ItemState[] = [
-      "merged", "verifying", "done", "bootstrapping", "implementing", "rebasing", "ci-failed", "ci-pending",
+      "merged", "verifying", "done", "blocked", "bootstrapping", "implementing", "rebasing", "ci-failed", "ci-pending",
       "review", "in-progress", "queued",
     ];
     for (const state of states) {
@@ -224,6 +230,7 @@ describe("stateLabel", () => {
     expect(stateLabel("merged")).toBe("Merged");
     expect(stateLabel("verifying")).toBe("Verifying");
     expect(stateLabel("done")).toBe("Done");
+    expect(stateLabel("blocked")).toBe("Blocked");
     expect(stateLabel("ci-failed")).toBe("CI Failed");
     expect(stateLabel("ci-pending")).toBe("CI Pending");
     expect(stateLabel("review")).toBe("In Review");
@@ -553,6 +560,12 @@ describe("formatItemRow", () => {
     const item = makeStatusItem({ state: "ci-failed", failureReason: "test timeout" });
     const row = stripAnsi(formatItemRow(item, 40));
     expect(row).toContain("test timeout");
+  });
+  it("includes blocked label and reason when present", () => {
+    const item = makeStatusItem({ state: "blocked", failureReason: "launch-blocked: missing repo" });
+    const row = stripAnsi(formatItemRow(item, 48));
+    expect(row).toContain("Blocked");
+    expect(row).toContain("launch-blocked: missing repo");
   });
   it("includes repo label when present", () => {
     const item = makeStatusItem({ repoLabel: "my-repo" });
@@ -1402,6 +1415,7 @@ describe("mapDaemonItemState", () => {
     expect(mapDaemonItemState("forward-fix-pending")).toBe("verifying");
     expect(mapDaemonItemState("fixing-forward")).toBe("verifying");
     expect(mapDaemonItemState("done")).toBe("done");
+    expect(mapDaemonItemState("blocked")).toBe("blocked");
     expect(mapDaemonItemState("bootstrapping")).toBe("bootstrapping");
     expect(mapDaemonItemState("implementing")).toBe("implementing");
     expect(mapDaemonItemState("launching")).toBe("implementing");
@@ -1501,6 +1515,31 @@ describe("daemonStateToStatusItems", () => {
     expect(items[0]!.dependencies).toEqual(["C-1-1"]);
     expect(items[0]!.exitCode).toBe(1);
     expect(items[0]!.stderrTail).toBe("Error: test failed");
+  });
+
+  it("preserves blocked state and reason separately from ci failures", () => {
+    const now = new Date().toISOString();
+    const state: DaemonState = {
+      pid: 1,
+      startedAt: now,
+      updatedAt: now,
+      items: [
+        {
+          id: "C-1-3",
+          state: "blocked",
+          prNumber: null,
+          title: "Blocked item",
+          lastTransition: now,
+          ciFailCount: 0,
+          retryCount: 0,
+          failureReason: "launch-blocked: Repo 'missing-repo' not found.",
+        },
+      ],
+    };
+
+    const items = daemonStateToStatusItems(state);
+    expect(items[0]!.state).toBe("blocked");
+    expect(items[0]!.failureReason).toContain("missing-repo");
   });
 
   it("maps descriptionSnippet when present and tolerates older state when absent", () => {
@@ -1728,6 +1767,7 @@ describe("orchestratorItemsToStatusItems", () => {
       ["forward-fix-pending", "verifying"],
       ["fixing-forward", "verifying"],
       ["done", "done"],
+      ["blocked", "blocked"],
       ["bootstrapping", "bootstrapping"],
       ["implementing", "implementing"],
       ["launching", "implementing"],
@@ -4001,6 +4041,23 @@ describe("renderDetailOverlay", () => {
     expect(text).toContain("H-EX-0, H-EX-2");
     expect(text).toContain("3");
     expect(text).toContain("1");
+  });
+
+  it("shows blocked reasons under a blocked heading instead of CI", () => {
+    const item = makeStatusItem({
+      id: "H-BLK-1",
+      state: "blocked",
+      failureReason: "launch-blocked: Repo 'missing-repo' not found.",
+    });
+
+    const lines = renderDetailOverlay(item, 100, 40, {
+      priority: "high",
+    });
+
+    const text = lines.map(stripAnsi).join("\n");
+    expect(text).toContain("Blocked:");
+    expect(text).toContain("missing-repo");
+    expect(text).not.toContain("CI:        launch-blocked");
   });
 
   it("renders queued item metadata without PR details", () => {

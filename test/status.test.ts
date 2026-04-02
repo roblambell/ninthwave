@@ -61,6 +61,7 @@ describe("stateColor", () => {
   it("returns a string for every valid state", () => {
     const states: ItemState[] = [
       "merged",
+      "blocked",
       "implementing",
       "ci-failed",
       "ci-pending",
@@ -77,6 +78,7 @@ describe("stateColor", () => {
 describe("stateLabel", () => {
   it("returns human-readable labels for each state", () => {
     expect(stateLabel("merged")).toBe("Merged");
+    expect(stateLabel("blocked")).toBe("Blocked");
     expect(stateLabel("implementing")).toBe("Implementing");
     expect(stateLabel("ci-failed")).toBe("CI Failed");
     expect(stateLabel("ci-pending")).toBe("CI Pending");
@@ -90,6 +92,7 @@ describe("stateIcon", () => {
   it("returns a single-character icon for each state", () => {
     const states: ItemState[] = [
       "merged",
+      "blocked",
       "implementing",
       "ci-failed",
       "ci-pending",
@@ -106,6 +109,10 @@ describe("stateIcon", () => {
 
   it("returns checkmark for merged", () => {
     expect(stateIcon("merged")).toBe("✓");
+  });
+
+  it("returns blocker icon for blocked", () => {
+    expect(stateIcon("blocked")).toBe("⧗");
   });
 
   it("returns play triangle for implementing", () => {
@@ -829,6 +836,7 @@ describe("mapDaemonItemState", () => {
     expect(mapDaemonItemState("merged")).toBe("verifying");
     expect(mapDaemonItemState("forward-fix-pending")).toBe("verifying");
     expect(mapDaemonItemState("fixing-forward")).toBe("verifying");
+    expect(mapDaemonItemState("blocked")).toBe("blocked");
   });
 
   it("maps implementing/launching to implementing", () => {

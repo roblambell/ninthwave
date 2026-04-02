@@ -94,6 +94,7 @@ import { readCrewCode, crewCodePath } from "../core/crew.ts";
 import { shouldEnterInteractive } from "../core/interactive.ts";
 import { listWorkItems } from "../core/work-item-files.ts";
 import { completeMergedWorkItemCleanup } from "../core/commands/reconcile.ts";
+import * as launchModule from "../core/commands/launch.ts";
 
 // ── Helpers ──────────────────────────────────────────────────────────
 
@@ -4789,6 +4790,60 @@ describe("orchestrateLoop watch mode", () => {
     expect(watchNewLog?.newIds).toEqual(["E-FAST-1"]);
   });
 
+  it("continues to the next ready item when launch-time validation blocks the first", async () => {
+    const orch = new Orchestrator({ fixForward: false, wipLimit: 1, mergeStrategy: "auto" });
+    orch.addItem(makeWorkItem("E-BLOCK-1"));
+    orch.getItem("E-BLOCK-1")!.reviewCompleted = true;
+    orch.addItem(makeWorkItem("E-READY-2"));
+    orch.getItem("E-READY-2")!.reviewCompleted = true;
+
+    const launchCalls: string[] = [];
+    const validatePickupCandidate = vi.fn((workItem: WorkItem) => {
+      if (workItem.id === "E-BLOCK-1") {
+        return {
+          status: "blocked" as const,
+          code: "unlaunchable" as const,
+          branchName: "ninthwave/E-BLOCK-1",
+          failureReason: "launch-blocked: Repo 'missing-repo' not found.",
+        };
+      }
+      return {
+        status: "launch" as const,
+        targetRepo: "ninthwave-sh/ninthwave",
+        branchName: `ninthwave/${workItem.id}`,
+      };
+    });
+
+    const deps: OrchestrateLoopDeps = {
+      buildSnapshot: (o): PollSnapshot => {
+        const secondItem = o.getItem("E-READY-2");
+        if (secondItem?.state === "launching") {
+          return {
+            items: [{ id: "E-READY-2", workerAlive: true }],
+            readyIds: ["E-BLOCK-1", "E-READY-2"],
+          };
+        }
+        return { items: [], readyIds: ["E-BLOCK-1", "E-READY-2"] };
+      },
+      sleep: () => Promise.resolve(),
+      log: () => {},
+      actionDeps: mockActionDeps({
+        validatePickupCandidate,
+        launchSingleItem: vi.fn((workItem) => {
+          launchCalls.push(workItem.id);
+          return { worktreePath: "/tmp/test/blocked-queue", workspaceRef: `workspace:${workItem.id}` };
+        }),
+      }),
+    };
+
+    await orchestrateLoop(orch, defaultCtx, deps, { maxIterations: 3 });
+
+    expect(launchCalls).toEqual(["E-READY-2"]);
+    expect(orch.getItem("E-BLOCK-1")!.state).toBe("blocked");
+    expect(orch.getItem("E-BLOCK-1")!.failureReason).toContain("missing-repo");
+    expect(orch.getItem("E-READY-2")!.state).toBe("implementing");
+  });
+
   it("watch mode default interval is 30 seconds", async () => {
     const orch = new Orchestrator({ fixForward: false, wipLimit: 2, mergeStrategy: "auto" });
     orch.addItem(makeWorkItem("D-1-1"));
@@ -6627,6 +6682,52 @@ describe("interactive watch operator session", () => {
     await expect(promise).resolves.toBe("ready");
     expect(execute).toHaveBeenCalledWith("prepared");
     expect(tuiState.startupOverlay).toBeUndefined();
+  });
+
+  it("does not validate queued items during startup or status rendering", async () => {
+    const validateSpy = vi.spyOn(launchModule, "validatePickupCandidate");
+    const tuiState = makeOperatorTuiState();
+    const writes: string[] = [];
+
+    try {
+      await runTuiStartupPreparation({
+        tuiState,
+        render: () => {
+          renderTuiPanelFrameFromStatusItems(
+            [
+              makeStatusItem({
+                id: "H-FAST-1",
+                title: "Queued snapshot",
+                state: "queued",
+                dependencies: ["H-FAST-0"],
+              }),
+            ],
+            1,
+            tuiState,
+            (chunk) => {
+              writes.push(chunk);
+            },
+          );
+        },
+        initialOverlay: {
+          phaseLabel: "Preparing runtime",
+          detailLines: ["Loading queued items."],
+        },
+        prepare: async (updateOverlay) => {
+          updateOverlay({
+            phaseLabel: "Preparing runtime",
+            detailLines: ["Still rendering while launch validation is deferred."],
+          });
+          return "prepared";
+        },
+        execute: async () => "ready",
+      });
+    } finally {
+      validateSpy.mockRestore();
+    }
+
+    expect(writes.join("")).toContain("Queued snapshot");
+    expect(validateSpy).not.toHaveBeenCalled();
   });
 
   it("re-renders from snapshot payloads while the engine is blocked", async () => {

@@ -215,6 +215,7 @@ export type ItemState =
   | "merged"
   | "verifying"
   | "done"
+  | "blocked"
   | "bootstrapping"
   | "implementing"
   | "rebasing"
@@ -328,6 +329,8 @@ export function stateColor(state: ItemState): string {
       return GREEN;
     case "verifying":
       return CYAN;
+    case "blocked":
+      return YELLOW;
     case "bootstrapping":
     case "implementing":
     case "rebasing":
@@ -354,6 +357,8 @@ export function stateIcon(state: ItemState): string {
       return "✓";
     case "verifying":
       return "◌";
+    case "blocked":
+      return "⧗";
     case "bootstrapping":
     case "implementing":
     case "in-progress":
@@ -382,6 +387,8 @@ export function stateLabel(state: ItemState): string {
       return "Verifying";
     case "done":
       return "Done";
+    case "blocked":
+      return "Blocked";
     case "bootstrapping":
       return "Bootstrapping";
     case "implementing":
@@ -756,6 +763,7 @@ export function formatBatchProgress(items: StatusItem[]): string {
     "bootstrapping",
     "implementing",
     "in-progress",
+    "blocked",
     "ci-failed",
     "queued",
   ];
@@ -1255,6 +1263,8 @@ export function mapDaemonItemState(orchState: string, flags?: { rebaseRequested?
       return "verifying";
     case "done":
       return "done";
+    case "blocked":
+      return "blocked";
     case "bootstrapping":
       return "bootstrapping";
     case "implementing":
@@ -1591,6 +1601,7 @@ export function formatUnifiedProgress(
     "bootstrapping",
     "implementing",
     "in-progress",
+    "blocked",
     "ci-failed",
     "queued",
   ];
@@ -2377,11 +2388,15 @@ export function formatItemDetail(
     }
   }
 
-  // CI status / failure reason
-  if (item.failureReason) {
+  // Failure / CI status
+  if (item.state === "blocked" && item.failureReason) {
+    lines.push(`  ${DIM}Blocked:${RESET}   ${YELLOW}${item.failureReason}${RESET}`);
+  } else if (item.failureReason) {
     lines.push(`  ${DIM}CI:${RESET}        ${RED}${item.failureReason}${RESET}`);
   } else if (item.state === "ci-failed") {
     lines.push(`  ${DIM}CI:${RESET}        ${RED}Failed${RESET}`);
+  } else if (item.state === "blocked") {
+    lines.push(`  ${DIM}Blocked:${RESET}   ${YELLOW}Waiting for intervention${RESET}`);
   } else if (item.state === "ci-pending") {
     lines.push(`  ${DIM}CI:${RESET}        ${CYAN}Pending${RESET}`);
   } else if (item.state === "verifying") {
