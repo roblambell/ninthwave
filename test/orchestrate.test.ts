@@ -96,6 +96,32 @@ import { completeMergedWorkItemCleanup } from "../core/commands/reconcile.ts";
 
 // ── Helpers ──────────────────────────────────────────────────────────
 
+function withProcessRespawnState<T>(
+  argv: string[],
+  execPath: string,
+  fn: () => T,
+): T {
+  const originalArgv = [...process.argv];
+  const originalExecPath = process.execPath;
+
+  try {
+    process.argv = [...argv];
+    Object.defineProperty(process, "execPath", {
+      value: execPath,
+      writable: true,
+      configurable: true,
+    });
+    return fn();
+  } finally {
+    process.argv = originalArgv;
+    Object.defineProperty(process, "execPath", {
+      value: originalExecPath,
+      writable: true,
+      configurable: true,
+    });
+  }
+}
+
 function makeWorkItem(id: string, deps: string[] = []): WorkItem {
   return {
     id,
@@ -3618,14 +3644,19 @@ describe("forkDaemon", () => {
       unlinkSync: vi.fn(),
       existsSync: vi.fn((p: string) => files.has(p)),
       mkdirSync: vi.fn(),
+      renameSync: vi.fn(),
     };
 
-    const result = forkDaemon(
-      ["--items", "T-1-1", "--_daemon-child"],
-      "/project",
-      spawnFn,
-      openFn,
-      daemonIO,
+    const result = withProcessRespawnState(
+      ["/usr/local/bin/bun", "/project/core/cli.ts", "watch"],
+      "/usr/local/bin/bun",
+      () => forkDaemon(
+        ["--items", "T-1-1", "--_daemon-child"],
+        "/project",
+        spawnFn,
+        openFn,
+        daemonIO,
+      ),
     );
 
     expect(result.pid).toBe(42);
@@ -3637,9 +3668,53 @@ describe("forkDaemon", () => {
 
     // spawn was called with detached: true
     expect(spawnFn).toHaveBeenCalled();
+    expect(spawnFn).toHaveBeenCalledWith(
+      "/usr/local/bin/bun",
+      ["/project/core/cli.ts", "orchestrate", "--items", "T-1-1", "--_daemon-child"],
+      expect.any(Object),
+    );
     const spawnOpts = spawnFn.mock.calls[0][2];
     expect(spawnOpts.detached).toBe(true);
     expect(spawnOpts.stdio[0]).toBe("ignore");
+  });
+
+  it("uses the packaged executable directly without forwarding argv[1]", () => {
+    const mockChild = { pid: 42, unref: vi.fn() };
+    const spawnFn = vi.fn(() => mockChild) as any;
+    const openFn = vi.fn(() => 3) as any;
+
+    const files = new Map<string, string>();
+    const daemonIO = {
+      writeFileSync: vi.fn((p: string, c: string) => files.set(p, c)),
+      readFileSync: vi.fn(),
+      unlinkSync: vi.fn(),
+      existsSync: vi.fn((p: string) => files.has(p)),
+      mkdirSync: vi.fn(),
+      renameSync: vi.fn(),
+    };
+
+    withProcessRespawnState(
+      ["/opt/homebrew/bin/ninthwave", "watch"],
+      "/opt/homebrew/bin/ninthwave",
+      () => forkDaemon(
+        ["--items", "T-1-1", "--_daemon-child"],
+        "/project",
+        spawnFn,
+        openFn,
+        daemonIO,
+      ),
+    );
+
+    expect(spawnFn).toHaveBeenCalledWith(
+      "/opt/homebrew/bin/ninthwave",
+      ["orchestrate", "--items", "T-1-1", "--_daemon-child"],
+      expect.objectContaining({
+        detached: true,
+        cwd: "/project",
+        stdio: ["ignore", 3, 3],
+      }),
+    );
+    expect(mockChild.unref).toHaveBeenCalled();
   });
 });
 
@@ -6112,14 +6187,34 @@ describe("shared engine wrappers", () => {
 });
 
 describe("interactive watch operator session", () => {
-  it("spawns the interactive engine child via flag-style CLI args", () => {
+  it("spawns the interactive engine child via flag-style CLI args in dev mode", () => {
     const spawnFn = vi.fn(() => ({}) as InteractiveEngineChildProcess);
 
-    spawnInteractiveEngineChild(["--_interactive-engine-child", "--items", "H-TRS-3"], "/project", spawnFn as any);
+    withProcessRespawnState(
+      ["/usr/local/bin/bun", "/project/core/cli.ts", "watch"],
+      "/usr/local/bin/bun",
+      () => spawnInteractiveEngineChild(["--_interactive-engine-child", "--items", "H-TRS-3"], "/project", spawnFn as any),
+    );
 
     expect(spawnFn).toHaveBeenCalledWith(
-      process.argv[0],
-      [process.argv[1], "--_interactive-engine-child", "--items", "H-TRS-3"],
+      "/usr/local/bin/bun",
+      ["/project/core/cli.ts", "--_interactive-engine-child", "--items", "H-TRS-3"],
+      expect.objectContaining({ cwd: "/project", stdio: ["pipe", "pipe", "pipe"] }),
+    );
+  });
+
+  it("spawns the interactive engine child via the packaged executable directly", () => {
+    const spawnFn = vi.fn(() => ({}) as InteractiveEngineChildProcess);
+
+    withProcessRespawnState(
+      ["/opt/homebrew/bin/ninthwave", "watch"],
+      "/opt/homebrew/bin/ninthwave",
+      () => spawnInteractiveEngineChild(["--_interactive-engine-child", "--items", "H-TRS-3"], "/project", spawnFn as any),
+    );
+
+    expect(spawnFn).toHaveBeenCalledWith(
+      "/opt/homebrew/bin/ninthwave",
+      ["--_interactive-engine-child", "--items", "H-TRS-3"],
       expect.objectContaining({ cwd: "/project", stdio: ["pipe", "pipe", "pipe"] }),
     );
   });

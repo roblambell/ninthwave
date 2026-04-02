@@ -131,6 +131,7 @@ import {
   type PassiveUpdateState,
   type PassiveUpdateStartupState,
 } from "../update-check.ts";
+import { resolveCliRespawnCommand } from "../cli-spawn.ts";
 // ── Extracted subsystems ─────────────────────────────────────────────
 import {
   buildSnapshot as _buildSnapshot,
@@ -850,7 +851,8 @@ export function spawnInteractiveEngineChild(
   projectRoot: string,
   spawnFn: typeof spawn = spawn,
 ): InteractiveEngineChildProcess {
-  return spawnFn(process.argv[0]!, [process.argv[1]!, ...childArgs], {
+  const cliCommand = resolveCliRespawnCommand(childArgs);
+  return spawnFn(cliCommand.command, cliCommand.args, {
     cwd: projectRoot,
     stdio: ["pipe", "pipe", "pipe"],
   }) as unknown as InteractiveEngineChildProcess;

@@ -17,6 +17,7 @@ import { dirname, join } from "path";
 import { spawn as nodeSpawn } from "node:child_process";
 import type { OrchestratorItem } from "./orchestrator.ts";
 import type { CrewRemoteItemSnapshot } from "./crew.ts";
+import { resolveCliRespawnCommand } from "./cli-spawn.ts";
 
 // ── Types ────────────────────────────────────────────────────────────
 
@@ -874,8 +875,9 @@ export function forkDaemon(
   rotateLogs(logPath);
 
   const logFd = openFn(logPath, "a");
+  const cliCommand = resolveCliRespawnCommand(["orchestrate", ...childArgs]);
 
-  const child = spawnFn(process.argv[0]!, [process.argv[1]!, "orchestrate", ...childArgs], {
+  const child = spawnFn(cliCommand.command, cliCommand.args, {
     detached: true,
     stdio: ["ignore", logFd, logFd],
     cwd: projectRoot,
