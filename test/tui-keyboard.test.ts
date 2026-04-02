@@ -54,6 +54,7 @@ function makeTuiState(overrides: Partial<TuiState> = {}): TuiState {
     pendingStrategyCountdownTimer: undefined,
     bypassEnabled: false,
     ctrlCPending: false,
+    shutdownInProgress: false,
     ctrlCTimestamp: 0,
     showHelp: false,
     showControls: false,
@@ -519,6 +520,55 @@ describe("setupKeyboardShortcuts", () => {
 
     expect(onShutdown).toHaveBeenCalledTimes(1);
     expect(ac.signal.aborted).toBe(false);
+    cleanup();
+    vi.useRealTimers();
+  });
+
+  it("second Ctrl+C clears confirmation, shows shutdown footer, and routes through onShutdown", () => {
+    vi.useFakeTimers();
+    const ac = new AbortController();
+    const stdin = makeFakeStdin();
+    const onShutdown = vi.fn();
+    const onUpdate = vi.fn();
+    const state = makeTuiState({ onShutdown, onUpdate });
+    const cleanup = setupKeyboardShortcuts(ac, () => {}, stdin as any, state);
+
+    stdin.emit("data", "\x03");
+    expect(state.ctrlCPending).toBe(true);
+    expect(state.viewOptions.ctrlCPending).toBe(true);
+    expect(state.shutdownInProgress).toBe(false);
+
+    stdin.emit("data", "\x03");
+
+    expect(state.ctrlCPending).toBe(false);
+    expect(state.viewOptions.ctrlCPending).toBe(false);
+    expect(state.shutdownInProgress).toBe(true);
+    expect(state.viewOptions.shutdownInProgress).toBe(true);
+    expect(onShutdown).toHaveBeenCalledTimes(1);
+    expect(ac.signal.aborted).toBe(false);
+    expect(onUpdate).toHaveBeenCalledTimes(2);
+
+    cleanup();
+    vi.useRealTimers();
+  });
+
+  it("Ctrl+C confirmation timeout cannot clear shutdown footer after second press", () => {
+    vi.useFakeTimers();
+    const ac = new AbortController();
+    const stdin = makeFakeStdin();
+    const state = makeTuiState({ onShutdown: vi.fn() });
+    const cleanup = setupKeyboardShortcuts(ac, () => {}, stdin as any, state);
+
+    stdin.emit("data", "\x03");
+    stdin.emit("data", "\x03");
+    vi.advanceTimersByTime(2500);
+
+    expect(state.ctrlCPending).toBe(false);
+    expect(state.viewOptions.ctrlCPending).toBe(false);
+    expect(state.shutdownInProgress).toBe(true);
+    expect(state.viewOptions.shutdownInProgress).toBe(true);
+    expect(ac.signal.aborted).toBe(false);
+
     cleanup();
     vi.useRealTimers();
   });

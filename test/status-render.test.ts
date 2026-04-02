@@ -2745,6 +2745,50 @@ describe("buildStatusLayout", () => {
     expect(footerText).not.toContain("update available");
   });
 
+  it("renders a red shutdown footer when shutdown is in progress", () => {
+    const items = [makeStatusItem({ id: "A-1" })];
+    const layout = buildStatusLayout(items, 80, undefined, false, {
+      mergeStrategy: "auto",
+      shutdownInProgress: true,
+    });
+
+    expect(layout.footerLines.some((line) => line.includes(`${RED}Closing...${RESET}`))).toBe(true);
+    expect(layout.footerLines.map(stripAnsi).join("\n")).toContain("Closing...");
+  });
+
+  it("shutdown footer takes precedence over Ctrl+C confirmation and footer notices", () => {
+    const items = [makeStatusItem({ id: "A-1" })];
+    const layout = buildStatusLayout(items, 80, undefined, false, {
+      mergeStrategy: "auto",
+      ctrlCPending: true,
+      shutdownInProgress: true,
+      updateState: makeUpdateState(),
+    });
+    const footerText = layout.footerLines.map(stripAnsi).join("\n");
+
+    expect(footerText).toContain("Closing...");
+    expect(footerText).not.toContain("Press Ctrl-C again to exit");
+    expect(footerText).not.toContain("update available");
+    expect(footerText).not.toContain("c controls");
+  });
+
+  it("shows the shutdown footer in logs-only mode", () => {
+    const items = [makeStatusItem({ id: "A-1", state: "implementing" })];
+    const layout = buildPanelLayout("logs-only", items, [], 100, 20, {
+      viewOptions: {
+        mergeStrategy: "auto",
+        ctrlCPending: true,
+        shutdownInProgress: true,
+        updateState: makeUpdateState({ latestVersion: "0.5.1" }),
+      },
+    });
+    const footerText = layout.footerLines.map(stripAnsi).join("\n");
+
+    expect(footerText).toContain("Closing...");
+    expect(footerText).not.toContain("Press Ctrl-C again to exit");
+    expect(footerText).not.toContain("update available");
+  });
+
   it("truncates the update notice when the footer is narrow", () => {
     const items = [makeStatusItem({ id: "A-1", state: "implementing" })];
     const layout = buildStatusLayout(items, 28, undefined, false, {

@@ -2961,6 +2961,7 @@ describe("setupKeyboardShortcuts", () => {
       mergeStrategy: "auto",
       bypassEnabled: false,
       ctrlCPending: false,
+      shutdownInProgress: false,
       ctrlCTimestamp: 0,
       showHelp: false,
     };
@@ -3059,8 +3060,10 @@ describe("setupKeyboardShortcuts", () => {
       mergeStrategy: "auto",
       bypassEnabled: false,
       ctrlCPending: false,
+      shutdownInProgress: false,
       ctrlCTimestamp: 0,
       showHelp: false,
+      onShutdown: vi.fn(),
     };
 
     setupKeyboardShortcuts(ac, () => {}, stdin, tuiState);
@@ -3081,8 +3084,10 @@ describe("setupKeyboardShortcuts", () => {
       mergeStrategy: "auto",
       bypassEnabled: false,
       ctrlCPending: false,
+      shutdownInProgress: false,
       ctrlCTimestamp: 0,
       showHelp: false,
+      onShutdown: vi.fn(),
     };
 
     const cleanup = setupKeyboardShortcuts(ac, () => {}, stdin, tuiState);
@@ -3107,8 +3112,10 @@ describe("setupKeyboardShortcuts", () => {
       mergeStrategy: "auto",
       bypassEnabled: false,
       ctrlCPending: false,
+      shutdownInProgress: false,
       ctrlCTimestamp: 0,
       showHelp: false,
+      onShutdown: vi.fn(),
     };
 
     const cleanup = setupKeyboardShortcuts(ac, (e) => logs.push(e), stdin, tuiState);
@@ -3117,7 +3124,12 @@ describe("setupKeyboardShortcuts", () => {
     expect(ac.signal.aborted).toBe(false);
 
     (stdin as any)._emit("data", "\x03"); // Second
-    expect(ac.signal.aborted).toBe(true);
+    expect(ac.signal.aborted).toBe(false);
+    expect(tuiState.ctrlCPending).toBe(false);
+    expect(tuiState.viewOptions.ctrlCPending).toBe(false);
+    expect(tuiState.shutdownInProgress).toBe(true);
+    expect(tuiState.viewOptions.shutdownInProgress).toBe(true);
+    expect(tuiState.onShutdown).toHaveBeenCalledTimes(1);
     expect(logs.some((l: any) => l.event === "keyboard_quit" && l.key === "ctrl-c")).toBe(true);
 
     cleanup();
@@ -3143,6 +3155,7 @@ describe("setupKeyboardShortcuts", () => {
       mergeStrategy: "auto",
       bypassEnabled: false,
       ctrlCPending: false,
+      shutdownInProgress: false,
       ctrlCTimestamp: 0,
       showHelp: false,
     };

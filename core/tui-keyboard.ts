@@ -123,6 +123,8 @@ export interface TuiState {
   bypassEnabled: boolean;
   /** First Ctrl+C pressed -- waiting for confirmation. */
   ctrlCPending: boolean;
+  /** Graceful shutdown has been requested and the footer should show progress. */
+  shutdownInProgress?: boolean;
   /** Timestamp of the first Ctrl+C press (for 2s timeout). */
   ctrlCTimestamp: number;
   /** Whether the help overlay is visible. */
@@ -291,6 +293,13 @@ export function setupKeyboardShortcuts(
   let ctrlCTimer: ReturnType<typeof setTimeout> | null = null;
 
   const pendingStrategyCountdownSeconds = (deadlineMs: number) => Math.max(0, Math.ceil((deadlineMs - Date.now()) / 1000));
+
+  const clearCtrlCPending = () => {
+    if (!tuiState) return;
+    tuiState.ctrlCPending = false;
+    tuiState.ctrlCTimestamp = 0;
+    tuiState.viewOptions.ctrlCPending = false;
+  };
 
   const clearPendingStrategyTimer = () => {
     if (tuiState?.pendingStrategyTimer) {
@@ -683,7 +692,14 @@ export function setupKeyboardShortcuts(
     if (key === "\x03") {
       if (tuiState?.ctrlCPending && Date.now() - tuiState.ctrlCTimestamp < 2000) {
         // Second press within 2s -- exit
-        if (ctrlCTimer) clearTimeout(ctrlCTimer);
+        if (ctrlCTimer) {
+          clearTimeout(ctrlCTimer);
+          ctrlCTimer = null;
+        }
+        clearCtrlCPending();
+        tuiState.shutdownInProgress = true;
+        tuiState.viewOptions.shutdownInProgress = true;
+        tuiState.onUpdate?.();
         log({ ts: new Date().toISOString(), level: "info", event: "keyboard_quit", key: "ctrl-c" });
         if (tuiState?.onShutdown) {
           tuiState.onShutdown();
@@ -701,8 +717,9 @@ export function setupKeyboardShortcuts(
         // Clear after ~2s
         if (ctrlCTimer) clearTimeout(ctrlCTimer);
         ctrlCTimer = setTimeout(() => {
-          tuiState.ctrlCPending = false;
-          tuiState.viewOptions.ctrlCPending = false;
+          ctrlCTimer = null;
+          if (!tuiState.ctrlCPending || tuiState.shutdownInProgress) return;
+          clearCtrlCPending();
           tuiState.onUpdate?.();
         }, 2000);
         return;
@@ -717,8 +734,7 @@ export function setupKeyboardShortcuts(
 
     // Any non-Ctrl+C key clears the ctrlCPending state
     if (tuiState.ctrlCPending) {
-      tuiState.ctrlCPending = false;
-      tuiState.viewOptions.ctrlCPending = false;
+      clearCtrlCPending();
       if (ctrlCTimer) { clearTimeout(ctrlCTimer); ctrlCTimer = null; }
     }
 

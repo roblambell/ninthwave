@@ -64,6 +64,8 @@ export interface ViewOptions {
   pendingStrategyCountdownSeconds?: number;
   /** When true, footer shows "Press Ctrl-C again to exit" instead of strategy indicator. */
   ctrlCPending?: boolean;
+  /** When true, footer shows a red shutdown-in-progress message. */
+  shutdownInProgress?: boolean;
   /** When true, render the help overlay instead of the normal frame. */
   showHelp?: boolean;
   /** When true, render the controls overlay instead of the normal frame. */
@@ -1830,7 +1832,9 @@ export function buildStatusLayout(
   const updateNoticeText = formatUpdateNoticeText(viewOptions?.updateState);
   const updateNotice = renderUpdateNotice(updateNoticeText);
   const safeWidth = Math.max(0, termWidth - 1);
-  if (viewOptions?.ctrlCPending) {
+  if (viewOptions?.shutdownInProgress) {
+    footerLines.push(`  ${RED}Closing...${RESET}`);
+  } else if (viewOptions?.ctrlCPending) {
     footerLines.push(`  ${YELLOW}Press Ctrl-C again to exit${RESET}`);
   } else if (viewOptions?.mergeStrategy) {
     const left = formatStrategyFooterLine(
@@ -2191,7 +2195,9 @@ function buildPanelFooter(
   footerLines.push(sep);
   footerLines.push(formatUnifiedProgress(items, termWidth));
 
-  if (viewOptions?.ctrlCPending) {
+  if (viewOptions?.shutdownInProgress) {
+    footerLines.push(`  ${RED}Closing...${RESET}`);
+  } else if (viewOptions?.ctrlCPending) {
     footerLines.push(`  ${YELLOW}Press Ctrl-C again to exit${RESET}`);
   } else if (viewOptions?.mergeStrategy) {
     footerLines.push(
