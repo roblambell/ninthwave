@@ -21,6 +21,7 @@ import {
   type OnboardDeps,
   type NoArgsDeps,
 } from "../core/commands/onboard.ts";
+import { loadLocalStartupItems } from "../core/startup-items.ts";
 import type { WorkItem } from "../core/types.ts";
 import type { InteractiveResult } from "../core/interactive.ts";
 import type { MergeStrategy } from "../core/orchestrator.ts";
@@ -176,6 +177,35 @@ describe("shouldOnboard", () => {
     const projectDir = setupTempRepo();
     mkdirSync(join(projectDir, ".ninthwave"), { recursive: true });
     expect(shouldOnboard(projectDir)).toBe(false);
+  });
+});
+
+describe("loadLocalStartupItems", () => {
+  it("returns parsed runnable startup items without needing PR polling", () => {
+    const projectDir = setupTempRepo();
+    const workDir = join(projectDir, ".ninthwave", "work");
+    const worktreeDir = join(projectDir, ".ninthwave", ".worktrees");
+
+    mkdirSync(workDir, { recursive: true });
+    mkdirSync(worktreeDir, { recursive: true });
+    writeFileSync(
+      join(workDir, "2-startup-items--H-LOCAL-1.md"),
+      [
+        "# Refactor: Local startup item (H-LOCAL-1)",
+        "",
+        "**Priority:** High",
+        "**Depends on:** None",
+        "**Domain:** startup-items",
+        "**Lineage:** 10000000-0000-4000-8000-000000000010",
+        "",
+        "Acceptance: Parsed locally",
+      ].join("\n"),
+    );
+
+    const items = loadLocalStartupItems(workDir, worktreeDir, projectDir);
+
+    expect(items.map((item) => item.id)).toEqual(["H-LOCAL-1"]);
+    expect(items[0]!.title).toBe("Local startup item");
   });
 });
 

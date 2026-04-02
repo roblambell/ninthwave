@@ -43,7 +43,9 @@ import {
   bootstrapTuiUpdateNotice,
   renderTuiPanelFrameFromStatusItems,
   resolveInteractiveStartupConfig,
+  loadLocalStartupItems,
   pruneMergedStartupReplayItems,
+  refreshRunnableStartupItems,
   INTERACTIVE_WATCH_STAGE_WARN_MS,
   LOG_BUFFER_MAX,
   TEST_INTERACTIVE_ENGINE_STARTUP_FAIL_MESSAGE,
@@ -214,6 +216,110 @@ describe("pruneMergedStartupReplayItems", () => {
     expect(result.prunedItems).toEqual([
       { id: "H-LEGACY-1", prNumber: 45, matchMode: "legacy-empty" },
     ]);
+  });
+
+  it("keeps legacy title matching intact for token-less merged items", () => {
+    const legacyItem = {
+      ...makeWorkItem("H-LEGACY-TITLE-1"),
+      title: "legacy work",
+      lineageToken: undefined,
+    };
+
+    const result = pruneMergedStartupReplayItems(
+      [legacyItem],
+      "/tmp/test-project",
+      () => "H-LEGACY-TITLE-1\t46\tmerged\t\t\tfix: legacy work\t",
+    );
+
+    expect(result.activeItems).toEqual([]);
+    expect(result.prunedItems).toEqual([
+      { id: "H-LEGACY-TITLE-1", prNumber: 46, matchMode: "legacy-title" },
+    ]);
+  });
+});
+
+describe("refreshRunnableStartupItems", () => {
+  function writeStartupItem(
+    workDir: string,
+    id: string,
+    title: string,
+    lineageToken: string,
+  ): void {
+    writeFileSync(
+      join(workDir, `2-startup-items--${id}.md`),
+      [
+        `# Refactor: ${title} (${id})`,
+        "",
+        "**Priority:** High",
+        "**Depends on:** None",
+        "**Domain:** startup-items",
+        `**Lineage:** ${lineageToken}`,
+        "",
+        "Acceptance: Test startup item parsing",
+      ].join("\n"),
+    );
+  }
+
+  it("returns deterministic diff data for removed and still-valid startup items", async () => {
+    const projectRoot = mkdtempSync(join(tmpdir(), "ninthwave-startup-refresh-"));
+    const workDir = join(projectRoot, ".ninthwave", "work");
+    const worktreeDir = join(projectRoot, ".ninthwave", ".worktrees");
+    const activeLineage = "10000000-0000-4000-8000-000000000001";
+    const newLineage = "10000000-0000-4000-8000-000000000002";
+
+    try {
+      mkdirSync(workDir, { recursive: true });
+      mkdirSync(worktreeDir, { recursive: true });
+
+      writeStartupItem(workDir, "H-SREF-1", "Stale replay item", STARTUP_LINEAGE);
+      writeStartupItem(workDir, "H-AREF-1", "Active replay item", activeLineage);
+
+      const initialItems = loadLocalStartupItems(workDir, worktreeDir, projectRoot);
+
+      writeStartupItem(workDir, "H-NREF-1", "New replay item", newLineage);
+
+      const result = await refreshRunnableStartupItems(
+        workDir,
+        worktreeDir,
+        projectRoot,
+        initialItems,
+        async (id) => {
+          if (id === "H-SREF-1") {
+            return `H-SREF-1\t52\tmerged\t\t\tStale replay item\t${STARTUP_LINEAGE}`;
+          }
+          return `${id}\t\tno-pr`;
+        },
+      );
+
+      expect(result.activeItems.map((item) => item.id).sort()).toEqual([
+        "H-AREF-1",
+        "H-NREF-1",
+      ]);
+      expect(result.prunedItems).toEqual([
+        { id: "H-SREF-1", prNumber: 52, matchMode: "lineage" },
+      ]);
+      expect(result.diff).toEqual({
+        keptItemIds: ["H-AREF-1"],
+        removedItemIds: ["H-SREF-1"],
+        addedItemIds: ["H-NREF-1"],
+      });
+      expect(result.changes).toEqual([
+        {
+          id: "H-SREF-1",
+          type: "removed",
+          reason: "merged-pruned",
+          prNumber: 52,
+          matchMode: "lineage",
+        },
+        {
+          id: "H-NREF-1",
+          type: "added",
+          reason: "local-add",
+        },
+      ]);
+    } finally {
+      rmSync(projectRoot, { recursive: true, force: true });
+    }
   });
 });
 

@@ -168,9 +168,16 @@ export { buildSnapshotAsync, isWorkerAlive, isWorkerAliveWithCache, getWorktreeL
 export { buildSnapshot } from "../snapshot.ts";
 export { reconstructState } from "../reconstruct.ts";
 export {
+  diffStartupItemIds,
+  loadLocalStartupItems,
   pruneMergedStartupReplayItems,
+  pruneMergedStartupReplayItemsAsync,
+  refreshRunnableStartupItems,
   type StartupReplayPrune,
   type StartupReplayPruneResult,
+  type StartupItemIdDiff,
+  type StartupItemsRefreshChange,
+  type StartupItemsRefreshResult,
 } from "../startup-items.ts";
 export { parseWatchArgs, validateItemIds, type ParsedWatchArgs } from "./watch-args.ts";
 export { setupKeyboardShortcuts, applyRuntimeSnapshotToTuiState, isTuiPaused, filterLogsByLevel, pushLogBuffer, LOG_BUFFER_MAX, REVIEW_MODE_CYCLE, COLLABORATION_MODE_CYCLE, type TuiState, type TuiRuntimeSnapshot, type LogLevelFilter, type CollaborationMode, type ReviewMode } from "../tui-keyboard.ts";
