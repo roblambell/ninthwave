@@ -1,10 +1,10 @@
-# Feat: Render paused overlay and teach the shortcut model (H-TPAU-2)
+# Feat: Render paused overlay and teach the shortcut model (H-TPAU-4)
 
 **Priority:** High
 **Source:** Spec `.opencode/plans/1775081194442-witty-star.md`
 **Depends on:** H-TPAU-1
 **Domain:** pause-ui
-**Lineage:** dcb7f6b1-ac27-4cd3-a7c1-59f348f8c929
+**Lineage:** 6550f95d-95ac-45b9-8f36-c7c30d4ecf31
 
 Add a dedicated paused overlay that matches the existing TUI modal style and makes the execution state obvious at a glance. Update help and footer copy so operators can discover the layered `Esc` behavior, the explicit `p` shortcut, and the quit hint without needing to guess how to leave the paused state.
 

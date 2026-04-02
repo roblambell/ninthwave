@@ -2,7 +2,7 @@
 
 **Priority:** High
 **Source:** Spec `.opencode/plans/1775081194442-witty-star.md`
-**Depends on:** H-TPAU-1, H-TPAU-2
+**Depends on:** H-TPAU-1, H-TPAU-4
 **Domain:** pause-orchestrator
 **Lineage:** 0a3a5179-4589-4d8c-82ea-8d4f6bca1a90
 
