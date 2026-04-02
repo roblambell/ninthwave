@@ -358,6 +358,51 @@ export function readStateFile(
   }
 }
 
+export interface WorkerNamespaceResolution {
+  requestedProjectRoot: string;
+  activeProjectRoot: string;
+  source: "cwd" | "daemon-state";
+}
+
+/**
+ * Resolve the live worker namespace for an item when inspecting from the hub root.
+ * Falls back to the current cwd/project namespace when no active worker worktree is known.
+ */
+export function resolveActiveWorkerNamespace(
+  projectRoot: string,
+  itemId: string,
+  io: {
+    existsSync: (path: string) => boolean;
+    readFileSync: (path: string, encoding: BufferEncoding) => string;
+  } = defaultIO,
+): WorkerNamespaceResolution {
+  const fallback: WorkerNamespaceResolution = {
+    requestedProjectRoot: projectRoot,
+    activeProjectRoot: projectRoot,
+    source: "cwd",
+  };
+
+  const filePath = stateFilePath(projectRoot);
+  if (!io.existsSync(filePath)) return fallback;
+
+  try {
+    const content = io.readFileSync(filePath, "utf-8");
+    const parsed = JSON.parse(content);
+    if (!validateDaemonState(parsed)) return fallback;
+    const state = parsed as DaemonState;
+    const item = state.items.find((entry) => entry.id === itemId);
+    if (!item?.worktreePath) return fallback;
+    if (!io.existsSync(item.worktreePath)) return fallback;
+    return {
+      requestedProjectRoot: projectRoot,
+      activeProjectRoot: item.worktreePath,
+      source: "daemon-state",
+    };
+  } catch {
+    return fallback;
+  }
+}
+
 /**
  * Lightweight shape validator for DaemonState.
  * Checks that `items` is an array and each item has `id` (string) and `state` (string).

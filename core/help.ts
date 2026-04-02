@@ -450,7 +450,7 @@ export const COMMAND_REGISTRY: ReadonlyArray<CommandEntry> = [
   },
   {
     name: "inbox",
-    usage: "inbox --wait <id> | --check <id> | --write <id> -m <text>",
+    usage: "inbox --wait <id> | --check <id> | --status <id> | --peek <id> | --write <id> -m <text>",
     description: "File-based message inbox for orchestrator↔agent communication",
     group: "advanced",
     needsRoot: true,
@@ -461,6 +461,8 @@ export const COMMAND_REGISTRY: ReadonlyArray<CommandEntry> = [
     flags: {
       "--wait": "Block until a message arrives; long-lived, but parent tools may still interrupt it",
       "--check": "Non-blocking check that drains all pending messages during active work",
+      "--status": "Inspect pending count, queue location, wait state, and recent history without consuming messages",
+      "--peek": "Preview queued messages without consuming them",
       "--write": "Write a message to the inbox",
       "-m, --message": "Message text (used with --write)",
     },
@@ -468,6 +470,8 @@ export const COMMAND_REGISTRY: ReadonlyArray<CommandEntry> = [
       "nw inbox --wait H-FOO-1",
       "# If interrupted before output, rerun the same wait with a very long timeout",
       "nw inbox --check H-FOO-1",
+      "nw inbox --status H-FOO-1",
+      "nw inbox --peek H-FOO-1",
       'nw inbox --write H-FOO-1 -m "Fix CI"',
     ],
   },

@@ -19,6 +19,7 @@ import {
 } from "../core/orchestrator.ts";
 import {
   serializeOrchestratorState,
+  resolveActiveWorkerNamespace,
   writeStateFile,
   readStateFile,
   writePidFile,
@@ -27,8 +28,10 @@ import {
   cleanStateFile,
   type DaemonIO,
 } from "../core/daemon.ts";
+import { checkInbox, cmdInbox, writeInbox } from "../core/commands/inbox.ts";
 import { reconstructState } from "../core/reconstruct.ts";
 import type { WorkItem, Priority } from "../core/types.ts";
+import { setupTempDir } from "./helpers.ts";
 
 // ── Helpers ──────────────────────────────────────────────────────────
 
@@ -94,9 +97,9 @@ function mockDeps(overrides?: Partial<OrchestratorDeps>): OrchestratorDeps {
 /** Create a mock DaemonIO backed by an in-memory Map. */
 function createMockIO(): DaemonIO & { files: Map<string, string> } {
   const files = new Map<string, string>();
-  return {
+  const io = {
     files,
-    writeFileSync: vi.fn((path: string, content: string, optionsOrEncoding?: any) => {
+    writeFileSync: vi.fn((path: any, content: any, optionsOrEncoding?: any) => {
       if (typeof optionsOrEncoding === "object" && optionsOrEncoding?.flag === "wx") {
         if (files.has(path)) {
           const err = new Error(`EEXIST: file already exists, open '${path}'`) as NodeJS.ErrnoException;
@@ -104,25 +107,26 @@ function createMockIO(): DaemonIO & { files: Map<string, string> } {
           throw err;
         }
       }
-      files.set(path, content);
+      files.set(path, String(content));
     }),
-    readFileSync: vi.fn((path: string) => {
+    readFileSync: vi.fn((path: any) => {
       const content = files.get(path);
       if (content === undefined) throw new Error(`ENOENT: ${path}`);
       return content;
     }),
-    unlinkSync: vi.fn((path: string) => {
+    unlinkSync: vi.fn((path: any) => {
       files.delete(path);
     }),
-    existsSync: vi.fn((path: string) => files.has(path)),
+    existsSync: vi.fn((path: any) => files.has(path)),
     mkdirSync: vi.fn(),
-    renameSync: vi.fn((from: string, to: string) => {
+    renameSync: vi.fn((from: any, to: any) => {
       const content = files.get(from);
       if (content === undefined) throw new Error(`ENOENT: ${from}`);
       files.set(to, content);
       files.delete(from);
     }),
   };
+  return io as unknown as DaemonIO & { files: Map<string, string> };
 }
 
 // ── 1. Startup / Shutdown ────────────────────────────────────────────
@@ -168,6 +172,57 @@ describe("Daemon lifecycle: startup and shutdown", () => {
     cleanStateFile("/project", io);
     expect(readPidFile("/project", io)).toBeNull();
     expect(readStateFile("/project", io)).toBeNull();
+  });
+
+  it("resolves and reports the active worker inbox namespace from the hub root", () => {
+    const fakeHome = setupTempDir("nw-inbox-home-");
+    const previousHome = process.env.HOME;
+    process.env.HOME = fakeHome;
+
+    const hubRoot = mkdtempSync(join(tmpdir(), "nw-hub-root-"));
+    const workerRoot = join(hubRoot, ".ninthwave", ".worktrees", "ninthwave-H-NS-1");
+    mkdirSync(workerRoot, { recursive: true });
+
+    try {
+      writeStateFile(hubRoot, {
+        pid: 1,
+        startedAt: "2026-04-02T10:00:00.000Z",
+        updatedAt: "2026-04-02T10:00:00.000Z",
+        items: [{
+          id: "H-NS-1",
+          title: "Namespace item",
+          state: "implementing",
+          prNumber: null,
+          ciFailCount: 0,
+          retryCount: 0,
+          lastTransition: "2026-04-02T10:00:00.000Z",
+          worktreePath: workerRoot,
+        }],
+      });
+      writeInbox(workerRoot, "H-NS-1", "live worker queue message");
+
+      const resolution = resolveActiveWorkerNamespace(hubRoot, "H-NS-1");
+      expect(resolution.activeProjectRoot).toBe(workerRoot);
+      expect(resolution.source).toBe("daemon-state");
+
+      const chunks: string[] = [];
+      const origWrite = process.stdout.write;
+      process.stdout.write = ((chunk: string) => { chunks.push(chunk); return true; }) as typeof process.stdout.write;
+      try {
+        cmdInbox(["--status", "H-NS-1"], hubRoot);
+      } finally {
+        process.stdout.write = origWrite;
+      }
+      const out = chunks.join("");
+      expect(out).toContain(`Requested namespace: ${hubRoot}`);
+      expect(out).toContain(`Active namespace: ${workerRoot}`);
+      expect(out).toContain("Namespace source: daemon-state");
+      expect(out).toContain("live worker queue message");
+      expect(checkInbox(workerRoot, "H-NS-1")).toBe("live worker queue message");
+    } finally {
+      process.env.HOME = previousHome;
+      rmSync(hubRoot, { recursive: true, force: true });
+    }
   });
 
   it("items with no deps start as ready; items with deps stay queued", () => {

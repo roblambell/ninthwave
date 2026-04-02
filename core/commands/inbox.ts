@@ -7,12 +7,14 @@
 // Usage:
 //   nw inbox --wait <item-id>              Block until a message arrives
 //   nw inbox --check <item-id>             Non-blocking check for all pending messages
+//   nw inbox --status <item-id>            Inspect queue + wait metadata without consuming
+//   nw inbox --peek <item-id>              Preview queued messages without consuming
 //   nw inbox --write <item-id> -m <text>   Write a message to the inbox
 
-import { existsSync, mkdirSync, readFileSync, readdirSync, unlinkSync, writeFileSync, renameSync } from "fs";
-import { join } from "path";
+import { appendFileSync, existsSync, mkdirSync, readFileSync, readdirSync, unlinkSync, writeFileSync, renameSync } from "fs";
+import { dirname, join } from "path";
 import { die } from "../output.ts";
-import { userStateDir } from "../daemon.ts";
+import { resolveActiveWorkerNamespace, userStateDir } from "../daemon.ts";
 
 // ── Types ────────────────────────────────────────────────────────────
 
@@ -21,7 +23,8 @@ export interface InboxIO {
   mkdirSync: (path: string, opts?: { recursive?: boolean }) => void;
   readdirSync: (path: string) => string[];
   readFileSync: (path: string, encoding: BufferEncoding) => string;
-  writeFileSync: (path: string, data: string) => void;
+  writeFileSync: (path: string, data: string, encoding?: BufferEncoding) => void;
+  appendFileSync: (path: string, data: string, encoding?: BufferEncoding) => void;
   unlinkSync: (path: string) => void;
   renameSync: (oldPath: string, newPath: string) => void;
 }
@@ -41,7 +44,7 @@ export interface InboxWaitRuntime {
 }
 
 const defaultDeps: InboxDeps = {
-  io: { existsSync, mkdirSync, readdirSync, readFileSync, writeFileSync, unlinkSync, renameSync },
+  io: { existsSync, mkdirSync, readdirSync, readFileSync, writeFileSync, appendFileSync, unlinkSync, renameSync },
   sleep: (ms) => Bun.sleepSync(ms),
   getBranch: () => {
     try {
@@ -81,9 +84,65 @@ export function itemInboxDir(projectRoot: string, itemId: string): string {
   return join(inboxDir(projectRoot), itemId);
 }
 
+export function inboxHistoryPath(projectRoot: string): string {
+  return join(userStateDir(projectRoot), "inbox-history.jsonl");
+}
+
+export function inboxWaitDir(projectRoot: string): string {
+  return join(userStateDir(projectRoot), "inbox-waits");
+}
+
+export function inboxWaitStatePath(projectRoot: string, itemId: string): string {
+  return join(inboxWaitDir(projectRoot), `${itemId}.json`);
+}
+
+export type InboxHistoryAction = "write" | "deliver" | "drain" | "clean" | "wait-interrupted";
+
+export interface InboxHistoryEntry {
+  itemId: string;
+  ts: string;
+  action: InboxHistoryAction;
+  namespaceProjectRoot: string;
+  queuePath: string;
+  preview?: string;
+  previews?: string[];
+  messageCount?: number;
+  waitStartedAt?: string;
+  waitInterruptedAt?: string;
+}
+
+export interface InboxWaitState {
+  itemId: string;
+  startedAt: string;
+  pid: number;
+  pollMs: number;
+  namespaceProjectRoot: string;
+  queuePath: string;
+}
+
+export interface PendingInboxMessage {
+  filePath: string;
+  preview: string;
+}
+
+export interface InboxInspection {
+  itemId: string;
+  requestedProjectRoot: string;
+  namespaceProjectRoot: string;
+  namespaceSource: "cwd" | "daemon-state";
+  queuePath: string;
+  pendingCount: number;
+  pendingMessages: PendingInboxMessage[];
+  waitState: InboxWaitState | null;
+  recentHistory: InboxHistoryEntry[];
+}
+
 // ── Core operations ──────────────────────────────────────────────────
 
 let inboxWriteSequence = 0;
+const DEFAULT_PREVIEW_LIMIT = 5;
+const DEFAULT_HISTORY_LIMIT = 10;
+const PREVIEW_CHARS = 120;
 
 function nextInboxFileName(): string {
   const now = String(Date.now()).padStart(13, "0");
@@ -108,6 +167,216 @@ function listInboxFiles(
   }
 }
 
+function ensureParentDir(filePath: string, io: InboxIO): void {
+  const dir = dirname(filePath);
+  if (!io.existsSync(dir)) {
+    io.mkdirSync(dir, { recursive: true });
+  }
+}
+
+function previewMessage(message: string): string {
+  const flattened = message.replace(/\s+/g, " ").trim();
+  if (flattened.length <= PREVIEW_CHARS) return flattened;
+  return `${flattened.slice(0, PREVIEW_CHARS - 1)}…`;
+}
+
+export function appendInboxHistoryEntry(
+  projectRoot: string,
+  entry: InboxHistoryEntry,
+  io: InboxIO = defaultDeps.io,
+): void {
+  const filePath = inboxHistoryPath(projectRoot);
+  ensureParentDir(filePath, io);
+  io.appendFileSync(filePath, `${JSON.stringify(entry)}\n`, "utf-8");
+}
+
+export function readInboxHistory(
+  projectRoot: string,
+  itemId: string,
+  limit: number = DEFAULT_HISTORY_LIMIT,
+  io: InboxIO = defaultDeps.io,
+): InboxHistoryEntry[] {
+  const filePath = inboxHistoryPath(projectRoot);
+  if (!io.existsSync(filePath)) return [];
+  try {
+    const content = io.readFileSync(filePath, "utf-8");
+    return content
+      .split("\n")
+      .map((line) => line.trim())
+      .filter(Boolean)
+      .flatMap((line) => {
+        try {
+          return [JSON.parse(line) as InboxHistoryEntry];
+        } catch {
+          return [];
+        }
+      })
+      .filter((entry) => entry.itemId === itemId)
+      .slice(-limit)
+      .reverse();
+  } catch {
+    return [];
+  }
+}
+
+export function writeInboxWaitState(
+  projectRoot: string,
+  itemId: string,
+  waitState: InboxWaitState,
+  io: InboxIO = defaultDeps.io,
+): void {
+  const filePath = inboxWaitStatePath(projectRoot, itemId);
+  ensureParentDir(filePath, io);
+  io.writeFileSync(filePath, JSON.stringify(waitState, null, 2), "utf-8");
+}
+
+export function readInboxWaitState(
+  projectRoot: string,
+  itemId: string,
+  io: InboxIO = defaultDeps.io,
+): InboxWaitState | null {
+  const filePath = inboxWaitStatePath(projectRoot, itemId);
+  if (!io.existsSync(filePath)) return null;
+  try {
+    return JSON.parse(io.readFileSync(filePath, "utf-8")) as InboxWaitState;
+  } catch {
+    return null;
+  }
+}
+
+export function clearInboxWaitState(
+  projectRoot: string,
+  itemId: string,
+  io: InboxIO = defaultDeps.io,
+): void {
+  const filePath = inboxWaitStatePath(projectRoot, itemId);
+  if (!io.existsSync(filePath)) return;
+  try {
+    io.unlinkSync(filePath);
+  } catch {
+    // Best-effort cleanup
+  }
+}
+
+function readQueuedMessages(
+  projectRoot: string,
+  itemId: string,
+  io: InboxIO,
+): Array<{ filePath: string; content: string; preview: string }> {
+  return listInboxFiles(projectRoot, itemId, io)
+    .flatMap((filePath) => {
+      try {
+        const content = io.readFileSync(filePath, "utf-8");
+        return [{ filePath, content, preview: previewMessage(content) }];
+      } catch {
+        return [];
+      }
+    });
+}
+
+export function peekInbox(
+  projectRoot: string,
+  itemId: string,
+  io: InboxIO = defaultDeps.io,
+): string[] {
+  return readQueuedMessages(projectRoot, itemId, io).map((message) => message.content);
+}
+
+export function inspectInbox(
+  projectRoot: string,
+  itemId: string,
+  io: InboxIO = defaultDeps.io,
+): InboxInspection {
+  const namespace = resolveActiveWorkerNamespace(projectRoot, itemId, io);
+  const pendingMessages = readQueuedMessages(namespace.activeProjectRoot, itemId, io)
+    .slice(0, DEFAULT_PREVIEW_LIMIT)
+    .map((message) => ({ filePath: message.filePath, preview: message.preview }));
+
+  return {
+    itemId,
+    requestedProjectRoot: projectRoot,
+    namespaceProjectRoot: namespace.activeProjectRoot,
+    namespaceSource: namespace.source,
+    queuePath: itemInboxDir(namespace.activeProjectRoot, itemId),
+    pendingCount: listInboxFiles(namespace.activeProjectRoot, itemId, io).length,
+    pendingMessages,
+    waitState: readInboxWaitState(namespace.activeProjectRoot, itemId, io),
+    recentHistory: readInboxHistory(namespace.activeProjectRoot, itemId, DEFAULT_HISTORY_LIMIT, io),
+  };
+}
+
+function renderPeek(inspection: InboxInspection): string {
+  const lines = [
+    `Item: ${inspection.itemId}`,
+    `Namespace: ${inspection.namespaceProjectRoot}`,
+    `Queue: ${inspection.queuePath}`,
+    `Pending: ${inspection.pendingCount}`,
+  ];
+
+  if (inspection.pendingMessages.length === 0) {
+    lines.push("Pending previews: (none)");
+  } else {
+    lines.push("Pending previews:");
+    for (const [index, message] of inspection.pendingMessages.entries()) {
+      lines.push(`  ${index + 1}. ${message.preview}`);
+    }
+  }
+
+  return `${lines.join("\n")}\n`;
+}
+
+function formatHistoryEntry(entry: InboxHistoryEntry): string {
+  if (entry.action === "write" || entry.action === "deliver") {
+    return `${entry.ts} ${entry.action}: ${entry.preview ?? "(no preview)"}`;
+  }
+  if (entry.action === "wait-interrupted") {
+    return `${entry.ts} wait-interrupted: started ${entry.waitStartedAt ?? "unknown"}`;
+  }
+  const count = entry.messageCount ?? 0;
+  const previews = entry.previews?.length ? ` -- ${entry.previews.join(" | ")}` : "";
+  return `${entry.ts} ${entry.action}: ${count} message${count === 1 ? "" : "s"}${previews}`;
+}
+
+function renderStatus(inspection: InboxInspection): string {
+  const lines = [
+    `Item: ${inspection.itemId}`,
+    `Requested namespace: ${inspection.requestedProjectRoot}`,
+    `Active namespace: ${inspection.namespaceProjectRoot}`,
+    `Namespace source: ${inspection.namespaceSource}`,
+    `Queue: ${inspection.queuePath}`,
+    `Pending: ${inspection.pendingCount}`,
+  ];
+
+  if (inspection.pendingMessages.length === 0) {
+    lines.push("Pending previews: (none)");
+  } else {
+    lines.push("Pending previews:");
+    for (const [index, message] of inspection.pendingMessages.entries()) {
+      lines.push(`  ${index + 1}. ${message.preview}`);
+    }
+  }
+
+  if (inspection.waitState) {
+    lines.push("Wait state:");
+    lines.push(`  started: ${inspection.waitState.startedAt}`);
+    lines.push(`  pid: ${inspection.waitState.pid}`);
+    lines.push(`  pollMs: ${inspection.waitState.pollMs}`);
+  } else {
+    lines.push("Wait state: idle");
+  }
+
+  if (inspection.recentHistory.length === 0) {
+    lines.push("Recent history: (none)");
+  } else {
+    lines.push("Recent history:");
+    for (const entry of inspection.recentHistory) {
+      lines.push(`  - ${formatHistoryEntry(entry)}`);
+    }
+  }
+
+  return `${lines.join("\n")}\n`;
+}
+
 /**
  * Queue a message atomically (temp file + rename) under the item's inbox directory.
  */
@@ -125,6 +394,14 @@ export function writeInbox(
   const tmpPath = `${filePath}.tmp.${Date.now()}`;
   io.writeFileSync(tmpPath, message);
   io.renameSync(tmpPath, filePath);
+  appendInboxHistoryEntry(projectRoot, {
+    itemId,
+    ts: new Date().toISOString(),
+    action: "write",
+    namespaceProjectRoot: projectRoot,
+    queuePath: dir,
+    preview: previewMessage(message),
+  }, io);
 }
 
 /**
@@ -141,6 +418,14 @@ export function checkInbox(
   try {
     const content = io.readFileSync(filePath, "utf-8");
     io.unlinkSync(filePath);
+    appendInboxHistoryEntry(projectRoot, {
+      itemId,
+      ts: new Date().toISOString(),
+      action: "deliver",
+      namespaceProjectRoot: projectRoot,
+      queuePath: itemInboxDir(projectRoot, itemId),
+      preview: previewMessage(content),
+    }, io);
     return content;
   } catch {
     return null;
@@ -162,6 +447,15 @@ export function drainInbox(
     if (message === null) break;
     messages.push(message);
   }
+  appendInboxHistoryEntry(projectRoot, {
+    itemId,
+    ts: new Date().toISOString(),
+    action: "drain",
+    namespaceProjectRoot: projectRoot,
+    queuePath: itemInboxDir(projectRoot, itemId),
+    messageCount: messages.length,
+    previews: messages.slice(0, DEFAULT_PREVIEW_LIMIT).map((message) => previewMessage(message)),
+  }, io);
   return messages;
 }
 
@@ -192,14 +486,34 @@ export function runInboxWait(
 ): void {
   let delivered = false;
   let cleanedUp = false;
+  const waitStartedAt = new Date().toISOString();
+  const waitState: InboxWaitState = {
+    itemId,
+    startedAt: waitStartedAt,
+    pid: process.pid,
+    pollMs: 1000,
+    namespaceProjectRoot: projectRoot,
+    queuePath: itemInboxDir(projectRoot, itemId),
+  };
+  writeInboxWaitState(projectRoot, itemId, waitState, deps.io);
   const cleanup = () => {
     if (cleanedUp) return;
     cleanedUp = true;
+    clearInboxWaitState(projectRoot, itemId, deps.io);
     runtime.removeSignalListener("SIGINT", onInterrupt);
     runtime.removeSignalListener("SIGTERM", onInterrupt);
   };
   const onInterrupt = () => {
     if (delivered) return;
+    appendInboxHistoryEntry(projectRoot, {
+      itemId,
+      ts: new Date().toISOString(),
+      action: "wait-interrupted",
+      namespaceProjectRoot: projectRoot,
+      queuePath: itemInboxDir(projectRoot, itemId),
+      waitStartedAt,
+      waitInterruptedAt: new Date().toISOString(),
+    }, deps.io);
     cleanup();
     runtime.writeStderr(
       `Inbox wait interrupted before delivery; rerun 'nw inbox --wait ${itemId}' with a very long timeout.\n`,
@@ -227,13 +541,25 @@ export function cleanInbox(
   itemId: string,
   io: InboxIO = defaultDeps.io,
 ): void {
+  const removedMessages: string[] = [];
   for (const filePath of listInboxFiles(projectRoot, itemId, io)) {
     try {
+      removedMessages.push(io.readFileSync(filePath, "utf-8"));
       io.unlinkSync(filePath);
     } catch {
       // Best-effort cleanup
     }
   }
+  clearInboxWaitState(projectRoot, itemId, io);
+  appendInboxHistoryEntry(projectRoot, {
+    itemId,
+    ts: new Date().toISOString(),
+    action: "clean",
+    namespaceProjectRoot: projectRoot,
+    queuePath: itemInboxDir(projectRoot, itemId),
+    messageCount: removedMessages.length,
+    previews: removedMessages.slice(0, DEFAULT_PREVIEW_LIMIT).map((message) => previewMessage(message)),
+  }, io);
 }
 
 // ── Branch → item ID extraction ──────────────────────────────────────
@@ -253,16 +579,18 @@ export function cmdInbox(
 ): void {
   const isWait = args.includes("--wait");
   const isCheck = args.includes("--check");
+  const isStatus = args.includes("--status");
+  const isPeek = args.includes("--peek");
   const isWrite = args.includes("--write");
 
-  if (!isWait && !isCheck && !isWrite) {
-    die("Usage: nw inbox --wait <id> | --check <id> | --write <id> -m <text>");
+  if (!isWait && !isCheck && !isStatus && !isPeek && !isWrite) {
+    die("Usage: nw inbox --wait <id> | --check <id> | --status <id> | --peek <id> | --write <id> -m <text>");
     return;
   }
 
   // Determine item ID: positional arg after the flag, or auto-detect from branch
   let itemId: string | undefined;
-  for (const flag of ["--wait", "--check", "--write"]) {
+  for (const flag of ["--wait", "--check", "--status", "--peek", "--write"]) {
     const idx = args.indexOf(flag);
     if (idx !== -1 && idx + 1 < args.length && !args[idx + 1]!.startsWith("-")) {
       itemId = args[idx + 1]!;
@@ -301,6 +629,16 @@ export function cmdInbox(
     if (messages.length > 0) {
       process.stdout.write(messages.join("\n\n"));
     }
+    return;
+  }
+
+  if (isStatus) {
+    process.stdout.write(renderStatus(inspectInbox(projectRoot, itemId, deps.io)));
+    return;
+  }
+
+  if (isPeek) {
+    process.stdout.write(renderPeek(inspectInbox(projectRoot, itemId, deps.io)));
     return;
   }
 
