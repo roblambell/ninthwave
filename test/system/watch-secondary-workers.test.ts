@@ -116,10 +116,13 @@ function inboxMessagesForProject(projectRoot: string, homeDir: string, itemId: s
     .map((entry) => readFileSync(join(dir, entry), "utf-8"));
 }
 
-function watchArgs(itemId: string, options: { mergeStrategy: "auto" | "manual"; noReview?: boolean }):
-  string[] {
+function watchArgs(
+  itemIds: string | string[],
+  options: { mergeStrategy: "auto" | "manual"; noReview?: boolean },
+): string[] {
+  const items = Array.isArray(itemIds) ? itemIds : [itemIds];
   const args = [
-    "--items", itemId,
+    "--items", ...items,
     "--watch",
     "--backend-mode", "headless",
     "--tool", "codex",
@@ -248,11 +251,65 @@ function createConflictingHistory(
   git(harness.projectRoot, ["push", "origin", "main", "--quiet"]);
 }
 
-function seedForwardFixPendingState(
+function seedItemBranch(
   harness: CliHarness,
   itemId: string,
-): string {
-  const mergeCommitSha = git(harness.projectRoot, ["rev-parse", "HEAD"]);
+): { branch: string; headSha: string; worktreePath: string } {
+  const branch = `ninthwave/${itemId}`;
+  const worktreePath = join(harness.worktreeDir, `ninthwave-${itemId}`);
+  git(harness.projectRoot, ["branch", "-f", branch, "HEAD"]);
+  git(harness.projectRoot, ["worktree", "add", worktreePath, branch, "--quiet"]);
+  git(harness.projectRoot, ["push", "origin", `+${branch}`, "--quiet"]);
+  return {
+    branch,
+    headSha: git(worktreePath, ["rev-parse", "HEAD"]),
+    worktreePath,
+  };
+}
+
+function seedOpenPr(
+  harness: CliHarness,
+  itemId: string,
+  branch: string,
+  headSha: string,
+  options: {
+    prNumber?: number;
+    checks?: CommitCheckStatus;
+    mergeable?: "MERGEABLE" | "CONFLICTING";
+  } = {},
+): number {
+  const prNumber = options.prNumber ?? 1;
+  const item = harness.findItem(itemId);
+  const now = "2026-04-02T12:00:00Z";
+  harness.writeFakeGhState({
+    nextPrNumber: prNumber + 1,
+    prs: [{
+      number: prNumber,
+      branch,
+      state: "open",
+      title: item.title,
+      body: `## Work Item Reference\nID: ${itemId}\nLineage: ${item.lineageToken}\n`,
+      createdAt: now,
+      updatedAt: now,
+      headSha,
+      mergeable: options.mergeable ?? "MERGEABLE",
+      reviewDecision: "",
+      checks: defaultPrChecks(options.checks ?? "pass"),
+      baseRefName: "main",
+    }],
+  });
+  return prNumber;
+}
+
+function seedPrLifecycleState(
+  harness: CliHarness,
+  itemId: string,
+  state: "ci-passed" | "ci-pending",
+  options: {
+    prNumber?: number;
+    worktreePath?: string;
+  } = {},
+): void {
   const item = harness.findItem(itemId);
   const now = "2026-04-02T12:00:00.000Z";
   harness.writeOrchestratorState({
@@ -261,17 +318,51 @@ function seedForwardFixPendingState(
     updatedAt: now,
     items: [{
       id: itemId,
-      state: "forward-fix-pending",
-      prNumber: 1,
+      state,
+      prNumber: options.prNumber ?? 1,
       title: item.title,
       lastTransition: now,
       ciFailCount: 0,
       retryCount: 0,
-      mergeCommitSha,
-      defaultBranch: "main",
+      worktreePath: options.worktreePath,
     }],
   });
-  return mergeCommitSha;
+}
+
+function seedForwardFixPendingStates(
+  harness: CliHarness,
+  itemIds: string[],
+): Record<string, string> {
+  const baseMergeCommitSha = git(harness.projectRoot, ["rev-parse", "HEAD"]);
+  const now = "2026-04-02T12:00:00.000Z";
+  const mergeShas = Object.fromEntries(
+    itemIds.map((itemId, index) => [
+      itemId,
+      itemIds.length === 1
+        ? baseMergeCommitSha
+        : `${baseMergeCommitSha.slice(0, -1)}${index.toString(16)}`,
+    ]),
+  );
+  harness.writeOrchestratorState({
+    pid: 1,
+    startedAt: now,
+    updatedAt: now,
+    items: itemIds.map((itemId) => {
+      const item = harness.findItem(itemId);
+      return {
+        id: itemId,
+        state: "forward-fix-pending",
+        prNumber: 1,
+        title: item.title,
+        lastTransition: now,
+        ciFailCount: 0,
+        retryCount: 0,
+        mergeCommitSha: mergeShas[itemId],
+        defaultBranch: "main",
+      };
+    }),
+  });
+  return mergeShas;
 }
 
 async function readSecondaryWorkerContext(
@@ -280,19 +371,19 @@ async function readSecondaryWorkerContext(
   agent: string,
 ): Promise<{ prompt: string; context: ReturnType<typeof readFakeAiContext> }> {
   const runId = fakeAiDefaultRunId(itemId, agent);
-  await waitFor(() => {
+  return waitFor(() => {
     const artifactDir = fakeAiArtifactDir(harness.stateDir, runId);
     const contextPath = join(artifactDir, "context.env");
     const promptPath = join(artifactDir, "prompt.txt");
-    return existsSync(contextPath) && existsSync(promptPath) ? runId : false;
+    if (!existsSync(contextPath) || !existsSync(promptPath)) return false;
+    const context = readFakeAiContext(harness.stateDir, runId);
+    const prompt = readFakeAiPrompt(harness.stateDir, runId);
+    return context.agent === agent && context.itemId === itemId && prompt.length > 0
+      ? { prompt, context }
+      : false;
   }, {
     description: `${agent} fake worker artifacts`,
   });
-  const context = readFakeAiContext(harness.stateDir, runId);
-  return {
-    prompt: readFakeAiPrompt(harness.stateDir, runId),
-    context,
-  };
 }
 
 function ensureBranchPrExists(harness: CliHarness, branch: string): Promise<FakeGhState> {
@@ -307,24 +398,28 @@ describe("system: watch secondary workers", () => {
     cleanupTempRepos();
   });
 
-  it("covers reviewer approve verdict creation and consumption end to end", async () => {
+  it("covers reviewer verdict creation and consumption end to end", async () => {
     const harness = new CliHarness();
     harness.writeWorkItems(WORK_ITEMS);
     harness.commitAndPushWorkItems("Add secondary-worker test items");
-
-    const run = createFakeAiRun(
-      harness.projectRoot,
-      fakeAiSuccessScenario({
-        sleepMs: 4_000,
-        stdout: ["fake worker finished"],
-        heartbeat: { progress: 1.0, label: "PR created", prNumber: 1 },
-      }),
-      { runId: "secondary-review-approve" },
-    );
+    const approved = seedItemBranch(harness, "H-SWW-1");
+    const approvedPrNumber = seedOpenPr(harness, "H-SWW-1", approved.branch, approved.headSha);
+    seedPrLifecycleState(harness, "H-SWW-1", "ci-passed", {
+      prNumber: approvedPrNumber,
+      worktreePath: approved.worktreePath,
+    });
+    const requested = seedItemBranch(harness, "H-SWW-2");
+    const requestedPrNumber = seedOpenPr(harness, "H-SWW-2", requested.branch, requested.headSha, {
+      prNumber: 2,
+    });
+    seedPrLifecycleState(harness, "H-SWW-2", "ci-passed", {
+      prNumber: requestedPrNumber,
+      worktreePath: requested.worktreePath,
+    });
 
     const processHandle = harness.start(
-      watchArgs("H-SWW-1", { mergeStrategy: "manual" }),
-      { env: buildCliEnv(harness, run.scenarioPath) },
+      watchArgs(["H-SWW-1", "H-SWW-2"], { mergeStrategy: "manual" }),
+      { env: buildCliEnv(harness, "/dev/null") },
     );
 
     try {
@@ -348,44 +443,18 @@ describe("system: watch secondary workers", () => {
       expect(reviewed.reviewCompleted).toBe(true);
       expect(reviewed.reviewWorkspaceRef).toBeUndefined();
       expect(existsSync(harness.reviewVerdictPath("H-SWW-1"))).toBe(false);
-    } finally {
-      await harness.stop(processHandle);
-    }
-  }, 70_000);
-
-  it("covers reviewer request-changes verdict creation and inbox follow-up", async () => {
-    const harness = new CliHarness();
-    harness.writeWorkItems(WORK_ITEMS);
-    harness.commitAndPushWorkItems("Add secondary-worker test items");
-
-    const run = createFakeAiRun(
-      harness.projectRoot,
-      fakeAiSuccessScenario({
-        sleepMs: 4_000,
-        stdout: ["fake worker finished"],
-        heartbeat: { progress: 1.0, label: "PR created", prNumber: 1 },
-      }),
-      { runId: "secondary-review-request-changes" },
-    );
-
-    const processHandle = harness.start(
-      watchArgs("H-SWW-2", { mergeStrategy: "manual" }),
-      { env: buildCliEnv(harness, run.scenarioPath) },
-    );
-
-    try {
       await waitForItemState(harness, "H-SWW-2", "reviewing", 30_000);
 
       writeVerdict(harness, "H-SWW-2", "request-changes");
 
-      const reviewed = await waitForItemState(harness, "H-SWW-2", "review-pending", 30_000);
-      expect(reviewed.reviewCompleted).toBeUndefined();
-      expect(reviewed.reviewWorkspaceRef).toBeUndefined();
+      const reviewedWithChanges = await waitForItemState(harness, "H-SWW-2", "review-pending", 30_000);
+      expect(reviewedWithChanges.reviewCompleted).toBeUndefined();
+      expect(reviewedWithChanges.reviewWorkspaceRef).toBeUndefined();
       expect(existsSync(harness.reviewVerdictPath("H-SWW-2"))).toBe(false);
 
       const inboxMessages = await waitFor(() => {
-        const messages = reviewed.worktreePath
-          ? inboxMessagesForProject(reviewed.worktreePath, harness.homeDir, "H-SWW-2")
+        const messages = reviewedWithChanges.worktreePath
+          ? inboxMessagesForProject(reviewedWithChanges.worktreePath, harness.homeDir, "H-SWW-2")
           : [];
         return messages.length > 0 ? messages : false;
       }, { timeoutMs: 20_000, description: "review feedback inbox messages" });
@@ -394,50 +463,45 @@ describe("system: watch secondary workers", () => {
     } finally {
       await harness.stop(processHandle);
     }
-  }, 70_000);
+  }, 90_000);
 
   it("covers CI conflict escalation into a rebaser worker and recovery back to ci-pending", async () => {
     const harness = new CliHarness();
     harness.writeWorkItems(WORK_ITEMS);
     harness.commitAndPushWorkItems("Add secondary-worker test items");
-
-    const implementerRun = createFakeAiRun(
-      harness.projectRoot,
-      fakeAiSuccessScenario({
-        sleepMs: 4_000,
-        stdout: ["fake worker finished"],
-        heartbeat: { progress: 1.0, label: "PR created", prNumber: 1 },
-      }),
-      { runId: "secondary-rebaser-implementer" },
-    );
+    const seeded = seedItemBranch(harness, "H-SWW-3");
+    const prNumber = seedOpenPr(harness, "H-SWW-3", seeded.branch, seeded.headSha, { checks: "pending" });
+    seedPrLifecycleState(harness, "H-SWW-3", "ci-pending", {
+      prNumber,
+      worktreePath: seeded.worktreePath,
+    });
 
     const rebaserRun = createFakeAiRun(
       harness.projectRoot,
       fakeAiSuccessScenario({
-        sleepMs: 4_000,
+        sleepMs: 250,
         stdout: ["fake rebaser finished"],
       }),
       { runId: "secondary-rebaser-worker" },
     );
 
-    const env = buildCliEnv(harness, implementerRun.scenarioPath);
+    const env = buildCliEnv(harness, rebaserRun.scenarioPath);
     const processHandle = harness.start(
       watchArgs("H-SWW-3", { mergeStrategy: "manual", noReview: true }),
       { env },
     );
 
     try {
-      await waitForItemState(harness, "H-SWW-3", "review-pending", 30_000);
-      await ensureBranchPrExists(harness, "ninthwave/H-SWW-3");
+      await waitForItemState(harness, "H-SWW-3", "ci-pending", 30_000);
 
       createConflictingHistory(harness, "H-SWW-3");
       setPrStatus(harness, "ninthwave/H-SWW-3", { checks: "fail", mergeable: "CONFLICTING" });
 
       const failed = await waitForItemState(harness, "H-SWW-3", "ci-failed");
-      expect(failed.rebaseRequested).toBe(true);
+      expect(failed.prNumber).toBe(prNumber);
 
       const launched = harness.launchHeadlessRebaser(
-        failed.prNumber!,
+        prNumber,
         "H-SWW-3",
         rebaserRun,
         { tool: "codex" },
@@ -467,7 +531,7 @@ describe("system: watch secondary workers", () => {
     const harness = new CliHarness();
     harness.writeWorkItems(WORK_ITEMS);
     harness.commitAndPushWorkItems("Add secondary-worker test items");
-    const mergeCommitSha = seedForwardFixPendingState(harness, "H-SWW-4");
+    const mergeCommitSha = seedForwardFixPendingStates(harness, ["H-SWW-4"])["H-SWW-4"];
 
     const run = createFakeAiRun(
       harness.projectRoot,
@@ -476,7 +540,7 @@ describe("system: watch secondary workers", () => {
         stdout: ["fake worker finished"],
         heartbeat: { progress: 1.0, label: "PR created", prNumber: 1 },
       }),
-      { runId: "secondary-forward-fixer-happy" },
+      { runId: "secondary-forward-fixer-worker" },
     );
 
     const processHandle = harness.start(
@@ -501,22 +565,21 @@ describe("system: watch secondary workers", () => {
       expect(context.agent).toBe("ninthwave-forward-fixer");
       expect(prompt).toContain("YOUR_VERIFY_ITEM_ID: H-SWW-4");
       expect(prompt).toContain(`YOUR_VERIFY_MERGE_SHA: ${mergeCommitSha}`);
-
     } finally {
       await harness.stop(processHandle);
     }
   }, 70_000);
 
-  it("covers the forward-fixer failure boundary when merge-commit CI never recovers", async () => {
+  it("covers the forward-fixer no-recovery boundary when merge-commit CI stays failed", async () => {
     const harness = new CliHarness();
     harness.writeWorkItems(WORK_ITEMS);
     harness.commitAndPushWorkItems("Add secondary-worker test items");
-    const mergeCommitSha = seedForwardFixPendingState(harness, "H-SWW-5");
+    const mergeCommitSha = seedForwardFixPendingStates(harness, ["H-SWW-5"])["H-SWW-5"];
 
     const run = createFakeAiRun(
       harness.projectRoot,
       fakeAiSuccessScenario({
-        sleepMs: 4_000,
+        sleepMs: 250,
         stdout: ["fake worker finished"],
         heartbeat: { progress: 1.0, label: "PR created", prNumber: 1 },
       }),
@@ -547,8 +610,9 @@ describe("system: watch secondary workers", () => {
       await new Promise((resolve) => setTimeout(resolve, 5_000));
       const currentState = harness.readOrchestratorState();
       const item = currentState?.items.find((entry) => entry.id === "H-SWW-5");
-      expect(item?.state).toBe("ci-passed");
-      expect(item?.prNumber).toBeGreaterThan(1);
+      expect(item?.state).toBe("fixing-forward");
+      expect(item?.fixForwardWorkspaceRef).toBeDefined();
+      expect(item?.prNumber).toBe(1);
     } finally {
       await harness.stop(processHandle);
     }

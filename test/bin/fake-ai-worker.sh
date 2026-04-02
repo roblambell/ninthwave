@@ -41,6 +41,7 @@ heartbeat_progress=""
 heartbeat_label=""
 heartbeat_pr_number=""
 sleep_ms="0"
+sleep_before_heartbeat="1"
 
 if [ -n "${scenario_file}" ] && [ -f "${scenario_file}" ]; then
   while IFS= read -r line || [ -n "${line}" ]; do
@@ -55,6 +56,9 @@ if [ -n "${scenario_file}" ] && [ -f "${scenario_file}" ]; then
         ;;
       sleepMs=*)
         sleep_ms="${line#sleepMs=}"
+        ;;
+      sleepBeforeHeartbeat=*)
+        sleep_before_heartbeat="${line#sleepBeforeHeartbeat=}"
         ;;
       stdout=*)
         printf '%s\n' "${line#stdout=}"
@@ -82,7 +86,25 @@ if [ -n "${scenario_file}" ] && [ -f "${scenario_file}" ]; then
   done < "${scenario_file}"
 fi
 
-if [ "${sleep_ms}" -gt 0 ] 2>/dev/null; then
+if [ -n "${NINTHWAVE_LAUNCH_PROMPT_FILE:-}" ] && [ -f "${NINTHWAVE_LAUNCH_PROMPT_FILE}" ]; then
+  cp "${NINTHWAVE_LAUNCH_PROMPT_FILE}" "${prompt_copy}"
+fi
+
+{
+  printf 'cwd=%s\n' "$(pwd)"
+  printf 'tool=%s\n' "${NINTHWAVE_LAUNCH_TOOL:-}"
+  printf 'mode=%s\n' "${NINTHWAVE_LAUNCH_MODE:-}"
+  printf 'agent=%s\n' "${NINTHWAVE_LAUNCH_AGENT:-}"
+  printf 'itemId=%s\n' "${NINTHWAVE_LAUNCH_ITEM_ID:-}"
+  printf 'projectRoot=%s\n' "${NINTHWAVE_LAUNCH_PROJECT_ROOT:-}"
+  printf 'workspaceName=%s\n' "${NINTHWAVE_LAUNCH_WORKSPACE_NAME:-}"
+  printf 'promptFile=%s\n' "${NINTHWAVE_LAUNCH_PROMPT_FILE:-}"
+  printf 'stateDir=%s\n' "${NINTHWAVE_LAUNCH_STATE_DIR:-}"
+  printf 'scenarioFile=%s\n' "${scenario_file}"
+  printf 'runId=%s\n' "${run_id}"
+} > "${context_file}"
+
+if [ "${sleep_before_heartbeat}" = "1" ] && [ "${sleep_ms}" -gt 0 ] 2>/dev/null; then
   sleep "$(awk "BEGIN { printf \"%.3f\", ${sleep_ms} / 1000 }")"
 fi
 
@@ -103,23 +125,9 @@ if [ -n "${heartbeat_progress}" ] && [ -n "${NINTHWAVE_LAUNCH_ITEM_ID:-}" ]; the
   } > "${heartbeat_file}"
 fi
 
-if [ -n "${NINTHWAVE_LAUNCH_PROMPT_FILE:-}" ] && [ -f "${NINTHWAVE_LAUNCH_PROMPT_FILE}" ]; then
-  cp "${NINTHWAVE_LAUNCH_PROMPT_FILE}" "${prompt_copy}"
+if [ "${sleep_before_heartbeat}" != "1" ] && [ "${sleep_ms}" -gt 0 ] 2>/dev/null; then
+  sleep "$(awk "BEGIN { printf \"%.3f\", ${sleep_ms} / 1000 }")"
 fi
-
-{
-  printf 'cwd=%s\n' "$(pwd)"
-  printf 'tool=%s\n' "${NINTHWAVE_LAUNCH_TOOL:-}"
-  printf 'mode=%s\n' "${NINTHWAVE_LAUNCH_MODE:-}"
-  printf 'agent=%s\n' "${NINTHWAVE_LAUNCH_AGENT:-}"
-  printf 'itemId=%s\n' "${NINTHWAVE_LAUNCH_ITEM_ID:-}"
-  printf 'projectRoot=%s\n' "${NINTHWAVE_LAUNCH_PROJECT_ROOT:-}"
-  printf 'workspaceName=%s\n' "${NINTHWAVE_LAUNCH_WORKSPACE_NAME:-}"
-  printf 'promptFile=%s\n' "${NINTHWAVE_LAUNCH_PROMPT_FILE:-}"
-  printf 'stateDir=%s\n' "${NINTHWAVE_LAUNCH_STATE_DIR:-}"
-  printf 'scenarioFile=%s\n' "${scenario_file}"
-  printf 'runId=%s\n' "${run_id}"
-} > "${context_file}"
 
 trap 'write_state signaled TERM; exit 0' TERM
 trap 'write_state signaled INT; exit 0' INT
