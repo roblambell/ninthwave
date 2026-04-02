@@ -465,7 +465,7 @@ describe("codex profile buildLaunchCmd", () => {
     const profile = getToolProfile("codex");
     const result = profile.buildLaunchCmd(stubOpts({ id: "H-X-CODEX" }), stubDeps());
     expect(result.cmd).not.toMatch(/\.sh$/);
-    expect(result.cmd).toContain("exec codex --full-auto");
+    expect(result.cmd).toContain("exec codex --dangerously-bypass-approvals-and-sandbox");
   });
 
   it("returns empty initialPrompt", () => {
@@ -489,7 +489,8 @@ describe("codex profile buildLaunchCmd", () => {
     const profile = getToolProfile("codex");
     const result = profile.buildLaunchCmd(stubOpts({ id: "H-X-CODEX" }), stubDeps());
     expect(result.cmd).toContain('PROMPT=$(cat ');
-    expect(result.cmd).toContain('exec codex --full-auto "$PROMPT"');
+    expect(result.cmd).toContain('exec codex --dangerously-bypass-approvals-and-sandbox "$PROMPT"');
+    expect(result.cmd).not.toContain("--full-auto");
   });
 });
 
@@ -516,8 +517,10 @@ describe("codex profile buildHeadlessCmd", () => {
   it("uses the supported headless codex command shape", () => {
     const profile = getToolProfile("codex");
     const result = profile.buildHeadlessCmd(stubOpts({ id: "H-X-CODEX-HEADLESS" }), stubDeps());
-    expect(result.cmd).toContain('exec codex exec --ask-for-approval never --sandbox workspace-write "$PROMPT"');
+    expect(result.cmd).toContain('exec codex exec --dangerously-bypass-approvals-and-sandbox "$PROMPT"');
     expect(result.cmd).not.toContain("--full-auto");
+    expect(result.cmd).not.toContain("--ask-for-approval never");
+    expect(result.cmd).not.toContain("--sandbox workspace-write");
   });
 });
 

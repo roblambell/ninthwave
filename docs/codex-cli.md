@@ -65,25 +65,27 @@ Codex workers use the same tool-selection and backend-selection flow as the othe
 
 ninthwave launches Codex with an inline shell command that reads a temporary prompt-data file from `~/.ninthwave/projects/{slug}/tmp/`, deletes it, and then execs Codex.
 
-Interactive workers use:
+Interactive workers use Codex's documented bypass/yolo mode:
 
 ```bash
 PROMPT=$(cat '~/.ninthwave/projects/{slug}/tmp/nw-prompt-{id}-{timestamp}')
 rm -f '~/.ninthwave/projects/{slug}/tmp/nw-prompt-{id}-{timestamp}'
-exec codex --full-auto "$PROMPT"
+exec codex --dangerously-bypass-approvals-and-sandbox "$PROMPT"
 ```
 
-Headless workers use:
+Headless workers use the same bypass mode on the `exec` subcommand:
 
 ```bash
 PROMPT=$(cat '~/.ninthwave/projects/{slug}/tmp/nw-prompt-{id}-{timestamp}')
 rm -f '~/.ninthwave/projects/{slug}/tmp/nw-prompt-{id}-{timestamp}'
-exec codex exec --ask-for-approval never --sandbox workspace-write "$PROMPT"
+exec codex exec --dangerously-bypass-approvals-and-sandbox "$PROMPT"
 ```
 
 ### Why there is no `--agent` flag
 
 Codex launch uses the currently supported command shapes above, so ninthwave does **not** pass `--agent` at runtime. Instead, it prepends the canonical agent's developer instructions to the work-item prompt before launch. The generated `.codex/agents/ninthwave-*.toml` files and the runtime prompt composition both come from the same canonical `agents/*.md` sources.
+
+Because ninthwave uses Codex worker sessions inside an externally managed environment, it intentionally runs them with approvals and sandboxing bypassed. This removes per-command permission prompts, but it also means Codex workers are trusted to run commands directly in the worker environment.
 
 ## Managed vs user-owned files
 

@@ -277,7 +277,7 @@ describe("cmdStart", () => {
     const launchCall = mockMux.launchWorkspace.mock.calls[0]!;
     expect(launchCall).toBeDefined();
     const cmd = launchCall[1] as string;
-    expect(cmd).toContain('exec codex --full-auto "$PROMPT"');
+    expect(cmd).toContain('exec codex --dangerously-bypass-approvals-and-sandbox "$PROMPT"');
     expect(cmd).not.toContain("--agent");
 
     const promptPath = join(worktreeDir, "ninthwave-M-CI-1", ".ninthwave", ".prompt");
@@ -1447,7 +1447,7 @@ describe("launchAiSession agentName", () => {
     const launchCall = mockMux.launchWorkspace.mock.calls[0]!;
     expect(launchCall).toBeDefined();
     const cmd = launchCall[1] as string;
-    expect(cmd).toContain('exec codex exec --ask-for-approval never --sandbox workspace-write "$PROMPT"');
+    expect(cmd).toContain('exec codex exec --dangerously-bypass-approvals-and-sandbox "$PROMPT"');
     expect(cmd).not.toContain("--agent");
 
     const promptData = readFileSync(extractPromptDataFile(cmd), "utf-8");

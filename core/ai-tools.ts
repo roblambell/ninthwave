@@ -339,7 +339,7 @@ export const AI_TOOL_PROFILES: AiToolProfile[] = [
       const cmd =
         `PROMPT=$(cat '${promptDataFile}')` +
         ` && rm -f '${promptDataFile}'` +
-        ` && exec codex --full-auto "$PROMPT"`;
+        ` && exec codex --dangerously-bypass-approvals-and-sandbox "$PROMPT"`;
       return { cmd, initialPrompt: "" };
     },
     buildHeadlessCmd(opts, deps): LaunchCmdResult {
@@ -347,7 +347,7 @@ export const AI_TOOL_PROFILES: AiToolProfile[] = [
       const cmd =
         `PROMPT=$(cat '${promptDataFile}')` +
         ` && rm -f '${promptDataFile}'` +
-        ` && exec codex exec --ask-for-approval never --sandbox workspace-write "$PROMPT"`;
+        ` && exec codex exec --dangerously-bypass-approvals-and-sandbox "$PROMPT"`;
       return { cmd, initialPrompt: "" };
     },
   },
