@@ -28,6 +28,7 @@ import {
   cleanStateFile,
   type DaemonIO,
 } from "../core/daemon.ts";
+import { buildSnapshot } from "../core/commands/orchestrate.ts";
 import { checkInbox, cmdInbox, writeInbox } from "../core/commands/inbox.ts";
 import { reconstructState } from "../core/reconstruct.ts";
 import type { WorkItem, Priority } from "../core/types.ts";
@@ -355,6 +356,80 @@ describe("Daemon lifecycle: single-item flow", () => {
 });
 
 describe("Daemon lifecycle: reconstructed worker inbox targeting", () => {
+  it("keeps a live implementing worker attached across restart without relaunching", () => {
+    const projectRoot = mkdtempSync(join(tmpdir(), "nw-reconstruct-live-"));
+    const worktreeDir = join(projectRoot, ".ninthwave", ".worktrees");
+    const itemWorktree = join(worktreeDir, "ninthwave-REC-LIVE-1");
+    mkdirSync(itemWorktree, { recursive: true });
+
+    try {
+      const beforeRestart = new Orchestrator({ wipLimit: 4 });
+      beforeRestart.addItem(makeWorkItem("REC-LIVE-1"));
+      beforeRestart.getItem("REC-LIVE-1")!.reviewCompleted = true;
+      beforeRestart.hydrateState("REC-LIVE-1", "implementing");
+      beforeRestart.getItem("REC-LIVE-1")!.workspaceRef = "workspace:27";
+      beforeRestart.getItem("REC-LIVE-1")!.worktreePath = itemWorktree;
+
+      const savedState = serializeOrchestratorState(
+        beforeRestart.getAllItems(),
+        1,
+        "2026-04-02T10:00:00.000Z",
+      );
+
+      const afterRestart = new Orchestrator({ wipLimit: 4 });
+      afterRestart.addItem(makeWorkItem("REC-LIVE-1"));
+      afterRestart.getItem("REC-LIVE-1")!.reviewCompleted = true;
+
+      const fakeMux = {
+        type: "cmux" as const,
+        isAvailable: () => true,
+        diagnoseUnavailable: () => "not available",
+        launchWorkspace: () => null,
+        splitPane: () => null,
+        sendMessage: () => true,
+        writeInbox: () => {},
+        readScreen: () => "",
+        listWorkspaces: () => "  workspace:27  ✳ live worker without item id",
+        closeWorkspace: () => true,
+        setStatus: () => true,
+        setProgress: () => true,
+      };
+
+      const reconstruction = reconstructState(
+        afterRestart,
+        projectRoot,
+        worktreeDir,
+        fakeMux,
+        () => null,
+        savedState,
+      );
+
+      const item = afterRestart.getItem("REC-LIVE-1")!;
+      expect(reconstruction.unresolvedImplementations).toEqual([]);
+      expect(item.state).toBe("implementing");
+      expect(item.workspaceRef).toBe("workspace:27");
+
+      const snapshot = buildSnapshot(
+        afterRestart,
+        projectRoot,
+        worktreeDir,
+        fakeMux,
+        () => null,
+        () => null,
+      );
+
+      expect(snapshot.items).toEqual([
+        expect.objectContaining({ id: "REC-LIVE-1", workerAlive: true }),
+      ]);
+
+      const actions = afterRestart.processTransitions(snapshot);
+      expect(actions.some((action) => action.type === "launch" && action.itemId === "REC-LIVE-1")).toBe(false);
+      expect(afterRestart.getItem("REC-LIVE-1")!.state).toBe("implementing");
+    } finally {
+      rmSync(projectRoot, { recursive: true, force: true });
+    }
+  });
+
   it("reconstructed ci-failed item notifies via worktree inbox when worktreePath is known", () => {
     const projectRoot = mkdtempSync(join(tmpdir(), "nw-reconstruct-"));
     const worktreeDir = join(projectRoot, ".ninthwave", ".worktrees");

@@ -12,6 +12,16 @@ import type { Multiplexer } from "./mux.ts";
 
 // ── State reconstruction (crash recovery) ──────────────────────────
 
+export interface UnresolvedImplementationReattachment {
+  itemId: string;
+  worktreePath: string;
+  savedWorkspaceRef?: string;
+}
+
+export interface ReconstructionResult {
+  unresolvedImplementations: UnresolvedImplementationReattachment[];
+}
+
 function isRepairPrCandidate(itemId: string, candidateId: string): boolean {
   return candidateId === `fix-forward-${itemId}` || candidateId === `revert-${itemId}`;
 }
@@ -156,7 +166,8 @@ export function reconstructState(
   mux?: Multiplexer,
   checkPr: (id: string, root: string) => string | null = checkPrStatus,
   daemonState?: DaemonState | null,
-): void {
+): ReconstructionResult {
+  const result: ReconstructionResult = { unresolvedImplementations: [] };
   // Build a lookup map from saved daemon state for restoring persisted counters and review fields
   const savedItems = new Map<string, {
     state: string;
@@ -181,6 +192,7 @@ export function reconstructState(
     fixForwardFailCount?: number;
     fixForwardWorkspaceRef?: string;
     worktreePath?: string;
+    workspaceRef?: string;
     resolvedRepoRoot?: string;
     aiTool?: string;
   }>();
@@ -214,6 +226,7 @@ export function reconstructState(
         fixForwardFailCount,
         fixForwardWorkspaceRef,
         worktreePath: si.worktreePath,
+        workspaceRef: si.workspaceRef,
         resolvedRepoRoot: si.resolvedRepoRoot,
         aiTool: si.aiTool,
       });
@@ -254,6 +267,7 @@ export function reconstructState(
       if (saved.resolvedRepoRoot) item.resolvedRepoRoot = saved.resolvedRepoRoot;
       if (saved.aiTool) item.aiTool = saved.aiTool;
     }
+    const savedWorkspaceRef = saved?.workspaceRef;
 
     // Preserve merged waiting state across restart even when the clean action
     // already removed the worktree and mergeCommitSha was not captured yet.
@@ -314,7 +328,14 @@ export function reconstructState(
     const statusLine = resolveTrackedPrStatus(item, repoRoot, checkPr);
     if (!statusLine) {
       hydrateKnownPrTrackingOrImplementing(orch, item.id);
-      recoverWorkspaceRef(orch, item.id, workspaceList);
+      const workspaceRecovery = recoverWorkspaceRef(orch, item.id, workspaceList, savedWorkspaceRef);
+      if (orch.getItem(item.id)?.state === "implementing" && workspaceRecovery.status === "unresolved") {
+        result.unresolvedImplementations.push({
+          itemId: item.id,
+          worktreePath: wtPath,
+          ...(savedWorkspaceRef ? { savedWorkspaceRef } : {}),
+        });
+      }
       continue;
     }
 
@@ -356,7 +377,7 @@ export function reconstructState(
             : { matches: true as const };
           if (workItem && !prMatch.matches) {
             orch.hydrateState(item.id, "implementing");
-            recoverWorkspaceRef(orch, item.id, workspaceList);
+            recoverWorkspaceRef(orch, item.id, workspaceList, savedWorkspaceRef);
           } else {
             orch.hydrateState(item.id, "merged");
           }
@@ -366,24 +387,33 @@ export function reconstructState(
       case "ready":
       case "ci-passed":
         orch.hydrateState(item.id, "ci-passed");
-        recoverWorkspaceRef(orch, item.id, workspaceList);
+        recoverWorkspaceRef(orch, item.id, workspaceList, savedWorkspaceRef);
         break;
       case "failing":
         orch.hydrateState(item.id, "ci-failed");
-        recoverWorkspaceRef(orch, item.id, workspaceList);
+        recoverWorkspaceRef(orch, item.id, workspaceList, savedWorkspaceRef);
         break;
       case "open":
       case "pending":
         orch.hydrateState(item.id, "ci-pending");
-        recoverWorkspaceRef(orch, item.id, workspaceList);
+        recoverWorkspaceRef(orch, item.id, workspaceList, savedWorkspaceRef);
         break;
       case "no-pr":
       default:
         hydrateKnownPrTrackingOrImplementing(orch, item.id);
-        recoverWorkspaceRef(orch, item.id, workspaceList);
+        const workspaceRecovery = recoverWorkspaceRef(orch, item.id, workspaceList, savedWorkspaceRef);
+        if (orch.getItem(item.id)?.state === "implementing" && workspaceRecovery.status === "unresolved") {
+          result.unresolvedImplementations.push({
+            itemId: item.id,
+            worktreePath: wtPath,
+            ...(savedWorkspaceRef ? { savedWorkspaceRef } : {}),
+          });
+        }
         break;
     }
   }
+
+  return result;
 }
 
 function restoreMergedWaitingState(
@@ -452,29 +482,66 @@ function hydrateKnownPrTrackingOrImplementing(
 }
 
 /**
- * Try to recover the workspaceRef for an implementing item by matching
- * its item ID in the live multiplexer workspace listing.
+ * Try to recover the workspaceRef for a live implementation worker during
+ * restart recovery.
  *
  * cmux listings include refs like "workspace:N  ✳ <ID> <title>" while tmux
  * listings return one ref per line (for example, "session:nw:<ID>").
  */
+type WorkspaceRecoveryResult =
+  | { status: "saved-ref" | "item-id"; workspaceRef: string }
+  | { status: "unresolved" };
+
+function escapeRegExp(value: string): string {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
+
+function extractWorkspaceRef(line: string): string {
+  const match = line.match(/workspace:\d+/);
+  return match?.[0] ?? line;
+}
+
+function lineIncludesWorkspaceRef(line: string, workspaceRef: string): boolean {
+  if (line === workspaceRef) return true;
+  const escaped = escapeRegExp(workspaceRef);
+  return new RegExp(`(^|\\s)${escaped}($|\\s)`).test(line);
+}
+
 function recoverWorkspaceRef(
   orch: Orchestrator,
   itemId: string,
   workspaceList: string,
-): void {
-  if (!workspaceList) return;
+  savedWorkspaceRef?: string,
+): WorkspaceRecoveryResult {
+  const orchItem = orch.getItem(itemId);
+  if (!orchItem) {
+    return { status: "unresolved" };
+  }
+
+  orchItem.workspaceRef = undefined;
+
+  if (!workspaceList) {
+    return { status: "unresolved" };
+  }
+
+  for (const line of workspaceList.split("\n")) {
+    const trimmed = line.trim();
+    if (!trimmed || !savedWorkspaceRef) continue;
+    if (!lineIncludesWorkspaceRef(trimmed, savedWorkspaceRef)) continue;
+
+    const workspaceRef = extractWorkspaceRef(trimmed);
+    orchItem.workspaceRef = workspaceRef;
+    return { status: "saved-ref", workspaceRef };
+  }
 
   for (const line of workspaceList.split("\n")) {
     const trimmed = line.trim();
     if (!trimmed || !trimmed.includes(itemId)) continue;
 
-    const match = trimmed.match(/workspace:\d+/);
-    const workspaceRef = match?.[0] ?? trimmed;
-    const orchItem = orch.getItem(itemId);
-    if (orchItem) {
-      orchItem.workspaceRef = workspaceRef;
-    }
-    return;
+    const workspaceRef = extractWorkspaceRef(trimmed);
+    orchItem.workspaceRef = workspaceRef;
+    return { status: "item-id", workspaceRef };
   }
+
+  return { status: "unresolved" };
 }
