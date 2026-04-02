@@ -27,6 +27,7 @@ import {
   getToolProfile,
   defaultLaunchDeps,
   type LaunchDeps,
+  type LaunchOverride,
 } from "../ai-tools.ts";
 
 /** Injectable dependencies for launch git operations, for testing. */
@@ -103,7 +104,7 @@ export function launchAiSession(
   safeTitle: string,
   promptFile: string,
   mux: Multiplexer,
-  options: { projectRoot?: string; agentName?: string } = {},
+  options: { projectRoot?: string; agentName?: string; launchOverride?: LaunchOverride } = {},
   deps: LaunchDeps = defaultLaunchDeps,
 ): string | null {
   const agentName = options.agentName ?? "ninthwave-implementer";
@@ -116,7 +117,7 @@ export function launchAiSession(
   const projectRoot = options.projectRoot ?? worktreePath;
   const stateDir = userStateDir(projectRoot);
   const buildCmd = mux.type === "headless" ? profile.buildHeadlessCmd : profile.buildLaunchCmd;
-  const { cmd } = buildCmd({ wsName, projectRoot, agentName, promptFile, id, stateDir }, deps);
+  const { cmd } = buildCmd({ wsName, projectRoot, agentName, promptFile, id, stateDir, launchOverride: options.launchOverride }, deps);
 
   const wsRef = mux.launchWorkspace(worktreePath, cmd, id);
   if (!wsRef) {
@@ -275,7 +276,7 @@ export function launchSingleItem(
   projectRoot: string,
   aiTool: string,
   mux: Multiplexer = getMux(),
-  options: { baseBranch?: string; forceWorkerLaunch?: boolean; hubRepoNwo?: string; resolveMux?: RuntimeMuxResolver } = {},
+  options: { baseBranch?: string; forceWorkerLaunch?: boolean; hubRepoNwo?: string; resolveMux?: RuntimeMuxResolver; launchOverride?: LaunchOverride } = {},
   deps: LaunchGitDeps = defaultLaunchGitDeps,
 ): LaunchResult | null {
   let targetRepo: string;
@@ -375,7 +376,7 @@ ${itemText}`;
       safeTitle,
       promptFile,
       launchMux,
-      { projectRoot },
+      { projectRoot, launchOverride: options.launchOverride },
     );
     if (!workspaceRef) {
       // launchAiSession returned null -- clean up and propagate
@@ -418,7 +419,7 @@ export function launchReviewWorker(
   repoRoot: string,
   aiTool: string,
   mux: Multiplexer = getMux(),
-  options: { baseBranch?: string; reviewType?: "todo" | "external"; implementerWorktreePath?: string; hubRepoNwo?: string; projectRoot?: string; resolveMux?: RuntimeMuxResolver } = {},
+  options: { baseBranch?: string; reviewType?: "todo" | "external"; implementerWorktreePath?: string; hubRepoNwo?: string; projectRoot?: string; resolveMux?: RuntimeMuxResolver; launchOverride?: LaunchOverride } = {},
   deps: LaunchGitDeps = defaultLaunchGitDeps,
 ): ReviewLaunchResult | null {
   let worktreePath: string | null = null;
@@ -521,7 +522,7 @@ ${baseBranchLine}${hubRepoNwoLine}${securityLine}`;
     safeTitle,
     promptFile,
     launchMux,
-    { projectRoot: options.projectRoot ?? repoRoot, agentName: "ninthwave-reviewer" },
+    { projectRoot: options.projectRoot ?? repoRoot, agentName: "ninthwave-reviewer", launchOverride: options.launchOverride },
   );
   if (!workspaceRef) return null;
   if (launchMux.type === "headless") {
@@ -542,7 +543,7 @@ export function launchRebaserWorker(
   repoRoot: string,
   aiTool: string,
   mux: Multiplexer = getMux(),
-  options: { hubRepoNwo?: string; projectRoot?: string; resolveMux?: RuntimeMuxResolver } = {},
+  options: { hubRepoNwo?: string; projectRoot?: string; resolveMux?: RuntimeMuxResolver; launchOverride?: LaunchOverride } = {},
 ): RebaserLaunchResult | null {
   // The rebaser worker runs in the existing worktree for this item
   const worktreePath = join(repoRoot, ".ninthwave", ".worktrees", `ninthwave-${itemId}`);
@@ -569,6 +570,7 @@ ${hubRepoNwoLine}`;
   const workspaceRef = launchAiSession(aiTool, worktreePath, itemId, safeTitle, promptFile, launchMux, {
     projectRoot: options.projectRoot ?? repoRoot,
     agentName: "ninthwave-rebaser",
+    launchOverride: options.launchOverride,
   });
   if (!workspaceRef) return null;
   if (launchMux.type === "headless") {
@@ -590,7 +592,7 @@ export function launchForwardFixerWorker(
   repoRoot: string,
   aiTool: string,
   mux: Multiplexer = getMux(),
-  options: { hubRepoNwo?: string; defaultBranch?: string; projectRoot?: string; resolveMux?: RuntimeMuxResolver } = {},
+  options: { hubRepoNwo?: string; defaultBranch?: string; projectRoot?: string; resolveMux?: RuntimeMuxResolver; launchOverride?: LaunchOverride } = {},
   deps: LaunchGitDeps = defaultLaunchGitDeps,
 ): ForwardFixerLaunchResult | null {
   const worktreePath = join(repoRoot, ".ninthwave", ".worktrees", `ninthwave-fix-forward-${itemId}`);
@@ -649,6 +651,7 @@ ${hubRepoNwoLine}`;
   const workspaceRef = launchAiSession(aiTool, worktreePath, itemId, safeTitle, promptFile, launchMux, {
     projectRoot: options.projectRoot ?? repoRoot,
     agentName: "ninthwave-forward-fixer",
+    launchOverride: options.launchOverride,
   });
   if (!workspaceRef) return null;
   if (launchMux.type === "headless") {

@@ -25,6 +25,16 @@ export interface LaunchDeps {
   run: (cmd: string, args: string[]) => unknown;
 }
 
+/** Deterministic launch seam for tests and harnesses that replace provider CLIs. */
+export interface LaunchOverride {
+  /** Executable to run instead of the provider CLI binary. */
+  command: string;
+  /** Optional argv appended after the executable. */
+  args?: string[];
+  /** Optional extra environment variables for the override command. */
+  env?: Record<string, string>;
+}
+
 /** Options passed to launch command builders. */
 export interface LaunchOpts {
   /** Workspace name shown in the multiplexer tab title. */
@@ -39,6 +49,8 @@ export interface LaunchOpts {
   id: string;
   /** Absolute path to ~/.ninthwave/projects/{slug}/ for temp file storage. */
   stateDir: string;
+  /** Optional deterministic launch seam that replaces the real provider CLI. */
+  launchOverride?: LaunchOverride;
 }
 
 /** Result of a launch command builder. */
@@ -256,6 +268,37 @@ function writePromptDataFile(
 const OPENCODE_ALLOW_ALL_PERMISSION =
   `export OPENCODE_PERMISSION='{"$schema":"https://opencode.ai/config.json","permission":"allow"}'`;
 
+function shQuote(value: string): string {
+  return `'${value.replace(/'/g, `'\"'\"'`)}'`;
+}
+
+function buildLaunchOverrideCmd(
+  toolId: AiToolId,
+  mode: "launch" | "headless",
+  opts: LaunchOpts,
+): string | null {
+  const override = opts.launchOverride;
+  if (!override) return null;
+
+  const env = {
+    ...(override.env ?? {}),
+    NINTHWAVE_LAUNCH_TOOL: toolId,
+    NINTHWAVE_LAUNCH_MODE: mode,
+    NINTHWAVE_LAUNCH_AGENT: opts.agentName,
+    NINTHWAVE_LAUNCH_PROMPT_FILE: opts.promptFile,
+    NINTHWAVE_LAUNCH_STATE_DIR: opts.stateDir,
+    NINTHWAVE_LAUNCH_ITEM_ID: opts.id,
+    NINTHWAVE_LAUNCH_PROJECT_ROOT: opts.projectRoot,
+    NINTHWAVE_LAUNCH_WORKSPACE_NAME: opts.wsName,
+  };
+  const envPrefix = Object.entries(env)
+    .map(([key, value]) => `${key}=${shQuote(value)}`)
+    .join(" ");
+  const args = (override.args ?? []).map(shQuote).join(" ");
+
+  return `${envPrefix} exec ${shQuote(override.command)}${args ? ` ${args}` : ""}`;
+}
+
 // ── Profiles ──────────────────────────────────────────────────────────────────
 
 /** The canonical list of AI tool profiles -- one entry per supported tool. */
@@ -275,6 +318,9 @@ export const AI_TOOL_PROFILES: AiToolProfile[] = [
     ],
     processNames: ["claude"],
     buildLaunchCmd(opts, _deps): LaunchCmdResult {
+      const overrideCmd = buildLaunchOverrideCmd("claude", "launch", opts);
+      if (overrideCmd) return { cmd: overrideCmd, initialPrompt: "" };
+
       // Prompt is embedded as a positional arg via --append-system-prompt; no post-launch send.
       const cmd =
         `claude --name '${opts.wsName}' --permission-mode bypassPermissions` +
@@ -283,6 +329,9 @@ export const AI_TOOL_PROFILES: AiToolProfile[] = [
       return { cmd, initialPrompt: "" };
     },
     buildHeadlessCmd(opts, _deps): LaunchCmdResult {
+      const overrideCmd = buildLaunchOverrideCmd("claude", "headless", opts);
+      if (overrideCmd) return { cmd: overrideCmd, initialPrompt: "" };
+
       const cmd =
         `claude --print --permission-mode bypassPermissions` +
         ` --agent ${opts.agentName}` +
@@ -303,6 +352,9 @@ export const AI_TOOL_PROFILES: AiToolProfile[] = [
     envDetection: [{ varName: "OPENCODE", value: "1" }],
     processNames: ["opencode"],
     buildLaunchCmd(opts, deps): LaunchCmdResult {
+      const overrideCmd = buildLaunchOverrideCmd("opencode", "launch", opts);
+      if (overrideCmd) return { cmd: overrideCmd, initialPrompt: "" };
+
       // Inline command pattern: write prompt to a plain-text data file, then
       // construct a shell command that reads it, cleans up, and execs the tool.
       // Avoids creating executable .sh scripts (which trigger EDR alerts).
@@ -315,6 +367,9 @@ export const AI_TOOL_PROFILES: AiToolProfile[] = [
       return { cmd, initialPrompt: "" };
     },
     buildHeadlessCmd(opts, deps): LaunchCmdResult {
+      const overrideCmd = buildLaunchOverrideCmd("opencode", "headless", opts);
+      if (overrideCmd) return { cmd: overrideCmd, initialPrompt: "" };
+
       const promptDataFile = writePromptDataFile(opts, deps);
       const cmd =
         `${OPENCODE_ALLOW_ALL_PERMISSION}` +
@@ -335,6 +390,9 @@ export const AI_TOOL_PROFILES: AiToolProfile[] = [
     projectIndicators: [".codex/agents"],
     processNames: ["codex"],
     buildLaunchCmd(opts, deps): LaunchCmdResult {
+      const overrideCmd = buildLaunchOverrideCmd("codex", "launch", opts);
+      if (overrideCmd) return { cmd: overrideCmd, initialPrompt: "" };
+
       const promptDataFile = writePromptDataFile(opts, deps, buildCodexPromptDataContent(opts, deps));
       const cmd =
         `PROMPT=$(cat '${promptDataFile}')` +
@@ -343,6 +401,9 @@ export const AI_TOOL_PROFILES: AiToolProfile[] = [
       return { cmd, initialPrompt: "" };
     },
     buildHeadlessCmd(opts, deps): LaunchCmdResult {
+      const overrideCmd = buildLaunchOverrideCmd("codex", "headless", opts);
+      if (overrideCmd) return { cmd: overrideCmd, initialPrompt: "" };
+
       const promptDataFile = writePromptDataFile(opts, deps, buildCodexPromptDataContent(opts, deps));
       const cmd =
         `PROMPT=$(cat '${promptDataFile}')` +
@@ -362,6 +423,9 @@ export const AI_TOOL_PROFILES: AiToolProfile[] = [
     projectIndicators: [".github/copilot-instructions.md", ".github/agents"],
     processNames: ["copilot"],
     buildLaunchCmd(opts, deps): LaunchCmdResult {
+      const overrideCmd = buildLaunchOverrideCmd("copilot", "launch", opts);
+      if (overrideCmd) return { cmd: overrideCmd, initialPrompt: "" };
+
       // Inline command pattern: write prompt to a plain-text data file, then
       // construct a shell command that reads it, cleans up, and execs the tool.
       // Avoids creating executable .sh scripts (which trigger EDR alerts).
@@ -374,6 +438,9 @@ export const AI_TOOL_PROFILES: AiToolProfile[] = [
       return { cmd, initialPrompt: "" };
     },
     buildHeadlessCmd(opts, deps): LaunchCmdResult {
+      const overrideCmd = buildLaunchOverrideCmd("copilot", "headless", opts);
+      if (overrideCmd) return { cmd: overrideCmd, initialPrompt: "" };
+
       const promptDataFile = writePromptDataFile(opts, deps);
       const runtimeAgentName = runtimeAgentNameForTool("copilot", opts.agentName);
       const cmd =
