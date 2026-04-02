@@ -304,7 +304,6 @@ export function isDaemonRunning(
   if (check(pid)) return pid;
   // Stale PID file -- clean up
   cleanPidFile(projectRoot, io);
-  cleanStateFile(projectRoot, io);
   return null;
 }
 

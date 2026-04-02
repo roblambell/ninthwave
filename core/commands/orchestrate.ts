@@ -1943,6 +1943,40 @@ interface InteractiveOperatorParentSessionOptions {
   loadRunnableWorkItems: (source: "startup" | "watch-scan" | "run-more") => WorkItem[];
 }
 
+/**
+ * Start a fresh watch-session snapshot.
+ *
+ * We always replace any prior restart snapshot before writing the new one so
+ * status/recovery views converge on the current session immediately.
+ */
+export function initializeWatchRuntimeFiles(
+  projectRoot: string,
+  state: DaemonState,
+  pid?: number,
+): void {
+  cleanStateFile(projectRoot);
+  writeStateFile(projectRoot, state);
+  if (pid != null) {
+    writePidFile(projectRoot, pid);
+  }
+}
+
+/**
+ * Release the active-session lock while preserving the last restart snapshot.
+ *
+ * Keeping the state file around lets a later `nw watch` session restore inflight
+ * work instead of reconstructing from scratch.
+ */
+export function cleanupWatchRuntimeFiles(
+  projectRoot: string,
+  options: { cleanPid?: boolean } = {},
+): void {
+  const { cleanPid = true } = options;
+  if (cleanPid) {
+    cleanPidFile(projectRoot);
+  }
+}
+
 async function runInteractiveOperatorParentSession(
   opts: InteractiveOperatorParentSessionOptions,
 ): Promise<void> {
@@ -2065,9 +2099,7 @@ async function runInteractiveOperatorParentSession(
     onUpdate: () => tuiState.onUpdate?.(),
   });
 
-  cleanStateFile(opts.projectRoot);
-  writeStateFile(opts.projectRoot, operatorLastSnapshot.daemonState);
-  writePidFile(opts.projectRoot, process.pid);
+  initializeWatchRuntimeFiles(opts.projectRoot, operatorLastSnapshot.daemonState, process.pid);
 
   try {
     while (true) {
@@ -2154,8 +2186,7 @@ async function runInteractiveOperatorParentSession(
       break;
     }
   } finally {
-    cleanStateFile(opts.projectRoot);
-    cleanPidFile(opts.projectRoot);
+    cleanupWatchRuntimeFiles(opts.projectRoot);
     if (operatorLastSnapshot.daemonState.items.length > 0) {
       console.log(formatExitSummary(operatorLastSnapshot.daemonState.items, operatorLastSnapshot.daemonState.startedAt));
     }
@@ -4346,7 +4377,6 @@ export async function cmdOrchestrate(
   // Clean stale state from previous run and write a fresh initial state.
   // This ensures `ninthwave status` never shows items from a previous run mixed
   // with the current run -- even before the first poll cycle completes.
-  cleanStateFile(projectRoot);
   const initialCrewStatus = crewBroker?.getCrewStatus();
   const initialState = serializeOrchestratorState(orch.getAllItems(), process.pid, daemonStartedAt, {
     wipLimit,
@@ -4355,7 +4385,7 @@ export async function cmdOrchestrate(
     crewStatus: crewStatusToDaemonCrewStatus(initialCrewStatus, crewCode, crewBroker?.isConnected() ?? false),
     ...(futureOnlyStartup ? { emptyState: "watch-armed" as const } : {}),
   });
-  writeStateFile(projectRoot, initialState);
+  initializeWatchRuntimeFiles(projectRoot, initialState);
 
   // TUI state: scroll offset and view option toggles (shared with keyboard handler)
   // Read persisted layout preference (defaults to "status-only" if missing/corrupt)
@@ -5130,13 +5160,8 @@ export async function cmdOrchestrate(
         try { crewBroker.disconnect(); } catch { /* best-effort */ }
       }
 
-      // Always clean up state file on exit (written in both daemon and interactive mode)
-      cleanStateFile(projectRoot);
-
-      // Clean up PID file on exit (both foreground and daemon child)
-      if (!isInteractiveEngineChild) {
-        cleanPidFile(projectRoot);
-      }
+      // Release the session lock but preserve the restart snapshot for the next run.
+      cleanupWatchRuntimeFiles(projectRoot, { cleanPid: !isInteractiveEngineChild });
       if (isDaemonChild) {
         log({
           ts: new Date().toISOString(),

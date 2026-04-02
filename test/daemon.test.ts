@@ -259,15 +259,14 @@ describe("isDaemonRunning", () => {
     expect(isDaemonRunning("/project", io, check)).toBe(1234);
   });
 
-  it("cleans up and returns null for stale PID (process dead)", () => {
+  it("cleans up only the stale PID file and preserves restart state", () => {
     io.files.set(pidFilePath("/project"), "9999");
     io.files.set(stateFilePath("/project"), '{"pid":9999}');
     const check: ProcessExistsCheck = () => false;
 
     expect(isDaemonRunning("/project", io, check)).toBeNull();
-    // Both PID file and state file should be cleaned up
     expect(io.files.has(pidFilePath("/project"))).toBe(false);
-    expect(io.files.has(stateFilePath("/project"))).toBe(false);
+    expect(io.files.has(stateFilePath("/project"))).toBe(true);
   });
 });
 
