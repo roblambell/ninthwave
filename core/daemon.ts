@@ -28,6 +28,8 @@ export interface DaemonStateItem {
   /** Prior active PR numbers for this item, oldest first. */
   priorPrNumbers?: number[];
   title: string;
+  /** Whether this item must stop for human review before merge. */
+  requiresManualReview?: boolean;
   /** Work item priority for snapshot-driven detail rendering. */
   priority?: string;
   /** Compact description snippet for status detail views (omitted when unavailable). */
@@ -668,6 +670,7 @@ export function serializeOrchestratorState(
         ...(item.priorPrNumbers?.length ? { priorPrNumbers: item.priorPrNumbers } : {}),
         title: item.workItem.title,
         ...(item.workItem.priority ? { priority: item.workItem.priority } : {}),
+        ...(item.workItem.requiresManualReview ? { requiresManualReview: true } : {}),
         ...(item.workItem.descriptionSnippet
           ? { descriptionSnippet: item.workItem.descriptionSnippet }
           : {}),

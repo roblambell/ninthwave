@@ -372,6 +372,7 @@ describe("serializeOrchestratorState", () => {
       makeOrchestratorItem("A-1-1", "implementing"),
       makeOrchestratorItem("A-1-2", "merged", 10),
     ];
+    items[0]!.workItem.requiresManualReview = true;
 
     const state = serializeOrchestratorState(
       items,
@@ -388,6 +389,7 @@ describe("serializeOrchestratorState", () => {
       state: "implementing",
       prNumber: null,
       title: "Item A-1-1",
+      requiresManualReview: true,
       priority: "high",
       descriptionBody: "## A-1-1\nTest item",
       lastTransition: "2026-03-24T10:00:00.000Z",

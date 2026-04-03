@@ -585,6 +585,120 @@ describe("orchestrateLoop", () => {
     expect(items[0]).toEqual({ id: "T-1-1", state: "done", prUrl: null });
   });
 
+  it("holds flagged items for manual review in auto mode", async () => {
+    const orch = new Orchestrator({ fixForward: false, wipLimit: 2, mergeStrategy: "auto" });
+    const sensitiveItem = makeWorkItem("T-HOLD-1");
+    sensitiveItem.requiresManualReview = true;
+    orch.addItem(sensitiveItem);
+    orch.getItem("T-HOLD-1")!.reviewCompleted = true;
+
+    let cycle = 0;
+    const logs: LogEntry[] = [];
+
+    const buildSnapshot = (): PollSnapshot => {
+      cycle++;
+      switch (cycle) {
+        case 1:
+          return { items: [], readyIds: ["T-HOLD-1"] };
+        case 2:
+          return { items: [{ id: "T-HOLD-1", workerAlive: true }], readyIds: [] };
+        default:
+          return {
+            items: [{ id: "T-HOLD-1", prNumber: 1, prState: "open", ciStatus: "pass" }],
+            readyIds: [],
+          };
+      }
+    };
+
+    const deps: OrchestrateLoopDeps = {
+      buildSnapshot,
+      sleep: () => Promise.resolve(),
+      log: (entry) => logs.push(entry),
+      actionDeps: mockActionDeps(),
+    };
+
+    await orchestrateLoop(orch, defaultCtx, deps, { maxIterations: 4 });
+
+    expect(orch.getItem("T-HOLD-1")!.state).toBe("review-pending");
+    expect(logs.some((l) => l.event === "action_execute" && l.action === "merge")).toBe(false);
+  });
+
+  it("holds flagged items for manual review in bypass mode", async () => {
+    const orch = new Orchestrator({ fixForward: false, wipLimit: 2, mergeStrategy: "bypass", bypassEnabled: true });
+    const sensitiveItem = makeWorkItem("T-HOLD-2");
+    sensitiveItem.requiresManualReview = true;
+    orch.addItem(sensitiveItem);
+    orch.getItem("T-HOLD-2")!.reviewCompleted = true;
+
+    let cycle = 0;
+    const logs: LogEntry[] = [];
+
+    const buildSnapshot = (): PollSnapshot => {
+      cycle++;
+      switch (cycle) {
+        case 1:
+          return { items: [], readyIds: ["T-HOLD-2"] };
+        case 2:
+          return { items: [{ id: "T-HOLD-2", workerAlive: true }], readyIds: [] };
+        default:
+          return {
+            items: [{ id: "T-HOLD-2", prNumber: 2, prState: "open", ciStatus: "pass" }],
+            readyIds: [],
+          };
+      }
+    };
+
+    const deps: OrchestrateLoopDeps = {
+      buildSnapshot,
+      sleep: () => Promise.resolve(),
+      log: (entry) => logs.push(entry),
+      actionDeps: mockActionDeps(),
+    };
+
+    await orchestrateLoop(orch, defaultCtx, deps, { maxIterations: 4 });
+
+    expect(orch.getItem("T-HOLD-2")!.state).toBe("review-pending");
+    expect(logs.some((l) => l.event === "action_execute" && l.action === "merge")).toBe(false);
+  });
+
+  it("still holds flagged items when skipReview is enabled", async () => {
+    const orch = new Orchestrator({ fixForward: false, wipLimit: 2, mergeStrategy: "auto", skipReview: true });
+    const sensitiveItem = makeWorkItem("T-HOLD-3");
+    sensitiveItem.requiresManualReview = true;
+    orch.addItem(sensitiveItem);
+
+    let cycle = 0;
+    const logs: LogEntry[] = [];
+
+    const buildSnapshot = (): PollSnapshot => {
+      cycle++;
+      switch (cycle) {
+        case 1:
+          return { items: [], readyIds: ["T-HOLD-3"] };
+        case 2:
+          return { items: [{ id: "T-HOLD-3", workerAlive: true }], readyIds: [] };
+        default:
+          return {
+            items: [{ id: "T-HOLD-3", prNumber: 3, prState: "open", ciStatus: "pass" }],
+            readyIds: [],
+          };
+      }
+    };
+
+    const deps: OrchestrateLoopDeps = {
+      buildSnapshot,
+      sleep: () => Promise.resolve(),
+      log: (entry) => logs.push(entry),
+      actionDeps: mockActionDeps(),
+    };
+
+    await orchestrateLoop(orch, defaultCtx, deps, { maxIterations: 4 });
+
+    expect(orch.getItem("T-HOLD-3")!.reviewCompleted).toBe(true);
+    expect(orch.getItem("T-HOLD-3")!.state).toBe("review-pending");
+    expect(logs.some((l) => l.event === "action_execute" && l.action === "merge")).toBe(false);
+  });
+
   it("processes dependency chain across batches", async () => {
     const orch = new Orchestrator({ fixForward: false, wipLimit: 1, mergeStrategy: "auto" });
     orch.addItem(makeWorkItem("A-1-1"));

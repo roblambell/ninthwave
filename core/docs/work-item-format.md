@@ -54,6 +54,7 @@ Each work item file is a standalone markdown document:
 **Depends on:** <ID(s) comma-separated, or "None">
 **Domain:** <domain slug>
 **Lineage:** <opaque token from `nw lineage-token`>
+**Requires manual review:** true   <!-- optional; include only when needed -->
 
 <Description -- 2-4 sentences explaining what to build/fix and key decisions.>
 
@@ -87,6 +88,7 @@ Key files: `path/to/file.ex`, `path/to/component.tsx:42`
 
 | Field | Location | Format |
 |-------|----------|--------|
+| Requires manual review | Metadata line | `**Requires manual review:** true` -- omit unless the item must stop for human review before merge |
 | Bundle with | Metadata line | `**Bundle with:** <ID>` |
 | Repo | Metadata line | `**Repo:** <alias>` -- target repo for cross-repo items |
 | Test plan | Body | `**Test plan:**` followed by bullet points |
@@ -101,6 +103,20 @@ Generate lineage tokens with `nw lineage-token` exactly once when creating a new
 - Preserve the same token when the file is re-read or rewritten
 
 Legacy work items created before this field existed may omit `**Lineage:**`; tooling falls back explicitly for those older files during rollout.
+
+### Requires Manual Review Field
+
+`**Requires manual review:** true` -- Optional. Forces the item to stop at `review-pending` before merge even when the current session merge strategy is `auto` or `bypass`.
+
+- Omit the field to inherit the session merge strategy
+- The only supported explicit value is `true`
+- Do not write `false`; omission is the default form
+
+Example use cases:
+- auth or permission-boundary changes
+- secrets, token, or credential handling
+- destructive production operations
+- high-risk data migration steps
 
 ### Writing Good Test Plans
 
@@ -182,6 +198,7 @@ Each work item should target one human-reviewable PR:
 - **Depends on**: from `**Depends on:**` line, comma/space-separated IDs
 - **Domain**: from `**Domain:**` line (defaults to `"uncategorized"` if missing)
 - **Lineage**: from `**Lineage:**` line (required for new items, optional only for legacy pre-rollout files)
+- **Requires manual review**: from `**Requires manual review:** true` (optional; omission means inherit)
 - **Bundle with**: from `**Bundle with:**` line (optional)
 - **Repo**: from `**Repo:**` line (optional, defaults to hub repo)
 - **Test plan**: from `**Test plan:**` line and subsequent bullet lines (optional)
@@ -207,6 +224,7 @@ File: `.ninthwave/work/2-cloud-infrastructure--M-CI-1.md`
 **Depends on:** None
 **Domain:** cloud-infrastructure
 **Lineage:** 8d641d84-5065-4e72-8b72-c087812ef2cb
+**Requires manual review:** true
 
 All test workflow runners currently use 2 vCPU Blacksmith instances. Upgrade to 4 vCPU for faster test execution. Keep deploy workflows on 2 vCPU. Each workflow stays on its current platform (ARM or x86).
 

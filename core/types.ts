@@ -29,6 +29,7 @@ export interface WorkItem {
   testPlan: string; // extracted from **Test plan:** section (empty if not present)
   descriptionSnippet?: string; // brief snippet extracted from the markdown body for status detail views
   bootstrap: boolean; // whether the orchestrator should bootstrap the target repo before launch
+  requiresManualReview?: boolean; // force a human merge hold regardless of session merge strategy
 }
 
 export const PRIORITY_NUM: Record<Priority, number> = {

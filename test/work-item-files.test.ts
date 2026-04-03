@@ -199,6 +199,24 @@ describe("parseWorkItemFile", () => {
     expect(item!.repoAlias).toBe("target-repo-a");
   });
 
+  it("extracts requires-manual-review when explicitly enabled", () => {
+    const dir = makeTempDir();
+    const content = `# Sensitive change (H-SEC-1)
+
+**Priority:** High
+**Source:** local
+**Depends on:** None
+**Domain:** security
+**Requires manual review:** true
+`;
+    const fp = join(dir, "1-security--H-SEC-1.md");
+    writeFileSync(fp, content);
+
+    const item = parseWorkItemFile(fp);
+    expect(item).not.toBeNull();
+    expect(item!.requiresManualReview).toBe(true);
+  });
+
   it("handles missing optional fields (no test plan, no key files, no bundle)", () => {
     const dir = makeTempDir();
     const content = `# Minimal item (L-MIN-1)
@@ -276,6 +294,22 @@ Just a description.
 **Domain:** broken
 `;
     const fp = join(dir, "broken3.md");
+    writeFileSync(fp, content);
+
+    expect(parseWorkItemFile(fp)).toBeNull();
+  });
+
+  it("returns null for explicit false manual-review override", () => {
+    const dir = makeTempDir();
+    const content = `# Invalid override (H-REV-1)
+
+**Priority:** High
+**Source:** local
+**Depends on:** None
+**Domain:** security
+**Requires manual review:** false
+`;
+    const fp = join(dir, "1-security--H-REV-1.md");
     writeFileSync(fp, content);
 
     expect(parseWorkItemFile(fp)).toBeNull();
@@ -410,12 +444,14 @@ describe("writeWorkItemFile + parseWorkItemFile round-trip", () => {
 
     const original = makeWorkItem({
       lineageToken: FIXTURE_LINEAGE,
+      requiresManualReview: true,
       rawText: `# Improve worker reliability (M-WRK-8)
 
 **Priority:** Medium
 **Source:** local
 **Depends on:** None
 **Domain:** worker-reliability
+**Requires manual review:** true
 
 Description text here.
 
@@ -448,6 +484,7 @@ Key files: \`core/worker.ts\`
     expect(parsed!.lineageToken).toBe(FIXTURE_LINEAGE);
     expect(parsed!.dependencies).toEqual(["H-DEP-1"]);
     expect(parsed!.bundleWith).toEqual(["M-BND-2"]);
+    expect(parsed!.requiresManualReview).toBe(true);
   });
 
   it("stamps a lineage token for newly created items and preserves it on read", () => {
@@ -480,6 +517,22 @@ Just do the thing.
     expect(original.lineageToken).toBe(FIXTURE_LINEAGE);
     expect(parsed!.testPlan).toBe("");
     expect(parsed!.filePaths).toEqual([]);
+  });
+
+  it("extractBody strips the manual-review metadata line", () => {
+    const raw = [
+      "# Title (H-T-4)",
+      "",
+      "**Priority:** High",
+      "**Source:** local",
+      "**Depends on:** None",
+      "**Domain:** test",
+      "**Requires manual review:** true",
+      "",
+      "Do the sensitive thing.",
+    ].join("\n");
+
+    expect(extractBody(raw)).toEqual(["Do the sensitive thing."]);
   });
 });
 

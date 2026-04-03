@@ -230,6 +230,8 @@ export interface StatusItem {
   title: string;
   /** Compact description snippet shown in the detail overlay when available. */
   descriptionSnippet?: string;
+  /** Whether this item requires a human merge hold regardless of session merge strategy. */
+  requiresManualReview?: boolean;
   state: ItemState;
   prNumber: number | null;
   /** Prior active PR numbers for this item, oldest first. */
@@ -269,6 +271,14 @@ function headlessModeTag(item: StatusItem): string {
   return item.workspaceRef && muxTypeForWorkspaceRef(item.workspaceRef) === "headless"
     ? ` ${DIM}[headless]${RESET}`
     : "";
+}
+
+function manualReviewMarker(item: StatusItem): string {
+  return item.requiresManualReview ? `${YELLOW}!${RESET} ` : "";
+}
+
+function manualReviewMarkerWidth(item: StatusItem): number {
+  return item.requiresManualReview ? 2 : 0;
 }
 
 // ─── Dependency tree types ────────────────────────────────────────────────────
@@ -726,7 +736,11 @@ export function formatItemRow(
       )
     : "";
   const progressWidth = progressText ? stripAnsiForWidth(progressText).length + 1 : 0;
-  const title = truncateTitle(item.title || item.id, Math.max(4, titleWidth - progressWidth));
+  const marker = manualReviewMarker(item);
+  const title = truncateTitle(
+    item.title || item.id,
+    Math.max(4, titleWidth - progressWidth - manualReviewMarkerWidth(item)),
+  );
   const repo = item.repoLabel ? ` ${DIM}[${item.repoLabel}]${RESET}` : "";
   const reason = item.failureReason
     ? ` ${DIM}(${truncateTitle(item.failureReason, 72)})${RESET}`
@@ -739,7 +753,7 @@ export function formatItemRow(
   const progressSuffix = progressText ? ` ${DIM}${progressText}${RESET}` : "";
   const modeTag = headlessModeTag(item);
 
-  return `${prefix}${iconColor}${icon}${RESET} ${id}${color}${stateCell}${RESET}${remoteDot} ${durationCell}${timeoutExtensions} ${depCol}${title}${progressSuffix}${modeTag}${repo}${reason}${telemetry}`;
+  return `${prefix}${iconColor}${icon}${RESET} ${id}${color}${stateCell}${RESET}${remoteDot} ${durationCell}${timeoutExtensions} ${depCol}${marker}${title}${progressSuffix}${modeTag}${repo}${reason}${telemetry}`;
 }
 
 function pushWrappedDetailField(
@@ -854,11 +868,15 @@ export function formatQueuedItemRow(
   const stateCell = formatStateLabelWithPr(item.state, item.prNumber, stateColWidth);
   const duration = pad(formatDuration(item), 8);
   const depCol = depIndicator ?? "";
-  const title = truncateTitle(item.title || item.id, titleWidth);
+  const marker = manualReviewMarker(item);
+  const title = truncateTitle(
+    item.title || item.id,
+    Math.max(4, titleWidth - manualReviewMarkerWidth(item)),
+  );
   const repo = item.repoLabel ? ` [${item.repoLabel}]` : "";
   const prefix = isSelected ? `${BOLD}>${RESET} ` : "  ";
 
-  return `${prefix}${DIM}${icon} ${id}${stateCell} ${duration} ${depCol}${title}${repo}${RESET}`;
+  return `${prefix}${DIM}${icon} ${id}${stateCell} ${duration} ${depCol}${marker}${title}${repo}${RESET}`;
 }
 
 // ─── Dependency tree building ─────────────────────────────────────────────────
@@ -945,13 +963,17 @@ export function formatTreeItemRow(
   const color = stateColor(item.state);
   const stateCell = formatStateLabelWithPr(item.state, item.prNumber, stateColWidth, repoUrl);
   const duration = pad(formatDuration(item), 8);
-  const title = truncateTitle(item.title || item.id, titleWidth);
+  const marker = manualReviewMarker(item);
+  const title = truncateTitle(
+    item.title || item.id,
+    Math.max(4, titleWidth - manualReviewMarkerWidth(item)),
+  );
   const repo = item.repoLabel ? ` ${DIM}[${item.repoLabel}]${RESET}` : "";
 
   if (item.state === "queued") {
-    return `  ${DIM}${prefix}${icon} ${id}${stateCell} ${duration} ${title}${repo}${RESET}`;
+    return `  ${DIM}${prefix}${icon} ${id}${stateCell} ${duration} ${marker}${title}${repo}${RESET}`;
   }
-  return `  ${prefix ? `${DIM}${prefix}${RESET}` : ""}${color}${icon}${RESET} ${id}${color}${stateCell}${RESET} ${duration} ${title}${repo}`;
+  return `  ${prefix ? `${DIM}${prefix}${RESET}` : ""}${color}${icon}${RESET} ${id}${color}${stateCell}${RESET} ${duration} ${marker}${title}${repo}`;
 }
 
 /**
@@ -1356,6 +1378,7 @@ export function daemonStateToStatusItems(state: DaemonState): StatusItem[] {
       id: item.id,
       title: item.remoteSnapshot?.title ?? item.title,
       ...(item.descriptionSnippet ? { descriptionSnippet: item.descriptionSnippet } : {}),
+      ...(item.requiresManualReview ? { requiresManualReview: true } : {}),
       state: item.remoteSnapshot
         ? normalizeRemoteItemState(item.remoteSnapshot.state)
         : mapDaemonItemState(item.state, { rebaseRequested: item.rebaseRequested }),
@@ -3102,6 +3125,10 @@ export function renderDetailOverlay(
 
   if (opts?.retryCount != null && opts.retryCount > 0) {
     contentLines.push(`  ${DIM}Retries:${RESET}   ${opts.retryCount}`);
+  }
+
+  if (item.requiresManualReview) {
+    contentLines.push(`  ${DIM}Merge hold:${RESET} manual review required`);
   }
 
   if (item.worktreePath) {

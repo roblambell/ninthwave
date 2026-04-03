@@ -261,6 +261,7 @@ const METADATA_PREFIXES = [
   "**Depends on:**",
   "**Domain:**",
   "**Lineage:**",
+  "**Requires manual review:**",
   "**Bundle with:**",
   "**Repo:**",
   "**Bootstrap:**",
@@ -564,6 +565,7 @@ export function parseWorkItemFile(filePath: string): WorkItem | null {
   let lineageToken: string | undefined;
   let repoAlias = "";
   let bootstrap = false;
+  let requiresManualReview = false;
 
   for (const line of lines) {
     const priorityMatch = line.match(/^\*\*Priority:\*\*\s+(.+)/);
@@ -597,6 +599,15 @@ export function parseWorkItemFile(filePath: string): WorkItem | null {
         return null;
       }
       lineageToken = candidate;
+    }
+
+    const requiresManualReviewMatch = line.match(/^\*\*Requires manual review:\*\*\s+(.+)/i);
+    if (requiresManualReviewMatch) {
+      const candidate = requiresManualReviewMatch[1]!.trim().toLowerCase();
+      if (candidate !== "true") {
+        return null;
+      }
+      requiresManualReview = true;
     }
 
     const repoMatch = line.match(/^\*\*Repo:\*\*\s+(.+)/);
@@ -648,6 +659,7 @@ export function parseWorkItemFile(filePath: string): WorkItem | null {
     testPlan: extractTestPlan(rawText),
     descriptionSnippet: extractDescriptionSnippet(rawText),
     bootstrap,
+    requiresManualReview,
   };
 
   item.filePaths = extractFilePaths(item);
@@ -793,6 +805,10 @@ export function writeWorkItemFile(
 
   // Lineage
   lines.push(`**Lineage:** ${lineageToken}`);
+
+  if (item.requiresManualReview) {
+    lines.push(`**Requires manual review:** true`);
+  }
 
   // Bundle
   if (item.bundleWith.length > 0) {

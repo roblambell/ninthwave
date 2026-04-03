@@ -637,6 +637,12 @@ describe("formatItemRow", () => {
     const row = stripAnsi(formatItemRow(item, 40));
     expect(row).toContain("[headless]");
   });
+
+  it("shows an attention marker for items that require manual review", () => {
+    const item = makeStatusItem({ requiresManualReview: true, title: "Sensitive item" });
+    const row = stripAnsi(formatItemRow(item, 40));
+    expect(row).toContain("! Sensitive item");
+  });
 });
 
 describe("formatInlineProgress", () => {
@@ -1595,6 +1601,30 @@ describe("daemonStateToStatusItems", () => {
     const items = daemonStateToStatusItems(state);
     expect(items[0]!.descriptionSnippet).toBe("Compact status detail summary.");
     expect(items[1]!.descriptionSnippet).toBeUndefined();
+  });
+
+  it("maps requiresManualReview when present", () => {
+    const now = new Date().toISOString();
+    const state: DaemonState = {
+      pid: 1,
+      startedAt: now,
+      updatedAt: now,
+      items: [
+        {
+          id: "C-1-7",
+          state: "review-pending",
+          prNumber: 17,
+          title: "Sensitive item",
+          requiresManualReview: true,
+          lastTransition: now,
+          ciFailCount: 0,
+          retryCount: 0,
+        },
+      ],
+    };
+
+    const items = daemonStateToStatusItems(state);
+    expect(items[0]!.requiresManualReview).toBe(true);
   });
 
   it("keeps ci-pending display state when rebaseRequested is true", () => {
@@ -4132,6 +4162,14 @@ describe("renderDetailOverlay", () => {
     const lines = renderDetailOverlay(item, 100, 40);
     const text = lines.map(stripAnsi).join("\n");
     expect(text).not.toContain("Summary:");
+  });
+
+  it("shows manual-review hold text when required", () => {
+    const item = makeStatusItem({ id: "H-MR-1", requiresManualReview: true });
+    const lines = renderDetailOverlay(item, 100, 40);
+    const text = lines.map(stripAnsi).join("\n");
+    expect(text).toContain("Merge hold:");
+    expect(text).toContain("manual review required");
   });
 
   it("shows prior repair PR references when available", () => {

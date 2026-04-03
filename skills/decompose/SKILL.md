@@ -143,6 +143,16 @@ Work from the bottom of the stack up:
 
 When a work item targets a repo other than the hub repo, include the `**Repo:** <alias>` metadata field. Omit the field for items that target the hub repo itself.
 
+#### Manual review override
+
+When a work item is unusually sensitive or risky, include:
+
+```markdown
+**Requires manual review:** true
+```
+
+Use this for auth and permission-boundary changes, secrets handling, destructive production operations, or high-risk data migrations. Omit the field for normal items. Do not write `false`.
+
 #### Test plan (REQUIRED)
 
 Every work item MUST include a `**Test plan:**` field. This is not optional -- workers use it as a testing checklist during implementation.
@@ -213,6 +223,7 @@ Show totals and ask for approval. Options: looks good, adjust, re-decompose.
 **Depends on:** <IDs or None>
 **Domain:** <domain name>
 **Lineage:** <token from `nw lineage-token`>
+**Requires manual review:** true   <!-- optional; include only for sensitive/high-risk items -->
 
 <Description -- 2-4 sentences.>
 

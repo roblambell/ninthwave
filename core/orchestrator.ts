@@ -1341,15 +1341,19 @@ export class Orchestrator {
       return actions;
     }
 
+    if (
+      item.workItem.requiresManualReview
+      || snap?.reviewDecision === "CHANGES_REQUESTED"
+      || this.config.mergeStrategy === "manual"
+    ) {
+      if (item.state !== "review-pending") {
+        this.transition(item, "review-pending", eventTime);
+      }
+      return actions;
+    }
+
     switch (this.config.mergeStrategy) {
       case "auto":
-        // Guard: never auto-merge when a reviewer has explicitly requested changes
-        if (snap?.reviewDecision === "CHANGES_REQUESTED") {
-          if (item.state !== "review-pending") {
-            this.transition(item, "review-pending", eventTime);
-          }
-          break;
-        }
         // Merge as soon as CI passes and review completes
         this.transition(item, "merging", eventTime);
         actions.push({
@@ -1359,23 +1363,9 @@ export class Orchestrator {
         });
         break;
 
-      case "manual":
-        // Never auto-merge -- just move to review-pending
-        if (item.state !== "review-pending") {
-          this.transition(item, "review-pending", eventTime);
-        }
-        break;
-
       case "bypass":
         // Admin override merge -- skips branch protection human review requirement.
         // CI and AI review still run (we only get here after ci-passed + review gate).
-        // Guard: never bypass when a reviewer has explicitly requested changes
-        if (snap?.reviewDecision === "CHANGES_REQUESTED") {
-          if (item.state !== "review-pending") {
-            this.transition(item, "review-pending", eventTime);
-          }
-          break;
-        }
         this.transition(item, "merging", eventTime);
         actions.push({
           type: "merge",

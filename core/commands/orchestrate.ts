@@ -1026,6 +1026,7 @@ export function orchestratorItemsToStatusItems(
       ...(item.workItem.descriptionSnippet
         ? { descriptionSnippet: item.workItem.descriptionSnippet }
         : {}),
+      ...(item.workItem.requiresManualReview ? { requiresManualReview: true } : {}),
       state,
       prNumber: prContext.prNumber,
       ...(prContext.priorPrNumbers ? { priorPrNumbers: prContext.priorPrNumbers } : {}),
