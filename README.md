@@ -4,7 +4,7 @@
 <h1 align="center">Ninthwave</h1>
 
 <p align="center">
-  <strong>Decompose. Run nw. Get merged PRs.</strong>
+  <strong>Orchestrate parallel AI coding into reviewable PRs.</strong>
 </p>
 
 <p align="center">
