@@ -16,6 +16,8 @@ Both paths converge on the same `initProject()` function for the actual setup wo
 
 The queue mental model is intentional: `/decompose` (or manual file creation) populates `.ninthwave/work/`, `nw` works through that live queue, and completed work is looked up through merged PRs, `nw history`, `nw logs`, or git history rather than retained in a `done` lane under `.ninthwave/work/`.
 
+`.ninthwave/friction/` and `.ninthwave/decisions/` are separate review inboxes. Workers add entries there when needed, reviewers consume them from those inboxes, and reviewed entries are deleted rather than moved into another review lane.
+
 ---
 
 ## 1. User Journey: `nw` No-Args Routing
@@ -215,6 +217,8 @@ Every file and directory created during onboarding, plus the user-managed instru
 | `.ninthwave/work/.gitkeep` | File | Always | Yes | Yes | Keeps empty dir in git |
 | `.ninthwave/friction/` | Directory | Always | N/A | Yes | Friction log entries |
 | `.ninthwave/friction/.gitkeep` | File | Always | Yes | Yes | Keeps empty dir in git |
+| `.ninthwave/decisions/` | Directory | Always | N/A | Yes | Decision inbox entries |
+| `.ninthwave/decisions/.gitkeep` | File | Always | Yes | Yes | Keeps empty dir in git |
 | `.ninthwave/schedules/` | Directory | Always | N/A | Yes | Scheduled task definitions |
 | `.ninthwave/schedules/ci--example-daily-audit.md` | File | Only on fresh init (dir is new) | **No** | Yes | Example disabled schedule |
 
@@ -284,6 +288,8 @@ project-root/
 │   │   └── .gitkeep
 │   ├── friction/                        # friction log
 │   │   └── .gitkeep
+│   ├── decisions/                       # decision inbox
+│   │   └── .gitkeep
 │   └── schedules/                       # scheduled tasks
 │       └── ci--example-daily-audit.md   # example (fresh init only)
 │
@@ -343,6 +349,8 @@ Init always creates `.ninthwave/.gitignore` with deny-by-default rules for ninth
 !schedules/**
 !friction/
 !friction/**
+!decisions/
+!decisions/**
 ```
 
 `nw init` does **not** modify the repo root `.gitignore`.
@@ -379,9 +387,11 @@ Interactive guided onboarding. Detects an AI tool, runs `initProject()`, then dr
 
 ---
 
-## 10. Work Item Storage
+## 10. Work Item and Review Inbox Storage
 
 Init creates and maintains `.ninthwave/work/` as the live queue of open work item files.
+
+Init also creates `.ninthwave/friction/` and `.ninthwave/decisions/` as first-class review inboxes. Entries stay in those inboxes until review, then are deleted; tracked guidance should use this delete-on-review workflow instead of extra review subdirectories.
 
 The rest of the onboarding flow, generated guidance, and managed copies should use `work item` terminology consistently.
 
@@ -398,7 +408,7 @@ Running `nw init` multiple times is safe:
 | `.ninthwave/config` | Overwritten (init is authoritative for detection) |
 | `.ninthwave/config.json` | Overwritten if monorepo detected |
 | `.ninthwave/domains.conf` | Preserved (user configuration) |
-| `.ninthwave/work/`, `friction/`, `schedules/` | Directories ensured, contents preserved |
+| `.ninthwave/work/`, `friction/`, `decisions/`, `schedules/` | Directories ensured, contents preserved |
 | Schedule example file | Only created if `schedules/` dir is new |
 | Skill managed copies | Re-copied from the canonical bundle |
 | Agent managed copies | Refreshed when stale, left alone when already current |

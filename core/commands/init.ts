@@ -669,13 +669,17 @@ than average. Open a work item for anything that needs attention.
     );
   }
 
-  // --- .ninthwave/work/ and .ninthwave/friction/ directories ---
+  // --- .ninthwave/work/, .ninthwave/friction/, and .ninthwave/decisions/ ---
   mkdirSync(workDir, { recursive: true });
   writeFileSync(join(workDir, ".gitkeep"), "");
 
   const frictionDir = join(projectDir, ".ninthwave", "friction");
   mkdirSync(frictionDir, { recursive: true });
   writeFileSync(join(frictionDir, ".gitkeep"), "");
+
+  const decisionsDir = join(projectDir, ".ninthwave", "decisions");
+  mkdirSync(decisionsDir, { recursive: true });
+  writeFileSync(join(decisionsDir, ".gitkeep"), "");
 
   // --- Skill files ---
   const skillsDir = join(projectDir, ".claude/skills");
@@ -711,6 +715,8 @@ than average. Open a work item for anything that needs attention.
 !schedules/**
 !friction/
 !friction/**
+!decisions/
+!decisions/**
 `,
     );
   }
@@ -777,6 +783,7 @@ export function initProject(
   scaffold(projectDir, bundleDir, opts?.agentSelection);
   console.log(`  .ninthwave/work/ ${DIM}(work items)${RESET}`);
   console.log(`  .ninthwave/friction/ ${DIM}(friction log)${RESET}`);
+  console.log(`  .ninthwave/decisions/ ${DIM}(decision inbox)${RESET}`);
   console.log(`  .ninthwave/schedules/ ${DIM}(scheduled tasks)${RESET}`);
   console.log(`  .claude/skills/ ${DIM}(managed copies)${RESET}`);
   console.log(`  .gitignore`);

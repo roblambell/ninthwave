@@ -292,6 +292,9 @@ describe("seedAgentFiles", () => {
     expect(claudePrompt).toContain("nw inbox --wait YOUR_WORK_ITEM_ID");
     expect(claudePrompt).toContain("set the timeout to the longest practical value available");
     expect(claudePrompt).toContain("immediately run the same wait command again");
+    expect(claudePrompt).toContain(".ninthwave/decisions/${TIMESTAMP}--YOUR_WORK_ITEM_ID.md");
+    expect(claudePrompt).toContain("review inbox");
+    expect(claudePrompt).toContain("do **not** move them into archival review subdirectories");
     expect(claudePrompt).toContain("The daemon owns that lifecycle automation");
     expect(claudePrompt).toContain("Opening the PR did **not** end your responsibility for this work item.");
     expect(claudePrompt).toContain("A PR that is red in CI is still your job until you either push a candidate fix or post a concrete blocker comment");
@@ -310,10 +313,12 @@ describe("seedAgentFiles", () => {
     expect(claudePrompt).toContain("Do **not** `git rebase --abort` just because conflicts appeared");
     expect(claudePrompt).toContain("Required outcome: do not go back to idle until the branch is either successfully rebased and force-pushed, or you have posted the blocker comment for a genuinely non-trivial conflict");
     expect(codexPrompt).toContain("Opening the PR did **not** end your responsibility for this work item.");
+    expect(codexPrompt).toContain(".ninthwave/decisions/${TIMESTAMP}--YOUR_WORK_ITEM_ID.md");
     expect(codexPrompt).toContain("Fix pushed");
     expect(githubPrompt).toContain("Do not assume the daemon will perform the rebase for you.");
     expect(githubPrompt).toContain("Some daemon nudges may be plain-language inbox messages");
     expect(githubPrompt).toContain("Opening the PR did **not** end your responsibility for this work item.");
+    expect(githubPrompt).toContain(".ninthwave/decisions/${TIMESTAMP}--YOUR_WORK_ITEM_ID.md");
     expect(githubPrompt).toContain("If CI fails again later, re-enter this same investigate → test → push loop on the next CI-failure message.");
 
     rmSync(hubRoot, { recursive: true, force: true });
