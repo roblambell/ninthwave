@@ -47,6 +47,7 @@ import {
   bootstrapTuiUpdateNotice,
   renderTuiPanelFrameFromStatusItems,
   runTuiStartupPreparation,
+  resolveScheduleExecutionEnabled,
   resolveInteractiveStartupConfig,
   loadDiscoveryStartupItems,
   loadLocalStartupItems,
@@ -5824,6 +5825,41 @@ describe("resolveInteractiveStartupConfig", () => {
       crewCode: "K2F9-AB3X-7YPL-QM4N",
       crewUrl: "wss://config.example",
     });
+  });
+});
+
+describe("resolveScheduleExecutionEnabled", () => {
+  const projectRoot = "/tmp/schedule-project";
+  const projectKey = "-tmp-schedule-project";
+
+  it("defaults schedule execution off on first run", () => {
+    expect(resolveScheduleExecutionEnabled(
+      { schedule_enabled: true },
+      {},
+      projectRoot,
+    )).toBe(false);
+  });
+
+  it("keeps schedule execution off when local preference is false", () => {
+    expect(resolveScheduleExecutionEnabled(
+      { schedule_enabled: true },
+      { schedule_enabled_projects: { [projectKey]: false } },
+      projectRoot,
+    )).toBe(false);
+  });
+
+  it("turns schedule execution on only when both project capability and local preference are enabled", () => {
+    expect(resolveScheduleExecutionEnabled(
+      { schedule_enabled: false },
+      { schedule_enabled_projects: { [projectKey]: true } },
+      projectRoot,
+    )).toBe(false);
+
+    expect(resolveScheduleExecutionEnabled(
+      { schedule_enabled: true },
+      { schedule_enabled_projects: { [projectKey]: true } },
+      projectRoot,
+    )).toBe(true);
   });
 });
 

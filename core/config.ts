@@ -110,8 +110,23 @@ export type TmuxLayoutMode = "dashboard" | "windows";
 
 const TMUX_LAYOUT_MODES: readonly TmuxLayoutMode[] = ["dashboard", "windows"] as const;
 
+export type ProjectScheduleEnabledMap = Record<string, boolean>;
+
 export function isTmuxLayoutMode(value: unknown): value is TmuxLayoutMode {
   return TMUX_LAYOUT_MODES.includes(value as TmuxLayoutMode);
+}
+
+export function projectUserConfigKey(projectRoot: string): string {
+  return projectRoot.replace(/\//g, "-");
+}
+
+function parseProjectScheduleEnabledMap(value: unknown): ProjectScheduleEnabledMap | undefined {
+  if (typeof value !== "object" || value === null || Array.isArray(value)) {
+    return undefined;
+  }
+
+  const entries = Object.entries(value).filter((entry): entry is [string, boolean] => typeof entry[1] === "boolean");
+  return entries.length > 0 ? Object.fromEntries(entries) : undefined;
 }
 
 export interface UserConfig {
@@ -123,6 +138,14 @@ export interface UserConfig {
   review_mode?: PersistedReviewMode;
   collaboration_mode?: PersistedCollaborationMode;
   update_checks_enabled?: boolean;
+  schedule_enabled_projects?: ProjectScheduleEnabledMap;
+}
+
+export function isProjectScheduleEnabled(
+  userConfig: Pick<UserConfig, "schedule_enabled_projects">,
+  projectRoot: string,
+): boolean {
+  return userConfig.schedule_enabled_projects?.[projectUserConfigKey(projectRoot)] === true;
 }
 
 /**
@@ -168,6 +191,10 @@ export function loadUserConfig(homeOverride?: string): UserConfig {
     }
     if (typeof parsed.update_checks_enabled === "boolean") {
       result.update_checks_enabled = parsed.update_checks_enabled;
+    }
+    const scheduleEnabledProjects = parseProjectScheduleEnabledMap(parsed.schedule_enabled_projects);
+    if (scheduleEnabledProjects) {
+      result.schedule_enabled_projects = scheduleEnabledProjects;
     }
     return result;
   } catch {
@@ -257,8 +284,29 @@ export function saveUserConfig(
       }
       continue;
     }
+    if (key === "schedule_enabled_projects") {
+      const parsed = parseProjectScheduleEnabledMap(value);
+      if (parsed) {
+        merged[key] = parsed;
+      }
+      continue;
+    }
     merged[key] = value;
   }
   mkdirSync(dirname(configPath), { recursive: true });
   writeFileSync(configPath, JSON.stringify(merged, null, 2) + "\n");
+}
+
+export function saveProjectScheduleEnabled(
+  projectRoot: string,
+  enabled: boolean,
+  homeOverride?: string,
+): void {
+  const existing = loadUserConfig(homeOverride);
+  saveUserConfig({
+    schedule_enabled_projects: {
+      ...(existing.schedule_enabled_projects ?? {}),
+      [projectUserConfigKey(projectRoot)]: enabled,
+    },
+  }, homeOverride);
 }

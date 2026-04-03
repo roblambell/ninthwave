@@ -49,7 +49,7 @@ import {
 } from "../interactive.ts";
 import type { WorkItem, LogEntry } from "../types.ts";
 import { ID_IN_FILENAME, PRIORITY_NUM } from "../types.ts";
-import { loadConfig, saveConfig, loadUserConfig, saveUserConfig } from "../config.ts";
+import { loadConfig, saveConfig, loadUserConfig, saveUserConfig, isProjectScheduleEnabled } from "../config.ts";
 import type { ProjectConfig, UserConfig } from "../config.ts";
 import {
   collaborationIntentFromMode,
@@ -273,6 +273,14 @@ export function resolveInteractiveStartupConfig(
     savedToolIds: userConfig.ai_tools,
     skipToolStep: !!toolOverride || (userConfig.ai_tools?.length ?? 0) > 0,
   };
+}
+
+export function resolveScheduleExecutionEnabled(
+  projectConfig: Pick<ProjectConfig, "schedule_enabled">,
+  userConfig: Pick<UserConfig, "schedule_enabled_projects">,
+  projectRoot: string,
+): boolean {
+  return projectConfig.schedule_enabled && isProjectScheduleEnabled(userConfig, projectRoot);
 }
 
 export const INTERACTIVE_WATCH_STAGE_WARN_MS = {
@@ -4384,7 +4392,7 @@ export async function cmdOrchestrate(
       : interactiveReviewMode === "mine" || interactiveReviewMode === "off"
         ? false
         : (parsedReviewExternal || projectConfig.review_external);
-  const scheduleEnabled = projectConfig.schedule_enabled;
+  const scheduleEnabled = resolveScheduleExecutionEnabled(projectConfig, persistedUserCfg, projectRoot);
 
   // State persistence: serialize state each poll cycle so the status pane can display all items.
   // Written in both daemon and interactive mode -- the status pane reads this file to show

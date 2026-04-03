@@ -3,7 +3,15 @@
 import { describe, it, expect, afterEach, vi } from "vitest";
 import { join } from "path";
 import { mkdirSync, writeFileSync, readFileSync, existsSync } from "fs";
-import { loadConfig, saveConfig, loadUserConfig, saveUserConfig } from "../core/config.ts";
+import {
+  loadConfig,
+  saveConfig,
+  loadUserConfig,
+  saveUserConfig,
+  isProjectScheduleEnabled,
+  projectUserConfigKey,
+  saveProjectScheduleEnabled,
+} from "../core/config.ts";
 import { setupTempRepo, cleanupTempRepos } from "./helpers.ts";
 
 afterEach(() => {
@@ -399,6 +407,50 @@ describe("loadUserConfig", () => {
     expect(config.update_checks_enabled).toBe(false);
   });
 
+  it("reads project-scoped schedule preferences without disturbing other fields", () => {
+    const tmpHome = setupTempRepo();
+    const configDir = join(tmpHome, ".ninthwave");
+    const projectA = "/tmp/project-a";
+    const projectB = "/tmp/project-b";
+    mkdirSync(configDir, { recursive: true });
+    writeFileSync(
+      join(configDir, "config.json"),
+      JSON.stringify({
+        session_limit: 3,
+        schedule_enabled_projects: {
+          [projectUserConfigKey(projectA)]: true,
+          [projectUserConfigKey(projectB)]: false,
+          ignored: "yes",
+        },
+      }),
+    );
+
+    const config = loadUserConfig(tmpHome);
+    expect(config.session_limit).toBe(3);
+    expect(config.schedule_enabled_projects).toEqual({
+      [projectUserConfigKey(projectA)]: true,
+      [projectUserConfigKey(projectB)]: false,
+    });
+    expect(isProjectScheduleEnabled(config, projectA)).toBe(true);
+    expect(isProjectScheduleEnabled(config, projectB)).toBe(false);
+  });
+
+  it("defaults missing project schedule preference to false on first run", () => {
+    const tmpHome = setupTempRepo();
+    const configDir = join(tmpHome, ".ninthwave");
+    const projectRoot = "/tmp/project-a";
+    mkdirSync(configDir, { recursive: true });
+    writeFileSync(
+      join(configDir, "config.json"),
+      JSON.stringify({ session_limit: 4 }),
+    );
+
+    const config = loadUserConfig(tmpHome);
+    expect(config.session_limit).toBe(4);
+    expect(config.schedule_enabled_projects).toBeUndefined();
+    expect(isProjectScheduleEnabled(config, projectRoot)).toBe(false);
+  });
+
   it("ignores invalid persisted TUI enum values safely", () => {
     const tmpHome = setupTempRepo();
     const configDir = join(tmpHome, ".ninthwave");
@@ -563,6 +615,36 @@ describe("saveUserConfig", () => {
     const content = JSON.parse(readFileSync(join(configDir, "config.json"), "utf-8"));
     expect(content.ai_tools).toEqual(["claude"]);
     expect(content.session_limit).toBe(3);
+  });
+
+  it("writes project-scoped schedule preferences without clobbering other user config", () => {
+    const tmpHome = setupTempRepo();
+    const configDir = join(tmpHome, ".ninthwave");
+    const projectA = "/tmp/project-a";
+    const projectB = "/tmp/project-b";
+    mkdirSync(configDir, { recursive: true });
+    writeFileSync(
+      join(configDir, "config.json"),
+      JSON.stringify({
+        ai_tools: ["claude"],
+        schedule_enabled_projects: {
+          [projectUserConfigKey(projectA)]: true,
+        },
+      }),
+    );
+
+    saveProjectScheduleEnabled(projectB, false, tmpHome);
+
+    const content = JSON.parse(readFileSync(join(configDir, "config.json"), "utf-8"));
+    expect(content.ai_tools).toEqual(["claude"]);
+    expect(content.schedule_enabled_projects).toEqual({
+      [projectUserConfigKey(projectA)]: true,
+      [projectUserConfigKey(projectB)]: false,
+    });
+
+    const config = loadUserConfig(tmpHome);
+    expect(isProjectScheduleEnabled(config, projectA)).toBe(true);
+    expect(isProjectScheduleEnabled(config, projectB)).toBe(false);
   });
 
   it("round-trips persisted TUI defaults without dropping unknown keys", () => {
