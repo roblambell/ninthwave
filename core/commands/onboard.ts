@@ -412,13 +412,10 @@ export async function cmdNoArgs(
   const doLoadUserConfig = deps.loadUserConfig ?? loadUserConfig;
   const projectConfig = doLoadConfig(projectRoot);
   const userConfig = doLoadUserConfig();
-  const defaultReviewMode = projectConfig.review_external ? "all" as const : "mine" as const;
   const defaultSettings = resolveTuiSettingsDefaults(userConfig, {
     scheduleEnabled: isProjectScheduleEnabled(userConfig, projectRoot),
   });
-  if (userConfig.review_mode === undefined) {
-    defaultSettings.reviewMode = defaultReviewMode;
-  }
+  const defaultReviewMode = defaultSettings.reviewMode;
   const installedTools = detectInstalledAITools();
   const doInteractive = deps.runInteractiveFlow ?? runInteractiveFlow;
   const result = await doInteractive(todos, 4, {

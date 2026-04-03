@@ -912,8 +912,8 @@ describe("cmdNoArgs", () => {
       runInteractiveFlow: async (_todos, _wip, deps) => {
         interactiveCalled = true;
         // Verify that the deps include the correct defaultReviewMode
-        expect(deps?.defaultReviewMode).toBe("all");
-        expect(deps?.defaultSettings?.reviewMode).toBe("all");
+        expect(deps?.defaultReviewMode).toBe("off");
+        expect(deps?.defaultSettings?.reviewMode).toBe("off");
         expect(deps?.defaultSettings?.backendMode).toBe("auto");
         return {
           itemIds: ["H-1"],
@@ -942,11 +942,11 @@ describe("cmdNoArgs", () => {
       loadConfig: () => ({ review_external: true, schedule_enabled: false, ai_tools: ["claude"] }),
       loadUserConfig: () => ({ ai_tools: ["opencode", "copilot"], merge_strategy: "auto", collaboration_mode: "share" }),
       runInteractiveFlow: async (_todos, _wip, deps) => {
-        expect(deps?.defaultReviewMode).toBe("all");
+        expect(deps?.defaultReviewMode).toBe("off");
         expect(deps?.defaultSettings).toEqual({
           backendMode: "auto",
           mergeStrategy: "auto",
-          reviewMode: "all",
+          reviewMode: "off",
           collaborationMode: "share",
           scheduleEnabled: false,
         });

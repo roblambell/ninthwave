@@ -55,9 +55,9 @@ export const BACKEND_MODE_OPTIONS: readonly ChoiceSettingOption<PersistedBackend
   {
     persistedValue: "auto",
     runtimeValue: "auto",
-    startupLabel: "Auto",
+    startupLabel: "auto",
     startupDescription: "Prefer your current or available mux backend, else headless",
-    runtimeLabel: "Auto",
+    runtimeLabel: "auto",
     persistable: true,
   },
   {

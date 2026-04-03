@@ -1108,7 +1108,7 @@ describe("runStartupSettingsScreen", () => {
       },
     });
 
-    expect(getOutput()).toContain("Auto");
+    expect(getOutput()).toContain("auto");
     expect(getOutput()).toContain("tmux");
     expect(getOutput()).toContain("cmux");
     expect(getOutput()).toContain("headless");
@@ -2019,7 +2019,7 @@ describe("runSelectionScreen -- startup settings display", () => {
 
     expect(mergeLine).toContain(" auto ");
     expect(mergeLine).toContain("[manual]");
-    expect(backendLine).toContain("[Auto]");
+    expect(backendLine).toContain("[auto]");
     expect(backendLine).toContain(" tmux ");
     expect(backendLine).toContain(" cmux ");
     expect(backendLine).toContain(" headless ");
@@ -2040,14 +2040,14 @@ describe("runSelectionScreen -- startup settings display", () => {
     sendKeys(["\x1B[B", "\x1B[B", "\x1B[B", "\x1B[B", "\x1B[B"]);
 
     const beforeMove = getPlainFrameLine(getOutput(), "> Backend");
-    const beforeStarts = ["Auto", "tmux", "cmux", "headless"].map((label) => getStartupChipStart(beforeMove, label));
+    const beforeStarts = ["auto", "tmux", "cmux", "headless"].map((label) => getStartupChipStart(beforeMove, label));
 
     sendKeys(["\x1B[C"]);
 
     const afterMove = getPlainFrameLine(getOutput(), "> Backend");
-    const afterStarts = ["Auto", "tmux", "cmux", "headless"].map((label) => getStartupChipStart(afterMove, label));
+    const afterStarts = ["auto", "tmux", "cmux", "headless"].map((label) => getStartupChipStart(afterMove, label));
 
-    expect(beforeMove).toContain("[Auto]");
+    expect(beforeMove).toContain("[auto]");
     expect(afterMove).toContain("[tmux]");
     expect(beforeStarts).toEqual(afterStarts);
 
