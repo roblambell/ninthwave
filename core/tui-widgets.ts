@@ -971,7 +971,7 @@ export function runStartupSettingsScreen(
       active: boolean,
     ): string => {
       const pointer = active ? `${CYAN}>${RESET}` : " ";
-      return `${pointer} ${BOLD}${title.padEnd(13)}${RESET} ${values.join("  ")}`;
+      return `${pointer} ${BOLD}${title.padEnd(16)}${RESET} ${values.join(" ")}`;
     };
 
     const mergeValues = () => STARTUP_MERGE_STRATEGY_OPTIONS.map((option, index) =>
