@@ -33,16 +33,9 @@ import { TmuxAdapter } from "../core/tmux.ts";
 
 function makeDeps(
   env: Record<string, string | undefined> = {},
-  binaries: string[] = [],
   warn?: (msg: string) => void,
-  savedBackendMode?: DetectMuxDeps["savedBackendMode"],
 ): DetectMuxDeps {
-  return {
-    env,
-    checkBinary: (name: string) => binaries.includes(name),
-    warn,
-    savedBackendMode,
-  };
+  return { env, warn };
 }
 
 // ── CmuxAdapter tests ───────────────────────────────────────────────
@@ -127,90 +120,19 @@ describe("CmuxAdapter", () => {
 // ── detectMuxType tests ─────────────────────────────────────────────
 
 describe("detectMuxType", () => {
-  it("uses saved backend_mode when no env override is present", () => {
-    const deps = makeDeps({}, ["tmux", "cmux"], undefined, "cmux");
-    expect(detectMuxType(deps)).toBe("cmux");
-  });
-
   it("picks cmux when CMUX_WORKSPACE_ID is set", () => {
     const deps = makeDeps({ CMUX_WORKSPACE_ID: "abc-123" });
     expect(detectMuxType(deps)).toBe("cmux");
   });
 
-  it("falls back to cmux binary when no session env vars", () => {
-    const deps = makeDeps({}, ["cmux"]);
-    expect(detectMuxType(deps)).toBe("cmux");
-  });
-
-  it("falls back to headless when no multiplexer is available", () => {
-    const deps = makeDeps({}, []);
-    expect(detectMuxType(deps)).toBe("headless");
-  });
-
-  it("prefers session env var over binary detection", () => {
-    const deps = makeDeps({ CMUX_WORKSPACE_ID: "abc" }, ["cmux"]);
-    expect(detectMuxType(deps)).toBe("cmux");
-  });
-
-  // ── NINTHWAVE_MUX override tests ───────────────────────────────────
-
-  it("returns tmux when NINTHWAVE_MUX=tmux", () => {
-    const deps = makeDeps({ NINTHWAVE_MUX: "tmux" }, ["tmux"]);
-    expect(detectMuxType(deps)).toBe("tmux");
-  });
-
-  it("returns cmux when NINTHWAVE_MUX=cmux", () => {
-    const deps = makeDeps({ NINTHWAVE_MUX: "cmux" }, ["cmux"]);
-    expect(detectMuxType(deps)).toBe("cmux");
-  });
-
-  it("returns headless when NINTHWAVE_MUX=headless", () => {
-    const deps = makeDeps({ NINTHWAVE_MUX: "headless" });
-    expect(detectMuxType(deps)).toBe("headless");
-  });
-
-  it("warns and falls through on invalid NINTHWAVE_MUX", () => {
-    const warnings: string[] = [];
-    const deps = makeDeps(
-      { NINTHWAVE_MUX: "garbage" },
-      ["tmux"],
-      (msg) => warnings.push(msg),
-    );
-    expect(detectMuxType(deps)).toBe("tmux");
-    expect(warnings).toHaveLength(1);
-    expect(warnings[0]).toContain("Invalid NINTHWAVE_MUX");
-    expect(warnings[0]).toContain("garbage");
-  });
-
-  it("NINTHWAVE_MUX overrides session env vars", () => {
-    const deps = makeDeps({ NINTHWAVE_MUX: "tmux", CMUX_WORKSPACE_ID: "abc" }, ["tmux"]);
-    expect(detectMuxType(deps)).toBe("tmux");
-  });
-
-  it("NINTHWAVE_MUX=cmux overrides $TMUX", () => {
-    const deps = makeDeps({ NINTHWAVE_MUX: "cmux", TMUX: "/tmp/tmux-501/default,12345,0" }, ["cmux"]);
-    expect(detectMuxType(deps)).toBe("cmux");
-  });
-
-  // ── tmux detection tests ───────────────────────────────────────────
-
-  it("returns tmux when $TMUX is set", () => {
+  it("picks tmux when $TMUX is set", () => {
     const deps = makeDeps({ TMUX: "/tmp/tmux-501/default,12345,0" });
     expect(detectMuxType(deps)).toBe("tmux");
   });
 
-  it("recognizes tmux pane refs", () => {
-    expect(muxTypeForWorkspaceRef("%12")).toBe("tmux");
-  });
-
-  it("returns tmux when tmux binary available (no session)", () => {
-    const deps = makeDeps({}, ["tmux"]);
-    expect(detectMuxType(deps)).toBe("tmux");
-  });
-
-  it("prefers tmux over cmux when both binaries available", () => {
-    const deps = makeDeps({}, ["tmux", "cmux"]);
-    expect(detectMuxType(deps)).toBe("tmux");
+  it("falls back to headless when no session env vars", () => {
+    const deps = makeDeps({});
+    expect(detectMuxType(deps)).toBe("headless");
   });
 
   it("CMUX_WORKSPACE_ID takes precedence over $TMUX", () => {
@@ -221,88 +143,70 @@ describe("detectMuxType", () => {
     expect(detectMuxType(deps)).toBe("cmux");
   });
 
-  it("override precedence: NINTHWAVE_MUX > session env > binary", () => {
-    // NINTHWAVE_MUX wins over everything
+  it("recognizes tmux pane refs", () => {
+    expect(muxTypeForWorkspaceRef("%12")).toBe("tmux");
+  });
+
+  // ── NINTHWAVE_MUX override tests ───────────────────────────────────
+
+  it("returns tmux when NINTHWAVE_MUX=tmux and inside tmux", () => {
+    const deps = makeDeps({ NINTHWAVE_MUX: "tmux", TMUX: "/tmp/tmux" });
+    expect(detectMuxType(deps)).toBe("tmux");
+  });
+
+  it("returns cmux when NINTHWAVE_MUX=cmux and inside cmux", () => {
+    const deps = makeDeps({ NINTHWAVE_MUX: "cmux", CMUX_WORKSPACE_ID: "abc" });
+    expect(detectMuxType(deps)).toBe("cmux");
+  });
+
+  it("NINTHWAVE_MUX=tmux falls to headless when not in tmux session", () => {
+    const deps = makeDeps({ NINTHWAVE_MUX: "tmux" });
+    expect(detectMuxType(deps)).toBe("headless");
+  });
+
+  it("NINTHWAVE_MUX=cmux falls to headless when not in cmux session", () => {
+    const deps = makeDeps({ NINTHWAVE_MUX: "cmux" });
+    expect(detectMuxType(deps)).toBe("headless");
+  });
+
+  it("returns headless when NINTHWAVE_MUX=headless", () => {
+    const deps = makeDeps({ NINTHWAVE_MUX: "headless" });
+    expect(detectMuxType(deps)).toBe("headless");
+  });
+
+  it("warns and falls through on invalid NINTHWAVE_MUX", () => {
+    const warnings: string[] = [];
+    const deps = makeDeps(
+      { NINTHWAVE_MUX: "garbage", TMUX: "/tmp/tmux" },
+      (msg) => warnings.push(msg),
+    );
+    expect(detectMuxType(deps)).toBe("tmux");
+    expect(warnings).toHaveLength(1);
+    expect(warnings[0]).toContain("Invalid NINTHWAVE_MUX");
+    expect(warnings[0]).toContain("garbage");
+  });
+
+  it("NINTHWAVE_MUX=tmux overrides CMUX_WORKSPACE_ID when inside tmux", () => {
+    const deps = makeDeps({ NINTHWAVE_MUX: "tmux", CMUX_WORKSPACE_ID: "abc", TMUX: "/tmp/tmux" });
+    expect(detectMuxType(deps)).toBe("tmux");
+  });
+
+  it("NINTHWAVE_MUX=cmux overrides $TMUX when inside cmux", () => {
+    const deps = makeDeps({ NINTHWAVE_MUX: "cmux", TMUX: "/tmp/tmux", CMUX_WORKSPACE_ID: "abc" });
+    expect(detectMuxType(deps)).toBe("cmux");
+  });
+
+  it("override precedence: NINTHWAVE_MUX > session env", () => {
     const deps = makeDeps(
       { NINTHWAVE_MUX: "cmux", CMUX_WORKSPACE_ID: "abc", TMUX: "/tmp/tmux" },
-      ["tmux", "cmux"],
     );
     expect(detectMuxType(deps)).toBe("cmux");
   });
 
-  it("override precedence: NINTHWAVE_MUX > saved backend_mode > auto", () => {
-    const deps = makeDeps(
-      { NINTHWAVE_MUX: "cmux", TMUX: "/tmp/tmux" },
-      ["tmux", "cmux"],
-      undefined,
-      "tmux",
-    );
-    expect(resolveBackend(deps)).toMatchObject({
-      requested: "cmux",
-      source: "env",
-      effective: "cmux",
-    });
-  });
-
-  it("uses saved backend_mode ahead of auto detection", () => {
-    const deps = makeDeps(
-      { CMUX_WORKSPACE_ID: "workspace:1" },
-      ["tmux", "cmux"],
-      undefined,
-      "tmux",
-    );
-    expect(resolveBackend(deps)).toMatchObject({
-      requested: "tmux",
-      source: "user-config",
-      effective: "tmux",
-    });
-  });
-
-  it("keeps explicit cmux selection inside a tmux session", () => {
-    const deps = makeDeps(
-      { TMUX: "/tmp/tmux" },
-      ["tmux", "cmux"],
-      undefined,
-      "cmux",
-    );
-    expect(resolveBackend(deps)).toMatchObject({
-      requested: "cmux",
-      source: "user-config",
-      effective: "cmux",
-    });
-  });
-
-  it("falls back from auto to headless when no mux exists", () => {
-    const deps = makeDeps({}, []);
-    expect(resolveBackend(deps)).toEqual({
-      requested: "auto",
-      source: "auto",
-      effective: "headless",
-      fallback: {
-        from: "auto",
-        to: "headless",
-        reason: "No tmux or cmux session/binary detected. Falling back to headless.",
-      },
-    });
-  });
-
-  it("downgrades unsupported explicit backend choices to headless with a reason", () => {
-    const deps = makeDeps({ TMUX: "/tmp/tmux" }, ["tmux"], undefined, "cmux");
-    const resolved = resolveBackend(deps);
-    expect(resolved.effective).toBe("headless");
-    expect(resolved.fallback).toEqual({
-      from: "cmux",
-      to: "headless",
-      reason: expect.stringContaining("saved backend_mode"),
-    });
-  });
-
-  it("invalid NINTHWAVE_MUX falls through to full detection chain", () => {
+  it("invalid NINTHWAVE_MUX falls through to session detection", () => {
     const warnings: string[] = [];
-    // Invalid override, but CMUX_WORKSPACE_ID is set
     const deps = makeDeps(
       { NINTHWAVE_MUX: "invalid", CMUX_WORKSPACE_ID: "abc" },
-      [],
       (msg) => warnings.push(msg),
     );
     expect(detectMuxType(deps)).toBe("cmux");
@@ -310,17 +214,78 @@ describe("detectMuxType", () => {
   });
 });
 
+// ── resolveBackend tests ───────────────────────────────────────────
+
+describe("resolveBackend", () => {
+  it("falls back to headless when no session detected", () => {
+    const deps = makeDeps({});
+    expect(resolveBackend(deps)).toEqual({
+      requested: "auto",
+      source: "auto",
+      effective: "headless",
+      fallback: {
+        from: "auto",
+        to: "headless",
+        reason: "No tmux or cmux session detected. Running headless.",
+      },
+    });
+  });
+
+  it("returns tmux when inside tmux session", () => {
+    const deps = makeDeps({ TMUX: "/tmp/tmux" });
+    expect(resolveBackend(deps)).toMatchObject({
+      requested: "auto",
+      source: "auto",
+      effective: "tmux",
+    });
+  });
+
+  it("returns cmux when inside cmux session", () => {
+    const deps = makeDeps({ CMUX_WORKSPACE_ID: "workspace:1" });
+    expect(resolveBackend(deps)).toMatchObject({
+      requested: "auto",
+      source: "auto",
+      effective: "cmux",
+    });
+  });
+
+  it("NINTHWAVE_MUX=tmux outside session falls to headless with reason", () => {
+    const deps = makeDeps({ NINTHWAVE_MUX: "tmux" });
+    const resolved = resolveBackend(deps);
+    expect(resolved.effective).toBe("headless");
+    expect(resolved.fallback).toEqual({
+      from: "tmux",
+      to: "headless",
+      reason: expect.stringContaining("NINTHWAVE_MUX=tmux"),
+    });
+  });
+
+  it("NINTHWAVE_MUX=cmux outside session falls to headless with reason", () => {
+    const deps = makeDeps({ NINTHWAVE_MUX: "cmux" });
+    const resolved = resolveBackend(deps);
+    expect(resolved.effective).toBe("headless");
+    expect(resolved.fallback).toEqual({
+      from: "cmux",
+      to: "headless",
+      reason: expect.stringContaining("NINTHWAVE_MUX=cmux"),
+    });
+  });
+
+  it("NINTHWAVE_MUX=cmux inside cmux session returns cmux", () => {
+    const deps = makeDeps({ NINTHWAVE_MUX: "cmux", CMUX_WORKSPACE_ID: "abc" });
+    expect(resolveBackend(deps)).toMatchObject({
+      requested: "cmux",
+      source: "env",
+      effective: "cmux",
+    });
+  });
+});
+
 // ── getMux tests ────────────────────────────────────────────────────
 
 describe("getMux", () => {
-  it("returns CmuxAdapter when detection picks cmux", () => {
-    const deps = makeDeps({ CMUX_WORKSPACE_ID: "abc-123" }, ["cmux"]);
-    const mux = getMux(deps);
-    expect(mux).toBeInstanceOf(CmuxAdapter);
-  });
-
-  it("returns CmuxAdapter when inside a cmux session", () => {
-    const deps = makeDeps({ CMUX_WORKSPACE_ID: "abc-123" }, ["cmux"]);
+  it("returns CmuxAdapter when inside cmux session", () => {
+    const deps = makeDeps({ CMUX_WORKSPACE_ID: "abc-123" });
     const mux = getMux(deps);
     expect(mux).toBeInstanceOf(CmuxAdapter);
   });
@@ -338,8 +303,8 @@ describe("getMux", () => {
     expect(typeof mux.setProgress).toBe("function");
   });
 
-  it("returns HeadlessAdapter when no mux is available", () => {
-    const deps = makeDeps({}, []);
+  it("returns HeadlessAdapter when no session is active", () => {
+    const deps = makeDeps({});
     const mux = getMux(deps);
     expect(mux).toBeInstanceOf(HeadlessAdapter);
   });
@@ -351,21 +316,21 @@ describe("getMux", () => {
     expect(mux.type).toBe("headless");
   });
 
-  it("returns TmuxAdapter when detection picks tmux", () => {
+  it("returns TmuxAdapter when inside tmux session", () => {
     const deps = makeDeps({ TMUX: "/tmp/tmux-501/default,12345,0" });
     const mux = getMux(deps);
     expect(mux).toBeInstanceOf(TmuxAdapter);
     expect(mux.type).toBe("tmux");
   });
 
-  it("returns TmuxAdapter when NINTHWAVE_MUX=tmux", () => {
-    const deps = makeDeps({ NINTHWAVE_MUX: "tmux" }, ["tmux"]);
+  it("returns TmuxAdapter when NINTHWAVE_MUX=tmux inside tmux", () => {
+    const deps = makeDeps({ NINTHWAVE_MUX: "tmux", TMUX: "/tmp/tmux" });
     const mux = getMux(deps);
     expect(mux).toBeInstanceOf(TmuxAdapter);
   });
 
-  it("returns CmuxAdapter when NINTHWAVE_MUX=cmux", () => {
-    const deps = makeDeps({ NINTHWAVE_MUX: "cmux" }, ["cmux"]);
+  it("returns CmuxAdapter when NINTHWAVE_MUX=cmux inside cmux", () => {
+    const deps = makeDeps({ NINTHWAVE_MUX: "cmux", CMUX_WORKSPACE_ID: "abc" });
     const mux = getMux(deps);
     expect(mux).toBeInstanceOf(CmuxAdapter);
   });

@@ -215,7 +215,7 @@ Use the startup settings screen to choose how workers should run:
 
 Interactive backends (`tmux`, `cmux`) give you attachable sessions you can jump into. `headless` runs detached instead.
 
-The backend choice you confirm is saved as `backend_mode` and becomes the next startup default. For a one-off run, `NINTHWAVE_MUX=tmux|cmux|headless nw` takes precedence over the saved `backend_mode`, and the saved preference takes precedence over normal auto-detection. Invalid `NINTHWAVE_MUX` values warn and fall through instead of changing your saved default.
+The backend is auto-detected from your session environment: inside tmux → tmux, inside cmux → cmux, otherwise → headless. For a one-off override, `NINTHWAVE_MUX=tmux|cmux|headless nw` forces a specific backend (requires an active session for tmux/cmux).
 
 ### What merge strategies are available?
 

@@ -93,13 +93,12 @@ sequenceDiagram
 
     Note over O,S: Step 4: Startup settings
     O->>S: runInteractiveFlow()
-    S->>U: Choose items, merge strategy, session limit, and backend
-    U-->>S: Auto | tmux | cmux | headless
-    Note over S: Selection is saved as backend_mode for next startup
-    Note over S: NINTHWAVE_MUX can override a single launch
+    S->>U: Choose items, merge strategy, and session limit
+    Note over S: Backend is auto-detected from session env ($TMUX, $CMUX_WORKSPACE_ID)
+    Note over S: NINTHWAVE_MUX env var can override for a single launch
 
     Note over S,B: Step 5: Start orchestration
-    S->>B: Launch workers in selected backend
+    S->>B: Launch workers in detected backend
     B-->>U: tmux/cmux session or detached headless workers
 ```
 

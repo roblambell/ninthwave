@@ -8,22 +8,13 @@ export type ReviewMode = "off" | "ninthwave-prs" | "all-prs";
 export type StartupCollaborationMode = "local" | "share" | "join";
 export type CollaborationIntent = StartupCollaborationMode;
 export type CollaborationMode = "local" | "shared" | "joined";
-export type PersistedBackendMode = "auto" | "tmux" | "cmux" | "headless";
 export type ScheduleEnabledMode = "off" | "on";
 
 export type PersistedMergeStrategy = Extract<MergeStrategy, "auto" | "manual">;
 export type PersistedReviewMode = StartupReviewMode;
 export type PersistedCollaborationMode = StartupCollaborationMode;
 
-const PERSISTED_BACKEND_MODES: readonly PersistedBackendMode[] = [
-  "auto",
-  "tmux",
-  "cmux",
-  "headless",
-] as const;
-
 export interface TuiSettingsDefaults {
-  backendMode: PersistedBackendMode;
   mergeStrategy: PersistedMergeStrategy;
   reviewMode: PersistedReviewMode;
   collaborationMode: PersistedCollaborationMode;
@@ -44,47 +35,11 @@ export type TuiSettingsRow = (typeof TUI_SETTINGS_ROWS)[number];
 export type TuiSettingsChoiceRow = Extract<TuiSettingsRow, { kind: "choice" }>;
 
 export const TUI_SETTINGS_DEFAULTS: TuiSettingsDefaults = {
-  backendMode: "auto",
   mergeStrategy: "manual",
   reviewMode: "off",
   collaborationMode: "local",
   scheduleEnabled: false,
 };
-
-export const BACKEND_MODE_OPTIONS: readonly ChoiceSettingOption<PersistedBackendMode, PersistedBackendMode>[] = [
-  {
-    persistedValue: "auto",
-    runtimeValue: "auto",
-    startupLabel: "auto",
-    startupDescription: "Prefer your current or available mux backend, else headless",
-    runtimeLabel: "auto",
-    persistable: true,
-  },
-  {
-    persistedValue: "tmux",
-    runtimeValue: "tmux",
-    startupLabel: "tmux",
-    startupDescription: "Use tmux explicitly, or fall back to headless if unavailable",
-    runtimeLabel: "tmux",
-    persistable: true,
-  },
-  {
-    persistedValue: "cmux",
-    runtimeValue: "cmux",
-    startupLabel: "cmux",
-    startupDescription: "Use cmux explicitly, or fall back to headless if unavailable",
-    runtimeLabel: "cmux",
-    persistable: true,
-  },
-  {
-    persistedValue: "headless",
-    runtimeValue: "headless",
-    startupLabel: "headless",
-    startupDescription: "Skip multiplexers and run headless directly in this terminal",
-    runtimeLabel: "Headless",
-    persistable: true,
-  },
-] as const;
 
 export const COLLABORATION_MODE_OPTIONS: readonly ChoiceSettingOption<PersistedCollaborationMode, CollaborationMode>[] = [
   {
@@ -278,10 +233,6 @@ export function isPersistedMergeStrategy(value: unknown): value is PersistedMerg
   return hasPersistedValue(MERGE_STRATEGY_OPTIONS, value);
 }
 
-export function isPersistedBackendMode(value: unknown): value is PersistedBackendMode {
-  return PERSISTED_BACKEND_MODES.includes(value as PersistedBackendMode);
-}
-
 export function isPersistedReviewMode(value: unknown): value is PersistedReviewMode {
   return hasPersistedValue(REVIEW_MODE_OPTIONS, value);
 }
@@ -367,7 +318,6 @@ export function scheduleEnabledLabel(enabled: boolean): string {
 }
 
 export function resolveTuiSettingsDefaults(userConfig: {
-  backend_mode?: unknown;
   merge_strategy?: unknown;
   review_mode?: unknown;
   collaboration_mode?: unknown;
@@ -375,9 +325,6 @@ export function resolveTuiSettingsDefaults(userConfig: {
   scheduleEnabled?: boolean;
 } = {}): TuiSettingsDefaults {
   return {
-    backendMode: isPersistedBackendMode(userConfig.backend_mode)
-      ? userConfig.backend_mode
-      : TUI_SETTINGS_DEFAULTS.backendMode,
     mergeStrategy: isPersistedMergeStrategy(userConfig.merge_strategy)
       ? userConfig.merge_strategy
       : TUI_SETTINGS_DEFAULTS.mergeStrategy,

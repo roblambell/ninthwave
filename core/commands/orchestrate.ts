@@ -38,7 +38,6 @@ import { RateLimitBackoff } from "../rate-limit-backoff.ts";
 import { fetchOrigin, ffMerge, gitAdd, gitCommit, gitPush, daemonRebase } from "../git.ts";
 import { run } from "../shell.ts";
 import { type Multiplexer, createMux, muxTypeForWorkspaceRef, resolveBackend } from "../mux.ts";
-import { resolveCmuxBinary } from "../cmux-resolve.ts";
 import { resolveSessionName } from "../tmux.ts";
 import { reconcile, completeMergedWorkItemCleanup } from "./reconcile.ts";
 import { die, warn, info, ALT_SCREEN_ON, ALT_SCREEN_OFF, BOLD, RED, RESET, YELLOW } from "../output.ts";
@@ -3904,7 +3903,6 @@ export async function cmdOrchestrate(
     mergeStrategy,
   } = parsed;
   const {
-    backendModeOverride,
     sessionLimitOverride, pollIntervalOverride, frictionDir,
     daemonMode, isDaemonChild, isInteractiveEngineChild, clickupListId, remoteFlag,
     reviewAutoFix, reviewExternal: parsedReviewExternal, reviewSessionLimit,
@@ -4041,8 +4039,6 @@ export async function cmdOrchestrate(
   let persistedUserCfg = loadUserConfig();
   const sessionLimitFromCli = sessionLimitOverride !== undefined;
   let sessionLimit = sessionLimitOverride ?? persistedUserCfg.session_limit ?? computedSessionLimit;
-  let startupBackendMode = backendModeOverride ?? persistedUserCfg.backend_mode ?? "auto";
-
   // Apply the GitHub token before recovery and later polling paths use it.
   emitInteractiveEngineStartupOverlay(isInteractiveEngineChild, INTERACTIVE_STARTUP_OVERLAYS.preparingRuntime);
   applyGithubToken(projectRoot);
@@ -4081,14 +4077,12 @@ export async function cmdOrchestrate(
     futureOnlyStartup = futureOnlyStartup || result.futureOnly === true;
     mergeStrategy = result.mergeStrategy;
     sessionLimit = result.sessionLimit;
-    startupBackendMode = result.backendMode ?? startupBackendMode;
     interactiveReviewMode = result.reviewMode;
     interactiveSkipReview = result.reviewMode === "off";
     interactiveScheduleEnabled = result.scheduleEnabled ?? false;
     try {
       saveUserConfig({
         ...buildStartupPersistenceUpdates(result, {
-          backendMode: startupBackendMode,
           savedToolIds: interactiveStartupConfig.savedToolIds,
           defaults: interactiveStartupConfig.defaults,
         }),
@@ -4238,14 +4232,7 @@ export async function cmdOrchestrate(
   // Real action dependencies -- create mux before state reconstruction so
   // workspace refs can be recovered from live workspaces.
   emitInteractiveEngineStartupOverlay(isInteractiveEngineChild, INTERACTIVE_STARTUP_OVERLAYS.restoringState);
-  const resolvedBackend = resolveBackend({
-    env: process.env,
-    checkBinary: (name: string): boolean => {
-      if (name === "cmux") return resolveCmuxBinary() !== null;
-      return Bun.which(name) !== null;
-    },
-    savedBackendMode: startupBackendMode,
-  });
+  const resolvedBackend = resolveBackend({ env: process.env });
   const mux = createMux(resolvedBackend.effective, projectRoot);
 
   if (resolvedBackend.fallback && resolvedBackend.requested !== "auto" && resolvedBackend.requested !== "headless") {
@@ -4266,14 +4253,7 @@ export async function cmdOrchestrate(
   const muxForWorkspaceRef = (workspaceRef: string): Multiplexer =>
     createMux(muxTypeForWorkspaceRef(workspaceRef), projectRoot);
   const resolveLaunchMux = (): Multiplexer => {
-    const runtimeResolvedBackend = resolveBackend({
-      env: process.env,
-      checkBinary: (name: string): boolean => {
-        if (name === "cmux") return resolveCmuxBinary() !== null;
-        return Bun.which(name) !== null;
-      },
-      savedBackendMode: startupBackendMode,
-    });
+    const runtimeResolvedBackend = resolveBackend({ env: process.env });
     return createMux(runtimeResolvedBackend.effective, projectRoot);
   };
 

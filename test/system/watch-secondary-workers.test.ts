@@ -106,6 +106,7 @@ function buildCliEnv(
     ...(options.autoCreatePrs === false
       ? { NINTHWAVE_FAKE_GH_AUTO_CREATE_PRS: "0" }
       : {}),
+    NINTHWAVE_MUX: "headless",
   };
 }
 
@@ -127,7 +128,6 @@ function watchArgs(
   const args = [
     "--items", ...items,
     "--watch",
-    "--backend-mode", "headless",
     "--tool", "codex",
     "--merge-strategy", options.mergeStrategy,
     "--skip-preflight",

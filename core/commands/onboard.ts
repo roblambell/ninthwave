@@ -432,7 +432,6 @@ export async function cmdNoArgs(
   try {
     doSaveUserConfig({
       ...buildStartupPersistenceUpdates(result, {
-        backendMode: defaultSettings.backendMode,
         savedToolIds: userConfig.ai_tools,
         defaults: defaultSettings,
       }),
@@ -448,7 +447,6 @@ export async function cmdNoArgs(
   // Build watch args from interactive result
   const watchArgs = [
     "--merge-strategy", result.mergeStrategy,
-    "--backend-mode", result.backendMode ?? defaultSettings.backendMode,
     "--session-limit", String(result.sessionLimit),
   ];
 

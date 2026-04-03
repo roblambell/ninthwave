@@ -4,11 +4,9 @@ import { readFileSync, writeFileSync, existsSync, mkdirSync } from "fs";
 import { join, dirname } from "path";
 import { homedir } from "os";
 import {
-  isPersistedBackendMode,
   isPersistedCollaborationMode,
   isPersistedMergeStrategy,
   isPersistedReviewMode,
-  type PersistedBackendMode,
   type PersistedCollaborationMode,
   type PersistedMergeStrategy,
   type PersistedReviewMode,
@@ -132,7 +130,6 @@ function parseProjectScheduleEnabledMap(value: unknown): ProjectScheduleEnabledM
 export interface UserConfig {
   ai_tools?: string[];
   session_limit?: number;
-  backend_mode?: PersistedBackendMode;
   tmux_layout?: TmuxLayoutMode;
   merge_strategy?: PersistedMergeStrategy;
   review_mode?: PersistedReviewMode;
@@ -173,9 +170,6 @@ export function loadUserConfig(homeOverride?: string): UserConfig {
     }
     if (typeof parsed.session_limit === "number" && Number.isFinite(parsed.session_limit) && parsed.session_limit >= 1) {
       result.session_limit = Math.floor(parsed.session_limit);
-    }
-    if (isPersistedBackendMode(parsed.backend_mode)) {
-      result.backend_mode = parsed.backend_mode;
     }
     if (isTmuxLayoutMode(parsed.tmux_layout)) {
       result.tmux_layout = parsed.tmux_layout;
@@ -257,12 +251,6 @@ export function saveUserConfig(
     if (key === "session_limit") {
       if (typeof value === "number" && Number.isFinite(value) && value >= 1) {
         merged[key] = Math.floor(value);
-      }
-      continue;
-    }
-    if (key === "backend_mode") {
-      if (isPersistedBackendMode(value)) {
-        merged[key] = value;
       }
       continue;
     }

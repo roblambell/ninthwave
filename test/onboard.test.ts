@@ -544,7 +544,6 @@ describe("cmdNoArgs", () => {
 
     const interactiveResult: InteractiveResult = {
       itemIds: ["H-FOO-1", "H-FOO-2"],
-      backendMode: "cmux",
       mergeStrategy: "auto" as MergeStrategy,
       sessionLimit: 3,
       allSelected: false,
@@ -576,8 +575,6 @@ describe("cmdNoArgs", () => {
     expect(watchArgs).toContain("H-FOO-2");
     expect(watchArgs).toContain("--merge-strategy");
     expect(watchArgs).toContain("auto");
-    expect(watchArgs).toContain("--backend-mode");
-    expect(watchArgs).toContain("cmux");
     expect(watchArgs).toContain("--session-limit");
     expect(watchArgs).toContain("3");
     // Should NOT have --watch when not all selected
@@ -904,7 +901,6 @@ describe("cmdNoArgs", () => {
         interactiveCalled = true;
         return {
           itemIds: ["H-1"],
-          backendMode: "auto",
           mergeStrategy: "auto" as MergeStrategy,
           sessionLimit: 4,
           allSelected: false,
@@ -936,10 +932,8 @@ describe("cmdNoArgs", () => {
         // Verify that the deps include the correct defaultReviewMode
         expect(deps?.defaultReviewMode).toBe("off");
         expect(deps?.defaultSettings?.reviewMode).toBe("off");
-        expect(deps?.defaultSettings?.backendMode).toBe("auto");
         return {
           itemIds: ["H-1"],
-          backendMode: "auto",
           mergeStrategy: "auto" as MergeStrategy,
           sessionLimit: 4,
           allSelected: false,
@@ -966,7 +960,6 @@ describe("cmdNoArgs", () => {
       runInteractiveFlow: async (_todos, _wip, deps) => {
         expect(deps?.defaultReviewMode).toBe("off");
         expect(deps?.defaultSettings).toEqual({
-          backendMode: "auto",
           mergeStrategy: "auto",
           reviewMode: "off",
           collaborationMode: "share",
@@ -997,7 +990,6 @@ describe("cmdNoArgs", () => {
       saveUserConfig: (updates) => savedUpdates.push(updates as Record<string, unknown>),
       runInteractiveFlow: async () => ({
         itemIds: ["H-1"],
-        backendMode: "headless",
         mergeStrategy: "auto" as MergeStrategy,
         sessionLimit: 4,
         allSelected: false,
@@ -1011,7 +1003,6 @@ describe("cmdNoArgs", () => {
 
     expect(savedUpdates).toHaveLength(1);
     expect(savedUpdates[0]).toMatchObject({
-      backend_mode: "headless",
       merge_strategy: "auto",
       review_mode: "all",
       session_limit: 4,
@@ -1042,7 +1033,6 @@ describe("cmdNoArgs", () => {
       saveUserConfig: (updates) => savedUpdates.push(updates as Record<string, unknown>),
       runInteractiveFlow: async () => ({
         itemIds: ["H-1"],
-        backendMode: "auto",
         mergeStrategy: "manual" as MergeStrategy,
         sessionLimit: 4,
         allSelected: false,
@@ -1055,7 +1045,7 @@ describe("cmdNoArgs", () => {
     expect(watchArgs).toContain("--crew");
     expect(watchArgs).toContain("K2F9-AB3X-7YPL-QM4N");
     expect(savedUpdates).toHaveLength(1);
-    // backendMode "auto" and mergeStrategy "manual" match TUI defaults, so they are not re-saved
+    // mergeStrategy "manual" matches TUI defaults, so it is not re-saved
     expect(savedUpdates[0]).toMatchObject({
       review_mode: "mine",
       session_limit: 4,

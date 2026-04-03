@@ -7,16 +7,7 @@ import { isTmuxLayoutMode, loadUserConfig } from "./config.ts";
 import { HeadlessAdapter, isHeadlessWorkspaceRef } from "./headless.ts";
 import { TmuxAdapter } from "./tmux.ts";
 import { die, warn as defaultWarn } from "./output.ts";
-import { resolveCmuxBinary } from "./cmux-resolve.ts";
 import { run as defaultShellRun } from "./shell.ts";
-import type { RunResult } from "./types.ts";
-import type { PersistedBackendMode } from "./tui-settings.ts";
-
-/** Shell runner signature -- injectable for testing. */
-export type ShellRunner = (
-  cmd: string,
-  args: string[],
-) => RunResult;
 
 /** Terminal multiplexer abstraction for workspace management. */
 export interface Multiplexer {
@@ -84,8 +75,8 @@ export type MuxType = "cmux" | "tmux" | "headless";
 /** Valid values for the NINTHWAVE_MUX environment variable. */
 const VALID_MUX_VALUES: readonly MuxType[] = ["cmux", "tmux", "headless"] as const;
 
-export type BackendPreference = PersistedBackendMode;
-export type BackendPreferenceSource = "env" | "user-config" | "auto";
+export type BackendPreference = MuxType | "auto";
+export type BackendPreferenceSource = "env" | "auto";
 
 export function muxTypeForWorkspaceRef(ref: string): MuxType {
   if (isHeadlessWorkspaceRef(ref)) return "headless";
@@ -111,31 +102,21 @@ export interface ResolvedBackend {
 /** Injectable dependencies for multiplexer detection -- enables testing without vi.mock. */
 export interface DetectMuxDeps {
   env: Record<string, string | undefined>;
-  checkBinary: (name: string) => boolean;
   warn?: (message: string) => void;
-  savedBackendMode?: PersistedBackendMode;
 }
 
 function defaultDetectDeps(): DetectMuxDeps {
   return {
     env: process.env,
-    checkBinary: (name: string): boolean => {
-      if (name === "cmux") return resolveCmuxBinary() !== null;
-      // For tmux and others, check PATH
-      return Bun.which(name) !== null;
-    },
     warn: defaultWarn,
-    savedBackendMode: loadUserConfig().backend_mode,
   };
 }
 
 function autoDetectMuxType(deps: DetectMuxDeps): MuxType {
-  const { env, checkBinary } = deps;
+  const { env } = deps;
 
   if (env.CMUX_WORKSPACE_ID) return "cmux";
   if (env.TMUX) return "tmux";
-  if (checkBinary("tmux")) return "tmux";
-  if (checkBinary("cmux")) return "cmux";
   return "headless";
 }
 
@@ -143,32 +124,31 @@ function explicitBackendSupported(
   backend: MuxType,
   deps: DetectMuxDeps,
 ): boolean {
-  const { env, checkBinary } = deps;
+  const { env } = deps;
 
   switch (backend) {
     case "headless":
       return true;
     case "tmux":
-      return Boolean(env.TMUX) || checkBinary("tmux");
+      return Boolean(env.TMUX);
     case "cmux":
-      return Boolean(env.CMUX_WORKSPACE_ID) || checkBinary("cmux");
+      return Boolean(env.CMUX_WORKSPACE_ID);
   }
 }
 
 function explicitBackendUnavailableReason(
   backend: Exclude<BackendPreference, "auto">,
-  source: BackendPreferenceSource,
 ): string {
-  const sourceLabel = source === "env"
-    ? "NINTHWAVE_MUX"
-    : source === "user-config"
-      ? "saved backend_mode"
-      : "auto-detect";
-  return `Requested ${backend} via ${sourceLabel}, but that backend is unavailable on this machine. Falling back to headless.`;
+  return `NINTHWAVE_MUX=${backend} requested, but no active ${backend} session detected. Falling back to headless.`;
 }
 
 /**
- * Resolve env overrides, saved config, and machine capabilities into one backend.
+ * Resolve the multiplexer backend from env overrides or session detection.
+ *
+ * Detection chain:
+ * 1. NINTHWAVE_MUX env override (validated)
+ * 2. Session env ($CMUX_WORKSPACE_ID, $TMUX)
+ * 3. Headless fallback
  */
 export function resolveBackend(
   deps: DetectMuxDeps = defaultDetectDeps(),
@@ -192,33 +172,13 @@ export function resolveBackend(
         fallback: {
           from: override as MuxType,
           to: "headless",
-          reason: explicitBackendUnavailableReason(override as MuxType, "env"),
+          reason: explicitBackendUnavailableReason(override as MuxType),
         },
       };
     }
     (warn ?? defaultWarn)(
-      `Invalid NINTHWAVE_MUX="${override}". Valid values: ${VALID_MUX_VALUES.join(", ")}. Falling back to saved backend or auto-detect.`,
+      `Invalid NINTHWAVE_MUX="${override}". Valid values: ${VALID_MUX_VALUES.join(", ")}. Falling back to auto-detect.`,
     );
-  }
-
-  if (deps.savedBackendMode && deps.savedBackendMode !== "auto") {
-    if (explicitBackendSupported(deps.savedBackendMode, deps)) {
-      return {
-        requested: deps.savedBackendMode,
-        source: "user-config",
-        effective: deps.savedBackendMode,
-      };
-    }
-    return {
-      requested: deps.savedBackendMode,
-      source: "user-config",
-      effective: "headless",
-      fallback: {
-        from: deps.savedBackendMode,
-        to: "headless",
-        reason: explicitBackendUnavailableReason(deps.savedBackendMode, "user-config"),
-      },
-    };
   }
 
   const effective = autoDetectMuxType(deps);
@@ -230,14 +190,14 @@ export function resolveBackend(
       fallback: {
         from: "auto",
         to: "headless",
-        reason: "No tmux or cmux session/binary detected. Falling back to headless.",
+        reason: "No tmux or cmux session detected. Running headless.",
       },
     };
   }
 
   return {
-    requested: deps.savedBackendMode ?? "auto",
-    source: deps.savedBackendMode === "auto" ? "user-config" : "auto",
+    requested: "auto",
+    source: "auto",
     effective,
   };
 }
@@ -247,8 +207,8 @@ export function resolveBackend(
  *
  * Detection chain:
  * 1. NINTHWAVE_MUX env override (validated)
- * 2. saved backend_mode preference
- * 3. auto-detect from session env / installed binaries
+ * 2. Session env ($CMUX_WORKSPACE_ID, $TMUX)
+ * 3. Headless fallback
  */
 export function detectMuxType(deps?: DetectMuxDeps): MuxType {
   return resolveBackend(deps ?? defaultDetectDeps()).effective;
@@ -288,7 +248,6 @@ export function getMux(deps?: DetectMuxDeps): Multiplexer {
 /** Injectable dependencies for mux session detection. */
 export interface AutoLaunchDeps {
   env: Record<string, string | undefined>;
-  checkBinary: (name: string) => boolean;
   warn?: (message: string) => void;
 }
 
@@ -325,10 +284,6 @@ export function checkAutoLaunch(deps: AutoLaunchDeps): AutoLaunchResult {
 
 const defaultAutoLaunchDeps: AutoLaunchDeps = {
   env: process.env,
-  checkBinary: (name: string): boolean => {
-    if (name === "cmux") return resolveCmuxBinary() !== null;
-    return Bun.which(name) !== null;
-  },
   warn: defaultWarn,
 };
 
@@ -352,7 +307,6 @@ export function ensureMuxOrAutoLaunch(
 /** Injectable deps for interactive mux install. */
 export interface InteractiveMuxDeps {
   env?: Record<string, string | undefined>;
-  checkBinary?: (name: string) => boolean;
   warn?: (message: string) => void;
   isTTY?: boolean;
   platform?: string;
@@ -408,7 +362,6 @@ export async function ensureMuxInteractiveOrDie(
 ): Promise<void> {
   const autoLaunchDeps: AutoLaunchDeps = {
     env: deps.env ?? process.env,
-    checkBinary: deps.checkBinary ?? defaultAutoLaunchDeps.checkBinary,
     warn: deps.warn ?? defaultAutoLaunchDeps.warn,
   };
   const result = checkAutoLaunch(autoLaunchDeps);

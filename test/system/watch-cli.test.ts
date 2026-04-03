@@ -56,6 +56,7 @@ function buildCliEnv(harness: CliHarness, runId: string, scenarioPath: string): 
     [FAKE_AI_RUN_ID_ENV]: runId,
     NINTHWAVE_FAKE_GH_STATE_PATH: join(harness.stateDir, "fake-gh.json"),
     NINTHWAVE_FAKE_GH_REPO: "ninthwave-sh/ninthwave-system-test",
+    NINTHWAVE_MUX: "headless",
   };
 }
 
@@ -82,7 +83,6 @@ describe("system: watch CLI", () => {
     const processHandle = harness.start([
       "--items", "H-WCL-1",
       "--watch",
-      "--backend-mode", "headless",
       "--tool", "codex",
       "--merge-strategy", "auto",
       "--no-review",
@@ -156,7 +156,6 @@ describe("system: watch CLI", () => {
     const processHandle = harness.start([
       "--watch",
       "--future-only-startup",
-      "--backend-mode", "headless",
       "--tool", "codex",
       "--merge-strategy", "auto",
       "--no-review",

@@ -381,7 +381,6 @@ describe("confirmSummary", () => {
 describe("buildStartupPersistenceUpdates", () => {
   const baseResult: InteractiveResult = {
     itemIds: ["A-1"],
-    backendMode: "auto",
     mergeStrategy: "manual",
     sessionLimit: 3,
     allSelected: false,
@@ -392,7 +391,6 @@ describe("buildStartupPersistenceUpdates", () => {
 
   it("maps local collaboration mode from a null connection action", () => {
     expect(buildStartupPersistenceUpdates(baseResult)).toMatchObject({
-      backend_mode: "auto",
       merge_strategy: "manual",
       review_mode: "mine",
       session_limit: 3,
@@ -438,15 +436,10 @@ describe("buildStartupPersistenceUpdates", () => {
     expect(buildStartupPersistenceUpdates(baseResult).ai_tools).toBeUndefined();
   });
 
-  it("fills in the durable backend and saved tools when startup skips them", () => {
-    expect(buildStartupPersistenceUpdates({
-      ...baseResult,
-      backendMode: undefined,
-    }, {
-      backendMode: "cmux",
+  it("fills in saved tools when startup skips them", () => {
+    expect(buildStartupPersistenceUpdates(baseResult, {
       savedToolIds: ["opencode", "copilot"],
     })).toMatchObject({
-      backend_mode: "cmux",
       ai_tools: ["opencode", "copilot"],
     });
   });
@@ -466,7 +459,6 @@ describe("runInteractiveFlow", () => {
 
     expect(result).not.toBeNull();
     expect(result!.itemIds).toEqual(["A-1", "B-2"]);
-    expect(result!.backendMode).toBe("auto");
     expect(result!.mergeStrategy).toBe("manual");
     expect(result!.sessionLimit).toBe(3);
     expect(result!.reviewMode).toBe("off");
@@ -564,7 +556,6 @@ describe("runInteractiveFlow", () => {
     expect(result!.itemIds).toEqual([]);
     expect(result!.allSelected).toBe(false);
     expect(result!.futureOnly).toBe(true);
-    expect(result!.backendMode).toBe("auto");
     expect(result!.mergeStrategy).toBe("manual");
     expect(result!.sessionLimit).toBe(3);
     expect(result!.scheduleEnabled).toBe(false);
@@ -576,7 +567,6 @@ describe("runInteractiveFlow", () => {
     const resultPromise = runInteractiveFlow(items, 6, {
       widgetIO: io,
       defaultSettings: {
-        backendMode: "cmux",
         mergeStrategy: "auto",
         reviewMode: "mine",
         collaborationMode: "share",
@@ -587,36 +577,11 @@ describe("runInteractiveFlow", () => {
 
     const result = await resultPromise;
     expect(result).not.toBeNull();
-    expect(result!.backendMode).toBe("cmux");
     expect(result!.mergeStrategy).toBe("auto");
     expect(result!.reviewMode).toBe("mine");
     expect(result!.connectionAction).toEqual({ type: "connect" });
     expect(result!.scheduleEnabled).toBe(true);
     expect(result!.sessionLimit).toBe(6);
-  });
-
-  it("returns the selected backend mode from the TUI startup settings", async () => {
-    const { io, sendKeyBatches } = createMockIO();
-
-    const resultPromise = runInteractiveFlow(items, 4, { widgetIO: io });
-    sendKeyBatches(
-      ["\r"],
-      [
-        "\x1B[B",
-        "\x1B[B",
-        "\x1B[B",
-        "\x1B[B",
-        "\x1B[B",
-        "\x1B[C",
-        "\x1B[C",
-        "\x1B[C",
-        "\r",
-      ],
-    );
-
-    const result = await resultPromise;
-    expect(result).not.toBeNull();
-    expect(result!.backendMode).toBe("headless");
   });
 
   it("returns null when the empty-queue TUI path is cancelled", async () => {

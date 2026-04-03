@@ -1064,7 +1064,6 @@ describe("runStartupSettingsScreen", () => {
       summaryLines: ["Items: A-1"],
       defaultSessionLimit: 4,
       defaultSettings: {
-        backendMode: "auto",
         mergeStrategy: "manual",
         reviewMode: "off",
         collaborationMode: "local",
@@ -1085,40 +1084,11 @@ describe("runStartupSettingsScreen", () => {
 
     const result = await resultPromise;
     expect(result.cancelled).toBe(false);
-    expect(result.backendMode).toBe("auto");
     expect(result.mergeStrategy).toBe("auto");
     expect(result.reviewMode).toBe("mine");
     expect(result.collaborationMode).toBe("share");
     expect(result.sessionLimit).toBe(5);
     expect(result.scheduleEnabled).toBe(false);
-  });
-
-  it("renders all backend options and preselects the saved default", async () => {
-    const { io, sendKeys, getOutput } = createMockIO();
-
-    const resultPromise = runStartupSettingsScreen(io, {
-      summaryLines: ["Items: A-1"],
-      defaultSessionLimit: 4,
-      defaultSettings: {
-        backendMode: "cmux",
-        mergeStrategy: "manual",
-        reviewMode: "off",
-        collaborationMode: "local",
-        scheduleEnabled: false,
-      },
-    });
-
-    expect(getOutput()).toContain("auto");
-    expect(getOutput()).toContain("tmux");
-    expect(getOutput()).toContain("cmux");
-    expect(getOutput()).toContain("headless");
-    expect(getOutput()).toContain("[cmux]");
-
-    sendKeys(["\r"]);
-
-    const result = await resultPromise;
-    expect(result.cancelled).toBe(false);
-    expect(result.backendMode).toBe("cmux");
   });
 
   it("confirms defaults on Enter", async () => {
@@ -1133,7 +1103,6 @@ describe("runStartupSettingsScreen", () => {
 
     const result = await resultPromise;
     expect(result.cancelled).toBe(false);
-    expect(result.backendMode).toBe("auto");
     expect(result.mergeStrategy).toBe("manual");
     expect(result.reviewMode).toBe("off");
     expect(result.collaborationMode).toBe("local");
@@ -1211,7 +1180,7 @@ describe("runStartupSettingsScreen", () => {
       defaultSessionLimit: 4,
     });
 
-      const activeLabels = ["Merge", "Reviews", "Collaboration", "Session limit", "Scheduled tasks", "Backend"];
+      const activeLabels = ["Merge", "Reviews", "Collaboration", "Session limit", "Scheduled tasks"];
 
     for (let i = 0; i < activeLabels.length; i++) {
       const lines = getPlainFrameLines(getOutput());
@@ -1234,7 +1203,6 @@ describe("runStartupSettingsScreen", () => {
     expect(result.collaborationMode).toBe("local");
     expect(result.sessionLimit).toBe(4);
     expect(result.scheduleEnabled).toBe(false);
-    expect(result.backendMode).toBe("auto");
   });
 
   it("wraps long summaries and descriptions within the terminal viewport", async () => {
@@ -1267,7 +1235,6 @@ describe("runStartupSettingsScreen", () => {
       summaryLines: [],
       defaultSessionLimit: 4,
       defaultSettings: {
-        backendMode: "headless",
         mergeStrategy: "manual",
         reviewMode: "off",
         collaborationMode: "local",
@@ -1275,21 +1242,19 @@ describe("runStartupSettingsScreen", () => {
       },
     });
 
-    description.sendKeys(["\x1B[B", "\x1B[B", "\x1B[B", "\x1B[B", "\x1B[B"]);
+    description.sendKeys(["\x1B[B", "\x1B[B", "\x1B[B", "\x1B[B"]);
 
     const lines = getPlainFrameLines(description.getOutput());
     expect(lines.length).toBeLessThanOrEqual(12);
     for (const line of lines) {
       expect(line.length).toBeLessThanOrEqual(32);
     }
-    expect(lines.some((line) => line.includes("> Backend"))).toBe(true);
-    expect(lines.some((line) => line.includes("Skip multiplexers and run"))).toBe(true);
+    expect(lines.some((line) => line.includes("> Scheduled tasks"))).toBe(true);
 
     description.sendKeys(["\r"]);
 
     const result = await descriptionPromise;
     expect(result.cancelled).toBe(false);
-    expect(result.backendMode).toBe("headless");
   });
 });
 
@@ -1768,7 +1733,6 @@ describe("runSelectionScreen -- startup defaults", () => {
 
     const resultPromise = runSelectionScreen(io, items, 7, {
       defaultSettings: {
-        backendMode: "cmux",
         mergeStrategy: "auto",
         reviewMode: "mine",
         collaborationMode: "share",
@@ -1779,7 +1743,6 @@ describe("runSelectionScreen -- startup defaults", () => {
 
     const result = await resultPromise;
     expect(result).not.toBeNull();
-    expect(result!.backendMode).toBe("cmux");
     expect(result!.mergeStrategy).toBe("auto");
     expect(result!.reviewMode).toBe("mine");
     expect(result!.connectionAction).toEqual({ type: "connect" });
@@ -1808,7 +1771,6 @@ describe("runSelectionScreen -- startup defaults", () => {
 
     const result = await resultPromise;
     expect(result).not.toBeNull();
-    expect(result!.backendMode).toBe("auto");
     expect(result!.mergeStrategy).toBe("auto");
     expect(result!.reviewMode).toBe("mine");
     expect(result!.connectionAction).toEqual({ type: "connect" });
@@ -2015,14 +1977,9 @@ describe("runSelectionScreen -- startup settings display", () => {
     });
 
     const mergeLine = getPlainFrameLine(getOutput(), "> Merge");
-    const backendLine = getPlainFrameLine(getOutput(), " Backend");
 
     expect(mergeLine).toContain(" auto ");
     expect(mergeLine).toContain("[manual]");
-    expect(backendLine).toContain("[auto]");
-    expect(backendLine).toContain(" tmux ");
-    expect(backendLine).toContain(" cmux ");
-    expect(backendLine).toContain(" headless ");
 
     sendKeys(["\r"]);
 
@@ -2030,25 +1987,24 @@ describe("runSelectionScreen -- startup settings display", () => {
     expect(result.cancelled).toBe(false);
   });
 
-  it("keeps backend option columns fixed when moving horizontally", async () => {
+  it("keeps merge option columns fixed when moving horizontally", async () => {
     const { io, sendKeys, getOutput } = createMockIO();
 
     const resultPromise = runStartupSettingsScreen(io, {
       summaryLines: ["Items: A-1"],
       defaultSessionLimit: 4,
     });
-    sendKeys(["\x1B[B", "\x1B[B", "\x1B[B", "\x1B[B", "\x1B[B"]);
 
-    const beforeMove = getPlainFrameLine(getOutput(), "> Backend");
-    const beforeStarts = ["auto", "tmux", "cmux", "headless"].map((label) => getStartupChipStart(beforeMove, label));
+    const beforeMove = getPlainFrameLine(getOutput(), "> Merge");
+    const beforeStarts = ["auto", "manual"].map((label) => getStartupChipStart(beforeMove, label));
 
     sendKeys(["\x1B[C"]);
 
-    const afterMove = getPlainFrameLine(getOutput(), "> Backend");
-    const afterStarts = ["auto", "tmux", "cmux", "headless"].map((label) => getStartupChipStart(afterMove, label));
+    const afterMove = getPlainFrameLine(getOutput(), "> Merge");
+    const afterStarts = ["auto", "manual"].map((label) => getStartupChipStart(afterMove, label));
 
-    expect(beforeMove).toContain("[auto]");
-    expect(afterMove).toContain("[tmux]");
+    expect(beforeMove).toContain("[manual]");
+    expect(afterMove).toContain("[auto]");
     expect(beforeStarts).toEqual(afterStarts);
 
     sendKeys(["\r"]);

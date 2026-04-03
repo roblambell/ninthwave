@@ -368,19 +368,6 @@ describe("loadUserConfig", () => {
     expect(config.collaboration_mode).toBe("share");
   });
 
-  it("reads backend_mode from valid JSON", () => {
-    const tmpHome = setupTempRepo();
-    const configDir = join(tmpHome, ".ninthwave");
-    mkdirSync(configDir, { recursive: true });
-    writeFileSync(
-      join(configDir, "config.json"),
-      JSON.stringify({ backend_mode: "cmux" }),
-    );
-
-    const config = loadUserConfig(tmpHome);
-    expect(config.backend_mode).toBe("cmux");
-  });
-
   it("reads tmux_layout from valid JSON", () => {
     const tmpHome = setupTempRepo();
     const configDir = join(tmpHome, ".ninthwave");
@@ -468,19 +455,6 @@ describe("loadUserConfig", () => {
     expect(config.merge_strategy).toBeUndefined();
     expect(config.review_mode).toBeUndefined();
     expect(config.collaboration_mode).toBeUndefined();
-  });
-
-  it("ignores invalid backend_mode safely", () => {
-    const tmpHome = setupTempRepo();
-    const configDir = join(tmpHome, ".ninthwave");
-    mkdirSync(configDir, { recursive: true });
-    writeFileSync(
-      join(configDir, "config.json"),
-      JSON.stringify({ backend_mode: "screen" }),
-    );
-
-    const config = loadUserConfig(tmpHome);
-    expect(config.backend_mode).toBeUndefined();
   });
 
   it("ignores invalid tmux_layout safely", () => {
@@ -657,7 +631,6 @@ describe("saveUserConfig", () => {
     );
 
     saveUserConfig({
-      backend_mode: "cmux",
       tmux_layout: "windows",
       merge_strategy: "auto",
       review_mode: "mine",
@@ -667,7 +640,6 @@ describe("saveUserConfig", () => {
 
     const content = JSON.parse(readFileSync(join(configDir, "config.json"), "utf-8"));
     expect(content.custom_key).toBe("hello");
-    expect(content.backend_mode).toBe("cmux");
     expect(content.tmux_layout).toBe("windows");
     expect(content.merge_strategy).toBe("auto");
     expect(content.review_mode).toBe("mine");
@@ -676,7 +648,6 @@ describe("saveUserConfig", () => {
 
     const config = loadUserConfig(tmpHome);
     expect(config).toMatchObject({
-      backend_mode: "cmux",
       tmux_layout: "windows",
       merge_strategy: "auto",
       review_mode: "mine",

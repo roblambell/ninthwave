@@ -18,7 +18,6 @@ import {
   STARTUP_COLLABORATION_MODE_OPTIONS,
   STARTUP_MERGE_STRATEGY_OPTIONS,
   STARTUP_REVIEW_MODE_OPTIONS,
-  type PersistedBackendMode,
   type StartupReviewMode as ReviewMode,
   type TuiSettingsDefaults,
 } from "./tui-settings.ts";
@@ -35,7 +34,6 @@ export type PromptFn = (question: string) => Promise<string>;
 
 export interface InteractiveResult {
   itemIds: string[];
-  backendMode?: PersistedBackendMode;
   mergeStrategy: MergeStrategy;
   sessionLimit: number;
   allSelected: boolean;
@@ -74,7 +72,6 @@ export interface InteractiveDeps {
 }
 
 export interface StartupPersistenceOptions {
-  backendMode?: PersistedBackendMode;
   savedToolIds?: string[];
   defaults?: TuiSettingsDefaults;
 }
@@ -427,9 +424,6 @@ export async function confirmSummary(
     }
   }
   console.log(`  ${BOLD}Merge strategy:${RESET}  ${result.mergeStrategy}`);
-  if (result.backendMode) {
-    console.log(`  ${BOLD}Backend:${RESET}         ${result.backendMode}`);
-  }
   console.log(`  ${BOLD}Session limit:${RESET}   ${result.sessionLimit}`);
   console.log(`  ${BOLD}AI reviews:${RESET}      ${result.reviewMode}`);
   if (result.scheduleEnabled !== undefined) {
@@ -469,7 +463,6 @@ export function buildStartupPersistenceUpdates(
     ? [...options.savedToolIds]
     : undefined;
 
-  const backendMode = result.backendMode ?? options.backendMode;
   const defaults = options.defaults;
 
   const mergeStrategy = result.mergeStrategy === "auto" ? "auto" as const : "manual" as const;
@@ -482,9 +475,6 @@ export function buildStartupPersistenceUpdates(
   // Only persist settings the user actively changed from their startup defaults.
   // This prevents a wrong default from being cemented by pressing Enter.
   const updates: Partial<UserConfig> = {};
-  if (backendMode && backendMode !== defaults?.backendMode) {
-    updates.backend_mode = backendMode;
-  }
   if (mergeStrategy !== defaults?.mergeStrategy) {
     updates.merge_strategy = mergeStrategy;
   }
@@ -539,7 +529,6 @@ export async function runTuiSelectionFlow(
 
       return {
         itemIds: result.itemIds,
-        backendMode: result.backendMode,
         mergeStrategy: result.mergeStrategy,
         sessionLimit: result.sessionLimit,
       allSelected: result.allSelected,
@@ -601,7 +590,6 @@ async function runReadlineFlow(
 
   // Local-first defaults -- no prompts for these
   const mergeStrategy: MergeStrategy = "manual";
-  const backendMode: PersistedBackendMode = deps.defaultSettings?.backendMode ?? "auto";
   const sessionLimit = defaultSessionLimit;
   const reviewMode: ReviewMode = "off";
   const scheduleEnabled = deps.defaultSettings?.scheduleEnabled ?? false;
@@ -674,7 +662,6 @@ async function runReadlineFlow(
   // Step 3: Summary + confirmation
   const result: InteractiveResult = {
     itemIds: itemResult.ids,
-    backendMode,
     mergeStrategy,
     sessionLimit,
     allSelected: itemResult.allSelected,

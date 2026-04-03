@@ -2,13 +2,11 @@
 // Extracted from core/commands/orchestrate.ts for modularity.
 
 import type { MergeStrategy } from "../orchestrator.ts";
-import type { PersistedBackendMode } from "../tui-settings.ts";
 import type { WorkItem } from "../types.ts";
 import { warn } from "../output.ts";
 
 export interface ParsedWatchArgs {
   itemIds: string[];
-  backendModeOverride?: PersistedBackendMode;
   mergeStrategy: MergeStrategy;
   sessionLimitOverride?: number;
   pollIntervalOverride?: number;
@@ -40,7 +38,6 @@ export interface ParsedWatchArgs {
 
 export function parseWatchArgs(args: string[]): ParsedWatchArgs {
   const itemIds: string[] = [];
-  let backendModeOverride: PersistedBackendMode | undefined;
   let mergeStrategy: MergeStrategy = "manual";
   let sessionLimitOverride: number | undefined;
   let pollIntervalOverride: number | undefined;
@@ -91,15 +88,6 @@ export function parseWatchArgs(args: string[]): ParsedWatchArgs {
         if (!strategyMap[raw]) {
           warn(`Unknown merge strategy "${raw}", defaulting to "auto"`);
         }
-        i += 2;
-        break;
-      }
-      case "--backend-mode": {
-        const raw = args[i + 1] ?? "auto";
-        if (raw !== "auto" && raw !== "tmux" && raw !== "cmux" && raw !== "headless") {
-          throw new Error(`Invalid --backend-mode value: "${raw}". Must be "auto", "tmux", "cmux", or "headless".`);
-        }
-        backendModeOverride = raw;
         i += 2;
         break;
       }
@@ -236,7 +224,7 @@ export function parseWatchArgs(args: string[]): ParsedWatchArgs {
   }
 
   return {
-    itemIds, backendModeOverride, mergeStrategy, sessionLimitOverride, pollIntervalOverride, frictionDir,
+    itemIds, mergeStrategy, sessionLimitOverride, pollIntervalOverride, frictionDir,
     daemonMode, isDaemonChild, isInteractiveEngineChild, clickupListId, remoteFlag,
     reviewAutoFix, reviewExternal, reviewSessionLimit,
     fixForward, skipReview, watchMode, futureOnlyStartup, noWatch, watchIntervalSecs,

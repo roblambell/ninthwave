@@ -48,6 +48,7 @@ function buildCliEnv(harness: CliHarness, runId: string, scenarioPath: string, e
     NINTHWAVE_FAKE_GH_STATE_PATH: join(harness.stateDir, "fake-gh.json"),
     NINTHWAVE_FAKE_GH_REPO: "ninthwave-sh/ninthwave-system-test",
     NINTHWAVE_FAKE_GH_AUTO_CREATE_PRS: "0",
+    NINTHWAVE_MUX: "headless",
     ...extraEnv,
   };
 }
@@ -60,7 +61,6 @@ function startRecoveryChild(
     "--_interactive-engine-child",
     "--items", "H-WRR-1",
     "--watch",
-    "--backend-mode", "headless",
     "--tool", "codex",
     "--merge-strategy", "auto",
     "--session-limit", "1",
