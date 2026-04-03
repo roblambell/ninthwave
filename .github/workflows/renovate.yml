@@ -1,0 +1,28 @@
+name: Renovate
+
+on:
+  schedule:
+    - cron: '15 10 * * 1-5'  # 10:15am UTC, weekdays
+  workflow_dispatch:
+
+concurrency:
+  group: renovate
+  cancel-in-progress: false
+
+jobs:
+  renovate:
+    name: Renovate
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+
+      - uses: renovatebot/github-action@3633cede7d4d4598438e654eac4a695e46004420 # v46.1.7
+        with:
+          token: ${{ secrets.RENOVATE_TOKEN }}
+          configurationFile: .github/renovate.json5
+        env:
+          LOG_LEVEL: info
+          RENOVATE_ONBOARDING: 'false'
+          RENOVATE_REQUIRE_CONFIG: optional
+          RENOVATE_REPOSITORIES: '["ninthwave-sh/ninthwave"]'

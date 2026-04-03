@@ -1,0 +1,53 @@
+// Renovate configuration for the ninthwave repo.
+// Docs: https://docs.renovatebot.com/configuration-options/
+{
+  "$schema": "https://docs.renovatebot.com/renovate-schema.json",
+
+  // ── Global settings ──────────────────────────────────────────────────
+  "extends": [
+    "config:recommended",
+    "helpers:pinGitHubActionDigests",
+    ":separateMajorReleases"
+  ],
+  "prConcurrentLimit": 5,
+  "prHourlyLimit": 4,
+  "branchPrefix": "deps/",
+  "commitMessagePrefix": "chore(deps):",
+  "labels": ["dependencies"],
+  "ignorePaths": ["**/node_modules/**"],
+  "platformAutomerge": true,
+
+  // ── Package rules ────────────────────────────────────────────────────
+  "packageRules": [
+    // GitHub Actions -- auto-merge patch and minor
+    {
+      "groupName": "GitHub Actions",
+      "matchManagers": ["github-actions"],
+      "automerge": true,
+      "matchUpdateTypes": ["patch", "minor", "pinDigest", "digest"]
+    },
+
+    // TypeScript & testing
+    {
+      "groupName": "TypeScript & testing",
+      "matchPackageNames": ["/^typescript$/", "vitest", "@types/bun"],
+      "matchManagers": ["npm"],
+      "automerge": true,
+      "matchUpdateTypes": ["patch", "minor"]
+    },
+
+    // npm devDependencies: auto-merge patch and minor
+    {
+      "matchManagers": ["npm"],
+      "matchDepTypes": ["devDependencies"],
+      "automerge": true,
+      "matchUpdateTypes": ["patch", "minor"]
+    },
+
+    // Major updates anywhere: never auto-merge
+    {
+      "matchUpdateTypes": ["major"],
+      "automerge": false
+    }
+  ]
+}
