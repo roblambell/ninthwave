@@ -210,7 +210,7 @@ describe("scenario: CI failure recovery", () => {
     const rebaseMessages = inboxCalls.filter(
       (call) => {
         const [projectRoot, itemId, msg] = call as [string, string, string];
-        return projectRoot === "/tmp/worktree"
+        return projectRoot === finalItem!.worktreePath
           && itemId === "CF-3"
           && typeof msg === "string"
           && msg.includes("Rebase");
@@ -324,7 +324,7 @@ describe("scenario: CI failure recovery", () => {
     const ciFailureMessages = inboxCalls.filter(
       (call) => {
         const [projectRoot, itemId, msg] = call as [string, string, string];
-        return projectRoot === "/tmp/worktree"
+        return projectRoot === finalItem!.worktreePath
           && itemId === "CF-5"
           && typeof msg === "string"
           && msg.includes("CI");

@@ -193,7 +193,7 @@ describe("scenario: stacking", () => {
     const resumeMessages = inboxCalls.filter(
       (call) => {
         const [projectRoot, itemId, msg] = call as [string, string, string];
-        return projectRoot === "/tmp/worktree"
+        return projectRoot === itemB.worktreePath
           && itemId === "B-1"
           && typeof msg === "string"
           && msg.includes("Resume")
