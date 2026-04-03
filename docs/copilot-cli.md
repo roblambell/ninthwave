@@ -14,7 +14,7 @@ Running `ninthwave init` (or `nw init`) configures Copilot CLI support:
 
 3. **Auto-detection** -- `ninthwave init` detects Copilot CLI if `.github/agents/` exists, or if a user-managed `.github/copilot-instructions.md` already exists in the project root, and records it in `.ninthwave/config` under `AI_TOOLS`.
 
-`CLAUDE.md`, `AGENTS.md`, and `.github/copilot-instructions.md` are project-owned instruction files. ninthwave reads them as inputs, but only manages generated agent artifacts under `.github/agents/`.
+In normal user repos, `CLAUDE.md`, `AGENTS.md`, and `.github/copilot-instructions.md` are project-owned instruction files. ninthwave reads them as inputs, but only manages generated agent artifacts under `.github/agents/`. In the ninthwave repo itself, `.github/copilot-instructions.md` is intentionally left untracked with the other generated tool copies.
 
 No additional configuration is required. If you have `copilot` in your `PATH`, ninthwave will find and use it.
 

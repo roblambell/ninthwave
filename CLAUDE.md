@@ -58,7 +58,7 @@ This repo uses ninthwave to develop ninthwave. When working here, log friction a
 
 3. **Always use worktree isolation for parallel agents.** When spawning agents that work on branches in the same repo, use `isolation: "worktree"` so each gets its own working copy. Never have two agents share a checkout.
 
-4. **Edit canonical sources, not generated mirrors.** In this repo, `skills/`, `agents/`, and the root `CLAUDE.md` are the tracked sources of truth. Regenerated copies under `.claude/`, `.opencode/`, and `.github/` are ignored here.
+4. **Edit canonical sources, not generated mirrors.** In this repo, `skills/`, `agents/`, and the root `CLAUDE.md` are the tracked sources of truth. Regenerated copies under `.claude/`, `.codex/`, `.opencode/`, and `.github/` are ignored here. This repo also keeps `.github/copilot-instructions.md` untracked.
 
 ## Skill routing
 
