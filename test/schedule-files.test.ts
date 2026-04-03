@@ -6,6 +6,8 @@ import { join } from "path";
 import { tmpdir } from "os";
 import { parseScheduleFile, listScheduledTasks } from "../core/schedule-files.ts";
 
+const SHIPPED_SCHEDULE_DIR = join(process.cwd(), ".ninthwave", "schedules");
+
 // Track temp dirs for cleanup
 const tempDirs: string[] = [];
 
@@ -208,6 +210,21 @@ Run on weekdays at 4:30 AM.
     expect(task!.schedule).toBe("cron: 30 4 * * 1-5");
     expect(task!.scheduleCron).toBe("30 4 * * 1-5");
   });
+
+  it("parses shipped review schedule files", () => {
+    const friction = parseScheduleFile(join(SHIPPED_SCHEDULE_DIR, "friction--review.md"));
+    const decisions = parseScheduleFile(join(SHIPPED_SCHEDULE_DIR, "decisions--review.md"));
+
+    expect(friction).not.toBeNull();
+    expect(friction!.id).toBe("friction-review");
+    expect(friction!.scheduleCron).toBe("0 9 * * 1-5");
+    expect(friction!.prompt).toContain("nw review-inbox friction");
+
+    expect(decisions).not.toBeNull();
+    expect(decisions!.id).toBe("decisions-review");
+    expect(decisions!.scheduleCron).toBe("0 13 * * 1-5");
+    expect(decisions!.prompt).toContain("nw review-inbox decisions");
+  });
 });
 
 // ── listScheduledTasks ───────────────────────────────────────────────
@@ -269,5 +286,12 @@ No schedule here.
 
     const tasks = listScheduledTasks(dir);
     expect(tasks).toEqual([]);
+  });
+
+  it("lists shipped review schedules", () => {
+    const tasks = listScheduledTasks(SHIPPED_SCHEDULE_DIR);
+    const ids = tasks.map((task) => task.id).sort();
+
+    expect(ids).toEqual(["decisions-review", "friction-review"]);
   });
 });

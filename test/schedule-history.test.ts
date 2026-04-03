@@ -282,11 +282,9 @@ describe("structured log events", () => {
   }
 
   function makeMinimalOrch(activeCount = 0): Orchestrator {
-    const orch = new Orchestrator([], {
+    const orch = new Orchestrator({
       sessionLimit: 5,
-      maxRetries: 0,
-      mergeStrategy: "sequential",
-      reviewAutoFix: false,
+      mergeStrategy: "auto",
     });
     for (let i = 0; i < activeCount; i++) {
       orch.addItem({
@@ -308,7 +306,7 @@ describe("structured log events", () => {
     return orch;
   }
 
-  it("emits schedule-triggered with triggerType=cron for due tasks", () => {
+  it("emits schedule-triggered with triggerType=cron for due tasks", async () => {
     const task = makeTask();
     const logs: LogEntry[] = [];
     const historyEntries: ScheduleHistoryEntry[] = [];
@@ -325,7 +323,7 @@ describe("structured log events", () => {
     };
 
     const orch = makeMinimalOrch(0);
-    processScheduledTasks("/project", orch, deps, (e) => logs.push(e), 5);
+    await processScheduledTasks("/project", orch, deps, (e) => logs.push(e), 5);
 
     const triggered = logs.filter((l) => l.event === "schedule-triggered");
     expect(triggered.length).toBeGreaterThan(0);
@@ -336,7 +334,7 @@ describe("structured log events", () => {
     expect(cronTriggered!.scheduleTime).toBeDefined();
   });
 
-  it("emits schedule-triggered with triggerType=manual for trigger files", () => {
+  it("emits schedule-triggered with triggerType=manual for trigger files", async () => {
     const task = makeTask({ id: "manual-task" });
     const logs: LogEntry[] = [];
 
@@ -352,7 +350,7 @@ describe("structured log events", () => {
     };
 
     const orch = makeMinimalOrch(0);
-    processScheduledTasks("/project", orch, deps, (e) => logs.push(e), 5);
+    await processScheduledTasks("/project", orch, deps, (e) => logs.push(e), 5);
 
     // Launch event
     const launchEvents = logs.filter((l) => l.event === "schedule-triggered" && l.triggerType === "launch");
@@ -360,7 +358,7 @@ describe("structured log events", () => {
     expect(launchEvents[0]!.taskId).toBe("manual-task");
   });
 
-  it("emits schedule-skipped with reason for already-running tasks", () => {
+  it("emits schedule-skipped with reason for already-running tasks", async () => {
     // We can't easily test trigger file processing inline, but we can test
     // the already-running path by having a task both in active and in trigger
     const task = makeTask();
@@ -385,7 +383,7 @@ describe("structured log events", () => {
     };
 
     const orch = makeMinimalOrch(0);
-    processScheduledTasks("/project", orch, deps, (e) => logs.push(e), 5);
+    await processScheduledTasks("/project", orch, deps, (e) => logs.push(e), 5);
 
     // Should not have triggered or skipped events (task is running, not triggered)
     // The running task should still show as running
@@ -393,7 +391,7 @@ describe("structured log events", () => {
     expect(logs.filter((l) => l.event === "schedule-triggered").length).toBe(0);
   });
 
-  it("emits schedule-completed with durationMs and result on success", () => {
+  it("emits schedule-completed with durationMs and result on success", async () => {
     const task = makeTask();
     const logs: LogEntry[] = [];
     const historyEntries: ScheduleHistoryEntry[] = [];
@@ -422,7 +420,7 @@ describe("structured log events", () => {
     };
 
     const orch = makeMinimalOrch(0);
-    processScheduledTasks("/project", orch, deps, (e) => logs.push(e), 5);
+    await processScheduledTasks("/project", orch, deps, (e) => logs.push(e), 5);
 
     const completed = logs.filter((l) => l.event === "schedule-completed");
     expect(completed).toHaveLength(1);
@@ -437,7 +435,7 @@ describe("structured log events", () => {
     expect(historyEntries[0]!.durationMs).toBeGreaterThan(0);
   });
 
-  it("emits schedule-completed with result=timeout on timeout", () => {
+  it("emits schedule-completed with result=timeout on timeout", async () => {
     const task = makeTask({ timeout: 10_000 }); // 10s timeout
     const logs: LogEntry[] = [];
     const historyEntries: ScheduleHistoryEntry[] = [];
@@ -465,7 +463,7 @@ describe("structured log events", () => {
     };
 
     const orch = makeMinimalOrch(0);
-    processScheduledTasks("/project", orch, deps, (e) => logs.push(e), 5);
+    await processScheduledTasks("/project", orch, deps, (e) => logs.push(e), 5);
 
     const completed = logs.filter((l) => l.event === "schedule-completed" && l.result === "timeout");
     expect(completed).toHaveLength(1);
@@ -475,7 +473,7 @@ describe("structured log events", () => {
     expect(historyEntries[0]!.result).toBe("timeout");
   });
 
-  it("emits schedule-skipped with reason=session-limit-full-queued when WIP full", () => {
+  it("emits schedule-skipped with reason=session-limit-full-queued when WIP full", async () => {
     const task = makeTask();
     const logs: LogEntry[] = [];
 
@@ -492,14 +490,14 @@ describe("structured log events", () => {
 
     // Pass effectiveSessionLimit=0 so no slots available
     const orch = makeMinimalOrch(0);
-    processScheduledTasks("/project", orch, deps, (e) => logs.push(e), 0);
+    await processScheduledTasks("/project", orch, deps, (e) => logs.push(e), 0);
 
     const skipped = logs.filter((l) => l.event === "schedule-skipped" && l.reason === "session-limit-full-queued");
     expect(skipped.length).toBeGreaterThan(0);
     expect(skipped[0]!.taskId).toBe("test-task");
   });
 
-  it("emits schedule-error on launch failure", () => {
+  it("emits schedule-error on launch failure", async () => {
     const task = makeTask();
     const logs: LogEntry[] = [];
 
@@ -515,7 +513,7 @@ describe("structured log events", () => {
     };
 
     const orch = makeMinimalOrch(0);
-    processScheduledTasks("/project", orch, deps, (e) => logs.push(e), 5);
+    await processScheduledTasks("/project", orch, deps, (e) => logs.push(e), 5);
 
     const errors = logs.filter((l) => l.event === "schedule-error");
     expect(errors).toHaveLength(1);

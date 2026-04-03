@@ -337,11 +337,9 @@ describe("double-fire prevention", () => {
 
 describe("processScheduledTasks", () => {
   function makeMinimalOrch(activeCount = 0): Orchestrator {
-    const orch = new Orchestrator([], {
+    const orch = new Orchestrator({
       sessionLimit: 5,
-      maxRetries: 0,
-      mergeStrategy: "sequential",
-      reviewAutoFix: false,
+      mergeStrategy: "auto",
     });
     // Simulate active work items
     for (let i = 0; i < activeCount; i++) {
@@ -364,7 +362,7 @@ describe("processScheduledTasks", () => {
     return orch;
   }
 
-  it("full cycle: due -> launch -> monitor -> complete -> history", () => {
+  it("full cycle: due -> launch -> monitor -> complete -> history", async () => {
     const now = new Date("2026-03-28T10:00:00Z");
     const task = makeTask();
     let savedState: ScheduleState | null = null;
@@ -384,7 +382,7 @@ describe("processScheduledTasks", () => {
     };
 
     const orch = makeMinimalOrch(0);
-    processScheduledTasks("/project", orch, deps, (e) => logs.push(e), 5);
+    await processScheduledTasks("/project", orch, deps, (e) => logs.push(e), 5);
 
     // Task should have been launched
     expect(savedState).not.toBeNull();
@@ -401,7 +399,7 @@ describe("processScheduledTasks", () => {
     expect(triggered.length).toBeGreaterThan(0);
   });
 
-  it("WIP queueing: fills WIP, confirms queued, frees slot, confirms launched", () => {
+  it("WIP queueing: fills WIP, confirms queued, frees slot, confirms launched", async () => {
     const now = new Date("2026-03-28T10:00:00Z");
     const task = makeTask();
     let savedState: ScheduleState | null = null;
@@ -424,7 +422,7 @@ describe("processScheduledTasks", () => {
     // All 5 WIP slots filled by active work items
     const orch = makeMinimalOrch(0);
     // Simulate active items by setting effectiveSessionLimit to 0
-    processScheduledTasks("/project", orch, fullDeps, (e) => logs.push(e), 0);
+    await processScheduledTasks("/project", orch, fullDeps, (e) => logs.push(e), 0);
 
     // Task should be queued, not launched
     expect(savedState).not.toBeNull();
@@ -439,7 +437,7 @@ describe("processScheduledTasks", () => {
     let savedState2: ScheduleState | null = null;
     freeDeps.writeState = (_pr, state) => { savedState2 = state; };
 
-    processScheduledTasks("/project", orch, freeDeps, (e) => logs.push(e), 5);
+    await processScheduledTasks("/project", orch, freeDeps, (e) => logs.push(e), 5);
 
     // Task should now be launched
     expect(savedState2).not.toBeNull();
@@ -448,7 +446,76 @@ describe("processScheduledTasks", () => {
     expect(savedState2!.active[0]!.taskId).toBe("test-task");
   });
 
-  it("trigger file processing: write file -> picked up -> deleted", () => {
+  it("claims broker ownership before launching a scheduled task", async () => {
+    const task = makeTask();
+    const steps: string[] = [];
+    let savedState: ScheduleState | null = null;
+
+    const deps: ScheduleLoopDeps = {
+      listScheduledTasks: () => [task],
+      readState: () => makeState(),
+      writeState: (_pr, state) => { savedState = state; },
+      claimScheduleRun: async () => {
+        steps.push("claim");
+        return { action: "launch", reason: "crew-granted" };
+      },
+      launchWorker: () => {
+        steps.push("launch");
+        return "ws:claimed";
+      },
+      monitorDeps: {
+        listWorkspaces: () => "",
+        closeWorkspace: () => true,
+      },
+      aiTool: "claude",
+      triggerDir: "/nonexistent",
+    };
+
+    await processScheduledTasks("/project", makeMinimalOrch(0), deps, () => {}, 5);
+
+    expect(steps).toEqual(["claim", "launch"]);
+    expect(savedState).not.toBeNull();
+    expect(savedState!.active[0]?.workspaceRef).toBe("ws:claimed");
+  });
+
+  it("skips safely when the crew broker is disconnected", async () => {
+    const task = makeTask();
+    const logs: LogEntry[] = [];
+    let launchCount = 0;
+    let savedState: ScheduleState | null = null;
+
+    const deps: ScheduleLoopDeps = {
+      listScheduledTasks: () => [task],
+      readState: () => makeState(),
+      writeState: (_pr, state) => { savedState = state; },
+      claimScheduleRun: async () => ({ action: "skip", reason: "crew-disconnected" }),
+      launchWorker: () => {
+        launchCount++;
+        return "ws:should-not-launch";
+      },
+      monitorDeps: {
+        listWorkspaces: () => "",
+        closeWorkspace: () => true,
+      },
+      aiTool: "claude",
+      triggerDir: "/nonexistent",
+    };
+
+    await processScheduledTasks("/project", makeMinimalOrch(0), deps, (entry) => logs.push(entry), 5);
+
+    expect(launchCount).toBe(0);
+    expect(savedState).not.toBeNull();
+    expect(savedState!.active).toEqual([]);
+    expect(savedState!.queued).toEqual([]);
+    expect(savedState!.tasks[task.id]?.lastRunAt).toBeDefined();
+    expect(logs).toContainEqual(expect.objectContaining({
+      event: "schedule-skipped",
+      taskId: task.id,
+      reason: "crew-disconnected",
+    }));
+  });
+
+  it("trigger file processing: write file -> picked up -> deleted", async () => {
     const task = makeTask({ id: "manual-task" });
     let savedState: ScheduleState | null = null;
     const logs: LogEntry[] = [];
@@ -473,7 +540,7 @@ describe("processScheduledTasks", () => {
     deps.readState = () => stateWithTriggered;
 
     const orch = makeMinimalOrch(0);
-    processScheduledTasks("/project", orch, deps, (e) => logs.push(e), 5);
+    await processScheduledTasks("/project", orch, deps, (e) => logs.push(e), 5);
 
     // Task should be launched from queue
     expect(savedState).not.toBeNull();
@@ -482,7 +549,7 @@ describe("processScheduledTasks", () => {
     expect(savedState!.queued).toEqual([]);
   });
 
-  it("monitor detects completion and removes from active", () => {
+  it("monitor detects completion and removes from active", async () => {
     const task = makeTask();
     const activeWorker = makeWorker({ workspaceRef: "ws:old" });
     let savedState: ScheduleState | null = null;
@@ -506,7 +573,7 @@ describe("processScheduledTasks", () => {
     };
 
     const orch = makeMinimalOrch(0);
-    processScheduledTasks("/project", orch, deps, (e) => logs.push(e), 5);
+    await processScheduledTasks("/project", orch, deps, (e) => logs.push(e), 5);
 
     // Active worker should be removed
     expect(savedState).not.toBeNull();
@@ -562,6 +629,7 @@ describe("tryScheduleClaim", () => {
       disconnect: () => {},
       isConnected: () => opts.connected ?? true,
       getCrewStatus: () => null,
+      report: () => {},
     };
   }
 
@@ -591,17 +659,17 @@ describe("tryScheduleClaim", () => {
     expect(result.reason).toBe("crew-denied");
   });
 
-  it("crew disconnected -> fallback to solo execution", async () => {
+  it("crew disconnected -> skip safely", async () => {
     const broker = mockBroker({ connected: false });
     const result = await tryScheduleClaim(broker, "task-1", "2026-03-28T10:00:00.000Z");
-    expect(result.action).toBe("launch");
+    expect(result.action).toBe("skip");
     expect(result.reason).toBe("crew-disconnected");
   });
 
-  it("WS disconnect during claim (exception) -> fallback to solo", async () => {
+  it("WS disconnect during claim (exception) -> skip safely", async () => {
     const broker = mockBroker({ connected: true, throwOnClaim: true });
     const result = await tryScheduleClaim(broker, "task-1", "2026-03-28T10:00:00.000Z");
-    expect(result.action).toBe("launch");
+    expect(result.action).toBe("skip");
     expect(result.reason).toBe("crew-disconnected");
   });
 });

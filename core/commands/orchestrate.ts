@@ -140,6 +140,7 @@ import {
 import {
   launchScheduledTask,
   scheduleTriggerDir,
+  tryScheduleClaim,
 } from "../schedule-runner.ts";
 import { listScheduledTasks as listScheduledTasksFromDir } from "../schedule-files.ts";
 import { loadDiscoveryStartupItems } from "../startup-items.ts";
@@ -2130,6 +2131,8 @@ async function runInteractiveOperatorParentSession(
     };
   };
 
+  let scheduleEnabled = opts.scheduleEnabled;
+
   let operatorLastSnapshot = buildQueuedState(currentItemIds, {
     paused: false,
     mergeStrategy: opts.mergeStrategy,
@@ -3524,7 +3527,7 @@ export async function orchestrateLoop(
       if (nowMs - lastScheduleCheckMs >= SCHEDULE_CHECK_INTERVAL_MS) {
         lastScheduleCheckMs = nowMs;
         try {
-          processScheduledTasks(
+          await processScheduledTasks(
             ctx.projectRoot,
             orch,
             deps.scheduleDeps,
@@ -4816,9 +4819,9 @@ export async function cmdOrchestrate(
     });
   }
 
-  // Build schedule deps when schedule_enabled and no crew broker (solo mode only)
+  // Build schedule deps when the project supports scheduled execution.
   const schedulesDir = join(projectRoot, ".ninthwave", "schedules");
-  const scheduleLoopDeps: ScheduleLoopDeps | undefined = (projectConfig.schedule_enabled && !crewBroker)
+  const scheduleLoopDeps: ScheduleLoopDeps | undefined = projectConfig.schedule_enabled
     ? {
         listScheduledTasks: () => listScheduledTasksFromDir(schedulesDir),
         readState: readScheduleState,
@@ -4826,6 +4829,7 @@ export async function cmdOrchestrate(
         launchWorker: (task, pr, ai) => launchScheduledTask(task, pr, ai, {
           launchWorkspace: (cwd, cmd, workItemId) => mux.launchWorkspace(cwd, cmd, workItemId),
         }),
+        claimScheduleRun: (taskId, scheduleTime) => tryScheduleClaim(crewBroker, taskId, scheduleTime),
         monitorDeps: {
           listWorkspaces: () => mux.listWorkspaces(),
           closeWorkspace: (ref) => muxForWorkspaceRef(ref).closeWorkspace(ref),
@@ -4965,6 +4969,7 @@ export async function cmdOrchestrate(
     buildState: buildEngineState,
     initialReviewMode,
     initialCollaborationMode,
+    initialScheduleEnabled: scheduleEnabled,
     getSessionLimit: () => sessionLimit,
     setSessionLimit: (limit) => {
       sessionLimit = limit;

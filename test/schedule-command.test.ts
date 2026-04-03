@@ -24,6 +24,8 @@ function makeTempProject(): string {
   return tmp;
 }
 
+const SHIPPED_SCHEDULE_DIR = join(process.cwd(), ".ninthwave", "schedules");
+
 /** Write a valid schedule file. */
 function writeSchedule(
   projectRoot: string,
@@ -96,7 +98,7 @@ function captureAll(fn: () => void): { stdout: string; stderr: string; code: num
   console.error = (...args: unknown[]) => {
     errs.push(args.map(String).join(" "));
   };
-  // @ts-expect-error -- mocking process.exit
+  // @ts-ignore -- mocking process.exit
   process.exit = (code?: number) => {
     exitCode = code ?? 0;
     throw new Error("__EXIT__");
@@ -289,6 +291,27 @@ Some text but no Schedule field.
     expect(code).toBe(1);
     expect(stdout).toContain("ERROR:");
     expect(stdout).toContain("missing or malformed heading");
+  });
+
+  it("validates shipped review schedules with parser-supported syntax", () => {
+    const root = makeTempProject();
+    writeSchedule(
+      root,
+      "friction--review.md",
+      readFileSync(join(SHIPPED_SCHEDULE_DIR, "friction--review.md"), "utf-8"),
+    );
+    writeSchedule(
+      root,
+      "decisions--review.md",
+      readFileSync(join(SHIPPED_SCHEDULE_DIR, "decisions--review.md"), "utf-8"),
+    );
+
+    const output = captureStdout(() => cmdSchedule(["validate"], root));
+
+    expect(output).toContain("OK:");
+    expect(output).toContain("friction--review.md");
+    expect(output).toContain("decisions--review.md");
+    expect(output).not.toContain("ERROR:");
   });
 });
 

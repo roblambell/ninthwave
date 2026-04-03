@@ -11,9 +11,9 @@ Schedule files live in `.ninthwave/schedules/` at the project root. Each file is
 ```
 .ninthwave/
   schedules/
+    friction--review.md
+    decisions--review.md
     ci--daily-test-audit.md
-    deps--weekly-dep-check.md
-    monitoring--hourly-health-check.md
 ```
 
 When the directory is empty, no tasks are scheduled. No sentinel file is needed.
@@ -33,9 +33,9 @@ Filenames follow the pattern:
 | `id` | Lowercase slug identifying the task. Must match `[a-z0-9][-a-z0-9]*`. | `daily-test-audit` |
 
 Examples:
+- `friction--review.md`
+- `decisions--review.md`
 - `ci--daily-test-audit.md`
-- `deps--weekly-dep-check.md`
-- `monitoring--hourly-health-check.md`
 
 The parser reads all `.md` files in the directory -- the filename itself is not parsed for metadata. The ID comes from the heading inside the file. The naming convention exists for human readability and `ls` ordering.
 
@@ -198,14 +198,26 @@ Write the prompt as if you're giving instructions to a developer. Be specific ab
 
 ## Execution Model
 
+`nw init` seeds two enabled weekday review schedules by default:
+
+- `.ninthwave/schedules/friction--review.md`
+- `.ninthwave/schedules/decisions--review.md`
+
+It also enables the project schedule capability in `.ninthwave/config.json`
+with `"schedule_enabled": true`.
+
+Actual execution still requires the local per-project preference to be on
+(`schedule_enabled_projects` in user config, or the runtime toggle in `nw watch`).
+
 The ninthwave daemon (`nw watch`) checks all enabled schedules every loop iteration:
 
 1. **Due check:** Compares the task's cron expression against the current time with a 2-minute tolerance window. This prevents missed fires if the daemon loop runs slightly late.
 2. **Double-fire prevention:** If a task already ran in the current minute, it is skipped.
 3. **Queue:** Due tasks are added to a queue. Tasks are dequeued when WIP slots are available.
-4. **Launch:** The daemon spawns a worker (identical to work item workers) with the schedule's prompt.
-5. **Timeout:** Workers are killed if they exceed the task's timeout.
-6. **State:** Execution history is stored in `~/.ninthwave/projects/{slug}/schedule-state.json`.
+4. **Claim (crew mode):** In shared crew sessions, the daemon claims the schedule fire with the broker before launch. Denied claims mean another daemon already owns that fire. Disconnected broker cases are skipped instead of falling back to solo execution.
+5. **Launch:** After a successful claim (or immediately in solo mode), the daemon spawns a worker with the schedule's prompt.
+6. **Timeout:** Workers are killed if they exceed the task's timeout.
+7. **State:** Execution history is stored in `~/.ninthwave/projects/{slug}/schedule-state.json`.
 
 ### Manual Triggering
 
@@ -242,24 +254,50 @@ This means:
 
 ## Example Files
 
-### Daily CI Audit
+### Review Friction Inbox
 
-File: `.ninthwave/schedules/ci--daily-test-audit.md`
+File: `.ninthwave/schedules/friction--review.md`
 
 ```markdown
-# Run full test suite and report failures (daily-test-audit)
+# Review friction inbox (friction-review)
 
-**Schedule:** every day at 06:00
-**Priority:** High
-**Domain:** ci
-**Timeout:** 30m
+**Schedule:** every weekday at 09:00
+**Priority:** Medium
+**Domain:** friction
+**Timeout:** 10m
+**Enabled:** true
 
-Run the full test suite. If any tests fail:
-1. Identify the failing tests and their error messages
-2. Check git log for recent commits that may have caused the failure
-3. Create a work item in `.ninthwave/work/` for each distinct failure
+Run `nw review-inbox friction` from the project root.
 
-If all tests pass, no action is needed.
+- Use the first-party review-inbox command instead of manually branching,
+  editing inbox files, or creating PRs yourself.
+- If the command reports there is nothing to review, stop.
+- If the command opens or updates a review PR, stop after confirming the
+  command succeeded.
+- If the command fails, capture the error and likely cause.
+```
+
+### Review Decisions Inbox
+
+File: `.ninthwave/schedules/decisions--review.md`
+
+```markdown
+# Review decisions inbox (decisions-review)
+
+**Schedule:** every weekday at 13:00
+**Priority:** Medium
+**Domain:** decisions
+**Timeout:** 10m
+**Enabled:** true
+
+Run `nw review-inbox decisions` from the project root.
+
+- Use the first-party review-inbox command instead of manually branching,
+  editing inbox files, or creating PRs yourself.
+- If the command reports there is nothing to review, stop.
+- If the command opens or updates a review PR, stop after confirming the
+  command succeeded.
+- If the command fails, capture the error and likely cause.
 ```
 
 ### Weekly Dependency Check

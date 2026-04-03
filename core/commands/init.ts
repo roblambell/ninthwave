@@ -89,6 +89,43 @@ export interface InitProjectOpts {
   resolveCommandPath?: CommandPathResolver;
 }
 
+const DEFAULT_SCHEDULE_FILES: Record<string, string> = {
+  "friction--review.md": `# Review friction inbox (friction-review)
+
+**Schedule:** every weekday at 09:00
+**Priority:** Medium
+**Domain:** friction
+**Timeout:** 10m
+**Enabled:** true
+
+Run \`nw review-inbox friction\` from the project root.
+
+- Use the first-party review-inbox command instead of manually branching,
+  editing inbox files, or creating PRs yourself.
+- If the command reports there is nothing to review, stop.
+- If the command opens or updates a review PR, stop after confirming the
+  command succeeded.
+- If the command fails, capture the error and likely cause.
+`,
+  "decisions--review.md": `# Review decisions inbox (decisions-review)
+
+**Schedule:** every weekday at 13:00
+**Priority:** Medium
+**Domain:** decisions
+**Timeout:** 10m
+**Enabled:** true
+
+Run \`nw review-inbox decisions\` from the project root.
+
+- Use the first-party review-inbox command instead of manually branching,
+  editing inbox files, or creating PRs yourself.
+- If the command reports there is nothing to review, stop.
+- If the command opens or updates a review PR, stop after confirming the
+  command succeeded.
+- If the command fails, capture the error and likely cause.
+`,
+};
+
 const defaultFileExists = (path: string): boolean => existsSync(path);
 
 const defaultReadDir = (dir: string): string[] => {
@@ -532,7 +569,7 @@ export function generateConfig(
     crew_url?: string;
   } = {
     review_external: false,
-    schedule_enabled: false,
+    schedule_enabled: true,
   };
   if (existingConfig?.crew_url) {
     config.crew_url = existingConfig.crew_url;
@@ -645,28 +682,15 @@ function scaffold(
 
   const workDir = join(projectDir, ".ninthwave", "work");
 
-  // --- .ninthwave/schedules/ directory with example ---
+  // --- .ninthwave/schedules/ directory with shipped review schedules ---
   const schedulesDir = join(projectDir, ".ninthwave", "schedules");
   const schedulesIsNew = !existsSync(schedulesDir);
   mkdirSync(schedulesDir, { recursive: true });
 
   if (schedulesIsNew) {
-    const examplePath = join(schedulesDir, "ci--example-daily-audit.md");
-    writeFileSync(
-      examplePath,
-      `# Daily CI Audit (ci--example-daily-audit)
-
-**Schedule:** Every day at 8am UTC
-**Priority:** Low
-**Domain:** ci
-**Timeout:** 10m
-**Enabled:** false
-
-Review the last 24 hours of CI runs. Summarise any flaky tests,
-unusual failure patterns, or builds that took significantly longer
-than average. Open a work item for anything that needs attention.
-`,
-    );
+    for (const [filename, content] of Object.entries(DEFAULT_SCHEDULE_FILES)) {
+      writeFileSync(join(schedulesDir, filename), content);
+    }
   }
 
   // --- .ninthwave/work/, .ninthwave/friction/, and .ninthwave/decisions/ ---

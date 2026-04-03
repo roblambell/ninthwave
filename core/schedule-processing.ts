@@ -7,10 +7,12 @@ import type { ScheduledTask } from "./types.ts";
 import type { ScheduleState } from "./schedule-state.ts";
 import {
   checkSchedules,
+  computeScheduleTime,
   processScheduleQueue,
   monitorScheduleWorkers,
   processTriggerFiles,
   type MonitorScheduleDeps,
+  type ScheduleClaimResult,
 } from "./schedule-runner.ts";
 import {
   appendHistoryEntry,
@@ -29,7 +31,9 @@ export interface ScheduleLoopDeps {
   /** Write schedule state to disk. */
   writeState: (projectRoot: string, state: ScheduleState) => void;
   /** Launch a scheduled task worker. Returns workspace ref or null. */
-  launchWorker: (task: ScheduledTask, projectRoot: string, aiTool: string) => string | null;
+  launchWorker: (task: ScheduledTask, projectRoot: string, aiTool: string) => string | null | Promise<string | null>;
+  /** Claim a schedule run before launch. Omit in solo mode. */
+  claimScheduleRun?: (taskId: string, scheduleTime: string) => Promise<ScheduleClaimResult>;
   /** Monitor deps (workspace listing + close). */
   monitorDeps: MonitorScheduleDeps;
   /** AI tool identifier for worker launch commands. */
@@ -53,13 +57,13 @@ export interface ScheduleLoopDeps {
  * 5. Queues or launches tasks based on WIP availability
  * 6. Writes updated state back to disk
  */
-export function processScheduledTasks(
+export async function processScheduledTasks(
   projectRoot: string,
   orch: Orchestrator,
   deps: ScheduleLoopDeps,
   log: (entry: LogEntry) => void,
   effectiveSessionLimit: number,
-): void {
+): Promise<void> {
   const tasks = deps.listScheduledTasks();
   if (tasks.length === 0) return;
 
@@ -221,11 +225,28 @@ export function processScheduledTasks(
     const task = taskMap.get(taskId);
     if (!task) continue;
 
-    // Double-fire prevention: update lastRunAt BEFORE launching worker
-    // Uses the scheduled fire time (now), not poll time
-    state.tasks[task.id] = { lastRunAt: now.toISOString() };
+    const scheduleTime = computeScheduleTime(now);
+    const claimResult = deps.claimScheduleRun
+      ? await deps.claimScheduleRun(task.id, scheduleTime)
+      : { action: "launch", reason: "solo" } satisfies ScheduleClaimResult;
 
-    const ref = deps.launchWorker(task, projectRoot, deps.aiTool);
+    if (claimResult.action === "skip") {
+      state.tasks[task.id] = { lastRunAt: scheduleTime };
+      log({
+        ts: now.toISOString(),
+        level: claimResult.reason === "crew-disconnected" ? "warn" : "info",
+        event: "schedule-skipped",
+        taskId: task.id,
+        reason: claimResult.reason,
+      });
+      continue;
+    }
+
+    // Double-fire prevention: update lastRunAt BEFORE launching worker
+    // Uses the scheduled fire minute shared with broker claims.
+    state.tasks[task.id] = { lastRunAt: scheduleTime };
+
+    const ref = await deps.launchWorker(task, projectRoot, deps.aiTool);
     if (ref) {
       state.active.push({
         taskId: task.id,
@@ -239,6 +260,7 @@ export function processScheduledTasks(
         taskId: task.id,
         triggerType: "launch",
         workspaceRef: ref,
+        claimReason: claimResult.reason,
       });
     } else {
       log({

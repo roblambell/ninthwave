@@ -261,8 +261,8 @@ const defaultTriggerFileIO: TriggerFileIO = {
 
 /** Result of a schedule claim attempt. */
 export type ScheduleClaimResult =
-  | { action: "launch"; reason: "solo" | "crew-granted" | "crew-disconnected" }
-  | { action: "skip"; reason: "crew-denied" };
+  | { action: "launch"; reason: "solo" | "crew-granted" }
+  | { action: "skip"; reason: "crew-denied" | "crew-disconnected" };
 
 /**
  * Compute the schedule fire time for crew claim deduplication.
@@ -282,8 +282,7 @@ export function computeScheduleTime(now: Date): string {
  * - Solo mode (no broker): always returns "launch" with reason "solo".
  * - Crew mode, connected: calls scheduleClaim(). Granted -> "launch".
  *   Denied -> "skip" with reason "crew-denied".
- * - Crew mode, disconnected: falls back to solo execution with reason
- *   "crew-disconnected" (log a warning at the call site).
+ * - Crew mode, disconnected: skips with reason "crew-disconnected".
  */
 export async function tryScheduleClaim(
   crewBroker: CrewBroker | null | undefined,
@@ -295,9 +294,9 @@ export async function tryScheduleClaim(
     return { action: "launch", reason: "solo" };
   }
 
-  // Crew mode but disconnected -- fallback to solo execution
+  // Crew mode but disconnected -- skip safely instead of falling back to solo
   if (!crewBroker.isConnected()) {
-    return { action: "launch", reason: "crew-disconnected" };
+    return { action: "skip", reason: "crew-disconnected" };
   }
 
   // Try to claim via the broker
@@ -308,8 +307,8 @@ export async function tryScheduleClaim(
     }
     return { action: "skip", reason: "crew-denied" };
   } catch {
-    // Claim failed (e.g., WS disconnected mid-request) -- fallback to solo
-    return { action: "launch", reason: "crew-disconnected" };
+    // Claim failed (e.g., WS disconnected mid-request) -- skip safely
+    return { action: "skip", reason: "crew-disconnected" };
   }
 }
 

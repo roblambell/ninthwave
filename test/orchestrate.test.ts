@@ -80,8 +80,11 @@ import {
   type OrchestratorDeps,
 } from "../core/orchestrator.ts";
 import type { WorkItem } from "../core/types.ts";
+import type { ScheduledTask } from "../core/types.ts";
 import type { StatusItem, ViewOptions } from "../core/status-render.ts";
 import type { Multiplexer } from "../core/mux.ts";
+import { emptyScheduleState } from "../core/schedule-state.ts";
+import { tryScheduleClaim } from "../core/schedule-runner.ts";
 import {
   pidFilePath,
   logFilePath,
@@ -5534,6 +5537,104 @@ describe("orchestrateLoop crew mode", () => {
     // Should have logged the blocking event
     const blockLogs = logs.filter((l) => l.event === "crew_launches_blocked");
     expect(blockLogs.length).toBeGreaterThan(0);
+  });
+
+  it("deduplicates scheduled fires across two orchestrators in crew mode", async () => {
+    const task: ScheduledTask = {
+      id: "friction-review",
+      title: "Review friction inbox",
+      schedule: "every weekday at 09:00",
+      scheduleCron: "* * * * *",
+      priority: "medium",
+      domain: "friction",
+      timeout: 10 * 60 * 1000,
+      prompt: "Run nw review-inbox friction",
+      filePath: "/tmp/test-project/.ninthwave/schedules/friction--review.md",
+      enabled: true,
+    };
+
+    const claimedScheduleKeys = new Set<string>();
+    const broker: CrewBroker = {
+      connect: vi.fn(async () => {}),
+      sync: vi.fn(),
+      claim: vi.fn(async () => null),
+      complete: vi.fn(),
+      scheduleClaim: vi.fn(async (taskId: string, scheduleTime: string) => {
+        const key = `${taskId}:${scheduleTime}`;
+        if (claimedScheduleKeys.has(key)) return false;
+        claimedScheduleKeys.add(key);
+        return true;
+      }),
+      heartbeat: vi.fn(),
+      disconnect: vi.fn(),
+      isConnected: vi.fn(() => true),
+      getCrewStatus: vi.fn(() => null),
+      report: vi.fn(),
+    };
+
+    const launchCalls: string[] = [];
+    const logs: LogEntry[] = [];
+    const makeScheduleDeps = (name: string) => {
+      let state = emptyScheduleState();
+      return {
+        listScheduledTasks: () => [task],
+        readState: () => state,
+        writeState: (_projectRoot: string, nextState: typeof state) => {
+          state = nextState;
+        },
+        launchWorker: async () => {
+          launchCalls.push(name);
+          return `ws:${name}`;
+        },
+        claimScheduleRun: (taskId: string, scheduleTime: string) =>
+          tryScheduleClaim(broker, taskId, scheduleTime),
+        monitorDeps: {
+          listWorkspaces: () => "",
+          closeWorkspace: () => true,
+        },
+        aiTool: "claude",
+        triggerDir: "/nonexistent",
+      };
+    };
+
+    const loopDepsFor = (name: string): OrchestrateLoopDeps => ({
+      buildSnapshot: (): PollSnapshot => ({ items: [{ id: "KEEP-1", workerAlive: true }], readyIds: [] }),
+      sleep: () => Promise.resolve(),
+      log: (entry) => logs.push({ ...entry, daemon: name }),
+      actionDeps: mockActionDeps(),
+      crewBroker: broker,
+      scheduleDeps: makeScheduleDeps(name),
+      isScheduleExecutionEnabled: () => true,
+      getFreeMem: () => 16 * 1024 ** 3,
+    });
+
+    const makeRunningOrchestrator = () => {
+      const orch = new Orchestrator({ sessionLimit: 5, mergeStrategy: "auto" });
+      orch.addItem(makeWorkItem("KEEP-1"));
+      orch.hydrateState("KEEP-1", "implementing");
+      return orch;
+    };
+
+    await orchestrateLoop(
+      makeRunningOrchestrator(),
+      defaultCtx,
+      loopDepsFor("daemon-a"),
+      { maxIterations: 1 },
+    );
+    await orchestrateLoop(
+      makeRunningOrchestrator(),
+      defaultCtx,
+      loopDepsFor("daemon-b"),
+      { maxIterations: 1 },
+    );
+
+    expect(launchCalls).toHaveLength(1);
+    expect(launchCalls).toEqual(["daemon-a"]);
+    expect(logs).toContainEqual(expect.objectContaining({
+      event: "schedule-skipped",
+      reason: "crew-denied",
+      daemon: "daemon-b",
+    }));
   });
 
   it("calls broker.complete when an item reaches true completion", async () => {

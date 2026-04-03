@@ -477,7 +477,7 @@ describe("generateConfig", () => {
     const parsed = JSON.parse(config);
 
     expect(parsed.review_external).toBe(false);
-    expect(parsed.schedule_enabled).toBe(false);
+    expect(parsed.schedule_enabled).toBe(true);
   });
 
   it("does not include dead config keys", () => {
@@ -687,7 +687,7 @@ describe("initProject", () => {
     );
     const parsed = JSON.parse(config);
     expect(parsed.review_external).toBe(false);
-    expect(parsed.schedule_enabled).toBe(false);
+    expect(parsed.schedule_enabled).toBe(true);
     expect(parsed).not.toHaveProperty("ai_tools");
     expect(Object.keys(parsed)).toEqual(["review_external", "schedule_enabled"]);
   });
@@ -824,7 +824,7 @@ describe("initProject", () => {
     ));
     // Should reflect fresh defaults (init always writes defaults)
     expect(config.review_external).toBe(false);
-    expect(config.schedule_enabled).toBe(false);
+    expect(config.schedule_enabled).toBe(true);
     expect(config.crew_url).toBe("wss://crew.example/ws");
   });
 
@@ -1417,7 +1417,7 @@ describe("initProject config.json", () => {
 
     const configJson = JSON.parse(readFileSync(configJsonPath, "utf-8"));
     expect(configJson.review_external).toBe(false);
-    expect(configJson.schedule_enabled).toBe(false);
+    expect(configJson.schedule_enabled).toBe(true);
     expect(configJson).not.toHaveProperty("ai_tools");
     // No workspace data in config.json
     expect(configJson).not.toHaveProperty("workspace");
@@ -2286,7 +2286,7 @@ describe("initProject -- preserves existing files", () => {
     expect(content).toBe("node_modules/\n");
   });
 
-  it("creates .ninthwave/schedules/ with example file on fresh init", () => {
+  it("creates .ninthwave/schedules/ with shipped review schedules on fresh init", () => {
     const projectDir = setupTempRepo();
     const bundleDir = createFakeBundle(projectDir + "-bundle-parent");
 
@@ -2300,17 +2300,22 @@ describe("initProject -- preserves existing files", () => {
     // Directory exists
     expect(existsSync(join(projectDir, ".ninthwave/schedules"))).toBe(true);
 
-    // Example file exists with correct format
-    const examplePath = join(projectDir, ".ninthwave/schedules/ci--example-daily-audit.md");
-    expect(existsSync(examplePath)).toBe(true);
+    const frictionPath = join(projectDir, ".ninthwave/schedules/friction--review.md");
+    const decisionsPath = join(projectDir, ".ninthwave/schedules/decisions--review.md");
+    expect(existsSync(frictionPath)).toBe(true);
+    expect(existsSync(decisionsPath)).toBe(true);
 
-    const content = readFileSync(examplePath, "utf-8");
-    expect(content).toContain("# Daily CI Audit");
-    expect(content).toContain("**Schedule:**");
-    expect(content).toContain("**Priority:**");
-    expect(content).toContain("**Domain:**");
-    expect(content).toContain("**Timeout:**");
-    expect(content).toContain("**Enabled:** false");
+    const frictionContent = readFileSync(frictionPath, "utf-8");
+    expect(frictionContent).toContain("# Review friction inbox");
+    expect(frictionContent).toContain("**Schedule:** every weekday at 09:00");
+    expect(frictionContent).toContain("**Enabled:** true");
+    expect(frictionContent).toContain("nw review-inbox friction");
+
+    const decisionsContent = readFileSync(decisionsPath, "utf-8");
+    expect(decisionsContent).toContain("# Review decisions inbox");
+    expect(decisionsContent).toContain("**Schedule:** every weekday at 13:00");
+    expect(decisionsContent).toContain("**Enabled:** true");
+    expect(decisionsContent).toContain("nw review-inbox decisions");
   });
 
   it("does not overwrite existing schedule files on re-init", () => {
@@ -2322,16 +2327,16 @@ describe("initProject -- preserves existing files", () => {
       getEnv: () => undefined,
     };
 
-    // First init -- creates the schedules dir and example
+    // First init -- creates the schedules dir and seeded review schedules
     initProject(projectDir, bundleDir, deps);
 
     // User creates their own schedule file
     const userSchedule = join(projectDir, ".ninthwave/schedules/deploy--nightly-deploy.md");
     writeFileSync(userSchedule, "# Nightly Deploy\n**Enabled:** true\n");
 
-    // Overwrite the example with custom content
-    const examplePath = join(projectDir, ".ninthwave/schedules/ci--example-daily-audit.md");
-    writeFileSync(examplePath, "# Custom content\n");
+    // Overwrite a seeded review schedule with custom content
+    const seededPath = join(projectDir, ".ninthwave/schedules/friction--review.md");
+    writeFileSync(seededPath, "# Custom content\n");
 
     // Re-init
     initProject(projectDir, bundleDir, deps);
@@ -2340,8 +2345,8 @@ describe("initProject -- preserves existing files", () => {
     expect(existsSync(userSchedule)).toBe(true);
     expect(readFileSync(userSchedule, "utf-8")).toBe("# Nightly Deploy\n**Enabled:** true\n");
 
-    // Example file is NOT overwritten (directory already existed)
-    expect(readFileSync(examplePath, "utf-8")).toBe("# Custom content\n");
+    // Seeded review schedule is NOT overwritten (directory already existed)
+    expect(readFileSync(seededPath, "utf-8")).toBe("# Custom content\n");
   });
 
   it("records version in user state directory", () => {
