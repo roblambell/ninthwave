@@ -6,6 +6,7 @@ import type { MergeStrategy } from "./orchestrator.ts";
 import type { LogEntry } from "./types.ts";
 import {
   type FrameLayout,
+  type QuitConfirmKey,
   type ViewOptions,
   type PanelMode,
   type LogEntry as PanelLogEntry,
@@ -124,11 +125,13 @@ export interface TuiState {
   pendingStrategyCountdownTimer?: ReturnType<typeof setInterval>;
   /** Whether bypass is available in the cycle (from --dangerously-bypass). */
   bypassEnabled: boolean;
-  /** First Ctrl+C pressed -- waiting for confirmation. */
+  /** A quit key was pressed once -- waiting for confirmation. */
   ctrlCPending: boolean;
+  /** Which key started the pending quit confirmation. */
+  pendingQuitKey?: QuitConfirmKey;
   /** Graceful shutdown has been requested and the footer should show progress. */
   shutdownInProgress?: boolean;
-  /** Timestamp of the first Ctrl+C press (for 2s timeout). */
+  /** Timestamp of the first quit-key press (for 2s timeout). */
   ctrlCTimestamp: number;
   /** Whether the help overlay is visible. */
   showHelp: boolean;
@@ -281,8 +284,8 @@ export function applyRuntimeSnapshotToTuiState(
 /**
  * Set up raw-mode stdin to capture individual keystrokes in TUI mode.
  *
- * - `q` triggers graceful shutdown via the AbortController
- * - Ctrl-C (0x03) triggers the same graceful shutdown
+ * - `q` triggers the same double-tap quit confirmation as Ctrl-C
+ * - Ctrl-C (0x03) triggers graceful shutdown after a second press
  * - `m` toggles metrics panel
  * - `d` toggles deps detail view
  * - `?` toggles full-screen help overlay
@@ -306,16 +309,55 @@ export function setupKeyboardShortcuts(
   stdin.resume();
   stdin.setEncoding("utf8");
 
-  // Timer for Ctrl+C double-tap timeout (clear ctrlCPending after ~2s)
+  // Timer for quit confirmation timeout (clear ctrlCPending after ~2s)
   let ctrlCTimer: ReturnType<typeof setTimeout> | null = null;
 
   const pendingStrategyCountdownSeconds = (deadlineMs: number) => Math.max(0, Math.ceil((deadlineMs - Date.now()) / 1000));
 
-  const clearCtrlCPending = () => {
+  const clearPendingQuitConfirmation = () => {
     if (!tuiState) return;
     tuiState.ctrlCPending = false;
+    tuiState.pendingQuitKey = undefined;
     tuiState.ctrlCTimestamp = 0;
     tuiState.viewOptions.ctrlCPending = false;
+    tuiState.viewOptions.pendingQuitKey = undefined;
+  };
+
+  const beginPendingQuitConfirmation = (key: QuitConfirmKey): boolean => {
+    if (!tuiState) return false;
+    tuiState.ctrlCPending = true;
+    tuiState.pendingQuitKey = key;
+    tuiState.ctrlCTimestamp = Date.now();
+    tuiState.viewOptions.ctrlCPending = true;
+    tuiState.viewOptions.pendingQuitKey = key;
+    tuiState.onUpdate?.();
+    if (ctrlCTimer) clearTimeout(ctrlCTimer);
+    ctrlCTimer = setTimeout(() => {
+      ctrlCTimer = null;
+      if (!tuiState.ctrlCPending || tuiState.shutdownInProgress) return;
+      clearPendingQuitConfirmation();
+      tuiState.onUpdate?.();
+    }, 2000);
+    return true;
+  };
+
+  const confirmQuit = (logKey: "q" | "ctrl-c") => {
+    if (ctrlCTimer) {
+      clearTimeout(ctrlCTimer);
+      ctrlCTimer = null;
+    }
+    if (tuiState) {
+      clearPendingQuitConfirmation();
+      tuiState.shutdownInProgress = true;
+      tuiState.viewOptions.shutdownInProgress = true;
+      tuiState.onUpdate?.();
+    }
+    log({ ts: new Date().toISOString(), level: "info", event: "keyboard_quit", key: logKey });
+    if (tuiState?.onShutdown) {
+      tuiState.onShutdown();
+    } else {
+      abortController.abort();
+    }
   };
 
   const clearPendingStrategyTimer = () => {
@@ -711,51 +753,30 @@ export function setupKeyboardShortcuts(
   };
 
   const onData = (key: string) => {
-    // q still exits immediately (discoverable via ? help overlay)
     if (key === "q") {
-      log({ ts: new Date().toISOString(), level: "info", event: "keyboard_quit", key: "q" });
-      if (tuiState?.onShutdown) {
-        tuiState.onShutdown();
-      } else {
-        abortController.abort();
+      if (tuiState?.ctrlCPending
+        && tuiState.pendingQuitKey === "q"
+        && Date.now() - tuiState.ctrlCTimestamp < 2000) {
+        confirmQuit("q");
+        return;
       }
+      if (beginPendingQuitConfirmation("q")) {
+        return;
+      }
+      log({ ts: new Date().toISOString(), level: "info", event: "keyboard_quit", key: "q" });
+      abortController.abort();
       return;
     }
 
     // Ctrl+C: double-tap to exit
     if (key === "\x03") {
-      if (tuiState?.ctrlCPending && Date.now() - tuiState.ctrlCTimestamp < 2000) {
-        // Second press within 2s -- exit
-        if (ctrlCTimer) {
-          clearTimeout(ctrlCTimer);
-          ctrlCTimer = null;
-        }
-        clearCtrlCPending();
-        tuiState.shutdownInProgress = true;
-        tuiState.viewOptions.shutdownInProgress = true;
-        tuiState.onUpdate?.();
-        log({ ts: new Date().toISOString(), level: "info", event: "keyboard_quit", key: "ctrl-c" });
-        if (tuiState?.onShutdown) {
-          tuiState.onShutdown();
-        } else {
-          abortController.abort();
-        }
+      if (tuiState?.ctrlCPending
+        && tuiState.pendingQuitKey === "ctrl-c"
+        && Date.now() - tuiState.ctrlCTimestamp < 2000) {
+        confirmQuit("ctrl-c");
         return;
       }
-      if (tuiState) {
-        // First press -- show confirmation footer
-        tuiState.ctrlCPending = true;
-        tuiState.ctrlCTimestamp = Date.now();
-        tuiState.viewOptions.ctrlCPending = true;
-        tuiState.onUpdate?.();
-        // Clear after ~2s
-        if (ctrlCTimer) clearTimeout(ctrlCTimer);
-        ctrlCTimer = setTimeout(() => {
-          ctrlCTimer = null;
-          if (!tuiState.ctrlCPending || tuiState.shutdownInProgress) return;
-          clearCtrlCPending();
-          tuiState.onUpdate?.();
-        }, 2000);
+      if (beginPendingQuitConfirmation("ctrl-c")) {
         return;
       }
       // No tuiState -- fall through to immediate abort
@@ -766,9 +787,9 @@ export function setupKeyboardShortcuts(
 
     if (!tuiState) return;
 
-    // Any non-Ctrl+C key clears the ctrlCPending state
+    // Any non-quit key clears the pending quit confirmation state
     if (tuiState.ctrlCPending) {
-      clearCtrlCPending();
+      clearPendingQuitConfirmation();
       if (ctrlCTimer) { clearTimeout(ctrlCTimer); ctrlCTimer = null; }
     }
 

@@ -172,7 +172,7 @@ describe("setupKeyboardShortcuts", () => {
     expect(ac.signal.aborted).toBe(false);
   });
 
-  it("q key triggers abort", () => {
+  it("q key still triggers abort without tui state", () => {
     const ac = new AbortController();
     const stdin = makeFakeStdin();
     const cleanup = setupKeyboardShortcuts(ac, () => {}, stdin as any);
@@ -181,7 +181,8 @@ describe("setupKeyboardShortcuts", () => {
     cleanup();
   });
 
-  it("q routes shutdown through onShutdown when provided", () => {
+  it("first q sets pending quit confirmation without shutting down", () => {
+    vi.useFakeTimers();
     const ac = new AbortController();
     const stdin = makeFakeStdin();
     const onShutdown = vi.fn();
@@ -190,9 +191,58 @@ describe("setupKeyboardShortcuts", () => {
 
     stdin.emit("data", "q");
 
+    expect(state.ctrlCPending).toBe(true);
+    expect(state.pendingQuitKey).toBe("q");
+    expect(state.viewOptions.ctrlCPending).toBe(true);
+    expect(state.viewOptions.pendingQuitKey).toBe("q");
+    expect(state.shutdownInProgress).toBe(false);
+    expect(onShutdown).not.toHaveBeenCalled();
+    expect(ac.signal.aborted).toBe(false);
+    cleanup();
+    vi.useRealTimers();
+  });
+
+  it("second q starts shutdown and routes through onShutdown", () => {
+    vi.useFakeTimers();
+    const ac = new AbortController();
+    const stdin = makeFakeStdin();
+    const onShutdown = vi.fn();
+    const state = makeTuiState({ onShutdown });
+    const cleanup = setupKeyboardShortcuts(ac, () => {}, stdin as any, state);
+
+    stdin.emit("data", "q");
+    stdin.emit("data", "q");
+
+    expect(state.ctrlCPending).toBe(false);
+    expect(state.pendingQuitKey).toBeUndefined();
+    expect(state.viewOptions.ctrlCPending).toBe(false);
+    expect(state.viewOptions.pendingQuitKey).toBeUndefined();
+    expect(state.shutdownInProgress).toBe(true);
+    expect(state.viewOptions.shutdownInProgress).toBe(true);
     expect(onShutdown).toHaveBeenCalledTimes(1);
     expect(ac.signal.aborted).toBe(false);
     cleanup();
+    vi.useRealTimers();
+  });
+
+  it("single q confirmation times out and clears pending state", () => {
+    vi.useFakeTimers();
+    const ac = new AbortController();
+    const stdin = makeFakeStdin();
+    const state = makeTuiState({ onShutdown: vi.fn() });
+    const cleanup = setupKeyboardShortcuts(ac, () => {}, stdin as any, state);
+
+    stdin.emit("data", "q");
+    vi.advanceTimersByTime(2500);
+
+    expect(state.ctrlCPending).toBe(false);
+    expect(state.pendingQuitKey).toBeUndefined();
+    expect(state.viewOptions.ctrlCPending).toBe(false);
+    expect(state.viewOptions.pendingQuitKey).toBeUndefined();
+    expect(state.shutdownInProgress).toBe(false);
+    expect(ac.signal.aborted).toBe(false);
+    cleanup();
+    vi.useRealTimers();
   });
 
   it("Escape pauses from the base dashboard", () => {
@@ -452,7 +502,8 @@ describe("setupKeyboardShortcuts", () => {
     cleanup();
   });
 
-  it("q still routes shutdown while help is visible", () => {
+  it("q uses the same pending confirmation flow while help is visible", () => {
+    vi.useFakeTimers();
     const ac = new AbortController();
     const stdin = makeFakeStdin();
     const onShutdown = vi.fn();
@@ -462,13 +513,23 @@ describe("setupKeyboardShortcuts", () => {
 
     stdin.emit("data", "q");
 
-    expect(onShutdown).toHaveBeenCalledTimes(1);
+    expect(state.ctrlCPending).toBe(true);
+    expect(state.pendingQuitKey).toBe("q");
+    expect(onShutdown).not.toHaveBeenCalled();
     expect(ac.signal.aborted).toBe(false);
     expect(state.showHelp).toBe(true);
+
+    stdin.emit("data", "q");
+
+    expect(state.ctrlCPending).toBe(false);
+    expect(state.shutdownInProgress).toBe(true);
+    expect(onShutdown).toHaveBeenCalledTimes(1);
     cleanup();
+    vi.useRealTimers();
   });
 
-  it("q still routes shutdown while paused", () => {
+  it("q uses the same pending confirmation flow while paused", () => {
+    vi.useFakeTimers();
     const ac = new AbortController();
     const stdin = makeFakeStdin();
     const onShutdown = vi.fn();
@@ -477,9 +538,18 @@ describe("setupKeyboardShortcuts", () => {
 
     stdin.emit("data", "q");
 
-    expect(onShutdown).toHaveBeenCalledTimes(1);
+    expect(state.ctrlCPending).toBe(true);
+    expect(state.pendingQuitKey).toBe("q");
+    expect(onShutdown).not.toHaveBeenCalled();
     expect(ac.signal.aborted).toBe(false);
+
+    stdin.emit("data", "q");
+
+    expect(state.ctrlCPending).toBe(false);
+    expect(state.shutdownInProgress).toBe(true);
+    expect(onShutdown).toHaveBeenCalledTimes(1);
     cleanup();
+    vi.useRealTimers();
   });
 
   it("double Ctrl+C still quits while help is visible", () => {
@@ -736,6 +806,12 @@ describe("setupKeyboardShortcuts", () => {
 
     stdin.emit("data", "\x1b[B");
     expect(state.controlsRowIndex).toBe(1);
+
+    stdin.emit("data", "q");
+    expect(state.ctrlCPending).toBe(true);
+    expect(state.pendingQuitKey).toBe("q");
+    expect(onShutdown).not.toHaveBeenCalled();
+    expect(ac.signal.aborted).toBe(false);
 
     stdin.emit("data", "q");
     expect(onShutdown).toHaveBeenCalledTimes(1);

@@ -2849,6 +2849,19 @@ describe("buildStatusLayout", () => {
     expect(footerText).not.toContain("update available");
   });
 
+  it("renders q confirmation footer when q quit is pending", () => {
+    const items = [makeStatusItem({ id: "A-1" })];
+    const layout = buildStatusLayout(items, 80, undefined, false, {
+      mergeStrategy: "auto",
+      ctrlCPending: true,
+      pendingQuitKey: "q",
+    });
+    const footerText = layout.footerLines.map(stripAnsi).join("\n");
+    expect(footerText).toContain("Press q again to quit");
+    expect(footerText).not.toContain("Press Ctrl-C again to exit");
+    expect(footerText).not.toContain("c controls");
+  });
+
   it("renders a red shutdown footer when shutdown is in progress", () => {
     const items = [makeStatusItem({ id: "A-1" })];
     const layout = buildStatusLayout(items, 80, undefined, false, {
@@ -3573,7 +3586,7 @@ describe("renderHelpOverlay", () => {
     const text = stripAnsi(lines.join("\n"));
     expect(text).toContain("Escape      Close overlay / pause or resume dashboard");
     expect(text).toContain("p           Pause or resume dashboard");
-    expect(text).toContain("q           Quit from any TUI state");
+    expect(text).toContain("q x2        Quit (double-tap) from any TUI state");
   });
 
   it("documents timeout extension shortcut", () => {

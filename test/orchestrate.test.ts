@@ -3483,6 +3483,70 @@ describe("setupKeyboardShortcuts", () => {
 
   // ── Ctrl+C double-tap ──────────────────────────────────────────────
 
+  it("first q sets pending quit state without aborting", () => {
+    const ac = new AbortController();
+    const stdin = mockStdin();
+    const tuiState: TuiState = {
+      scrollOffset: 0,
+      viewOptions: { mergeStrategy: "auto" },
+      mergeStrategy: "auto",
+      bypassEnabled: false,
+      ctrlCPending: false,
+      shutdownInProgress: false,
+      ctrlCTimestamp: 0,
+      showHelp: false,
+      onShutdown: vi.fn(),
+    };
+
+    const cleanup = setupKeyboardShortcuts(ac, () => {}, stdin, tuiState);
+
+    (stdin as any)._emit("data", "q");
+
+    expect(ac.signal.aborted).toBe(false);
+    expect(tuiState.ctrlCPending).toBe(true);
+    expect(tuiState.pendingQuitKey).toBe("q");
+    expect(tuiState.viewOptions.ctrlCPending).toBe(true);
+    expect(tuiState.viewOptions.pendingQuitKey).toBe("q");
+    expect(tuiState.ctrlCTimestamp).toBeGreaterThan(0);
+
+    cleanup();
+  });
+
+  it("second q within 2s enters shutdown", () => {
+    const ac = new AbortController();
+    const logs: LogEntry[] = [];
+    const stdin = mockStdin();
+    const tuiState: TuiState = {
+      scrollOffset: 0,
+      viewOptions: { mergeStrategy: "auto" },
+      mergeStrategy: "auto",
+      bypassEnabled: false,
+      ctrlCPending: false,
+      shutdownInProgress: false,
+      ctrlCTimestamp: 0,
+      showHelp: false,
+      onShutdown: vi.fn(),
+    };
+
+    const cleanup = setupKeyboardShortcuts(ac, (e) => logs.push(e), stdin, tuiState);
+
+    (stdin as any)._emit("data", "q");
+    expect(ac.signal.aborted).toBe(false);
+
+    (stdin as any)._emit("data", "q");
+    expect(ac.signal.aborted).toBe(false);
+    expect(tuiState.ctrlCPending).toBe(false);
+    expect(tuiState.pendingQuitKey).toBeUndefined();
+    expect(tuiState.viewOptions.ctrlCPending).toBe(false);
+    expect(tuiState.viewOptions.pendingQuitKey).toBeUndefined();
+    expect(tuiState.shutdownInProgress).toBe(true);
+    expect(tuiState.viewOptions.shutdownInProgress).toBe(true);
+    expect(tuiState.onShutdown).toHaveBeenCalledTimes(1);
+    expect(logs.some((l: any) => l.event === "keyboard_quit" && l.key === "q")).toBe(true);
+
+    cleanup();
+  });
+
   it("first Ctrl+C sets ctrlCPending, does not abort", () => {
     const ac = new AbortController();
     const stdin = mockStdin();
@@ -7234,6 +7298,7 @@ describe("interactive watch operator session", () => {
     expect(writes.join("")).toContain("Live snapshot");
 
     (stdin as any)._emit("data", "q");
+    (stdin as any)._emit("data", "q");
     await sessionPromise;
   });
 
@@ -7351,6 +7416,7 @@ describe("interactive watch operator session", () => {
     expect(renderFrame.mock.calls.length).toBeGreaterThan(renderCountAfterSnapshot);
 
     (stdin as any)._emit("data", "q");
+    (stdin as any)._emit("data", "q");
     const result = await sessionPromise;
 
     expect(result.completionAction).toBe("quit");
@@ -7433,6 +7499,7 @@ describe("interactive watch operator session", () => {
     expect(tuiState.showControls).toBe(false);
 
     (stdin as any)._emit("data", "q");
+    (stdin as any)._emit("data", "q");
     const result = await sessionPromise;
 
     expect(result.lastSnapshot.interactiveTiming?.timingsMs.totalBlocking).toBe(7_000);
@@ -7493,6 +7560,7 @@ describe("interactive watch operator session", () => {
     (stdin as any)._emit("data", "i");
     expect(tuiState.detailItemId).toBe("H-TRS-5");
 
+    (stdin as any)._emit("data", "q");
     (stdin as any)._emit("data", "q");
     const result = await sessionPromise;
 
@@ -7613,6 +7681,7 @@ describe("interactive watch operator session", () => {
     expect(writes.join("")).toContain("Press r to restart or q to quit");
 
     (stdin as any)._emit("data", "q");
+    (stdin as any)._emit("data", "q");
     const result = await sessionPromise;
 
     expect(result.completionAction).toBe("quit");
@@ -7651,6 +7720,7 @@ describe("interactive watch operator session", () => {
     await Promise.resolve();
 
     (stdin as any)._emit("data", "q");
+    (stdin as any)._emit("data", "q");
     await sessionPromise;
 
     expect(writes.join("")).toContain("Engine disconnected");
@@ -7684,6 +7754,7 @@ describe("interactive watch operator session", () => {
     await Promise.resolve();
     await Promise.resolve();
 
+    (stdin as any)._emit("data", "q");
     (stdin as any)._emit("data", "q");
     await sessionPromise;
 
@@ -7732,6 +7803,7 @@ describe("interactive watch operator session", () => {
     await Promise.resolve();
 
     (stdin as any)._emit("data", "q");
+    (stdin as any)._emit("data", "q");
     await sessionPromise;
 
     expect(writes.join("")).toContain("Restoring runtime state");
@@ -7765,6 +7837,7 @@ describe("interactive watch operator session", () => {
     (stdin as any)._emit("data", "?");
     expect(tuiState.showHelp).toBe(true);
 
+    (stdin as any)._emit("data", "q");
     (stdin as any)._emit("data", "q");
     const result = await sessionPromise;
 
@@ -7960,6 +8033,7 @@ describe("interactive watch operator session", () => {
     expect((thirdChild.stdin.write as any).mock.calls).toHaveLength(1);
 
     (stdin as any)._emit("data", "q");
+    (stdin as any)._emit("data", "q");
     await sessionPromise;
 
     activeSender?.({ type: "set-pause", paused: false });
@@ -8005,6 +8079,7 @@ describe("interactive watch operator session", () => {
 
     await expect(resultPromise).resolves.toEqual({ mode: "shared", code: "ABCD-1234" });
 
+    (stdin as any)._emit("data", "q");
     (stdin as any)._emit("data", "q");
     await sessionPromise;
   });

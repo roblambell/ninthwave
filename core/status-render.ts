@@ -50,6 +50,8 @@ export interface ScheduleWorkerInfo {
 
 export type EmptyStateMode = "watch-armed";
 
+export type QuitConfirmKey = "q" | "ctrl-c";
+
 export interface ViewOptions {
   showBlockerDetail?: boolean;
   sessionStartedAt?: string;
@@ -63,8 +65,10 @@ export interface ViewOptions {
   pendingStrategy?: MergeStrategy;
   /** Live pending merge strategy countdown in seconds. */
   pendingStrategyCountdownSeconds?: number;
-  /** When true, footer shows "Press Ctrl-C again to exit" instead of strategy indicator. */
+  /** When true, footer shows a pending quit confirmation instead of the strategy indicator. */
   ctrlCPending?: boolean;
+  /** Which key started the pending quit confirmation. Defaults to Ctrl-C for legacy callers. */
+  pendingQuitKey?: QuitConfirmKey;
   /** When true, footer shows a red shutdown-in-progress message. */
   shutdownInProgress?: boolean;
   /** When true, render the help overlay instead of the normal frame. */
@@ -163,6 +167,13 @@ function formatStrategyFooterLine(
 
 function formatShortcutHint(key: string, label: string): string {
   return `${RESET}${key}${DIM} ${label}${RESET}`;
+}
+
+function formatPendingQuitFooterLine(pendingQuitKey: QuitConfirmKey = "ctrl-c"): string {
+  if (pendingQuitKey === "q") {
+    return `  ${YELLOW}Press q again to quit${RESET}`;
+  }
+  return `  ${YELLOW}Press Ctrl-C again to exit${RESET}`;
 }
 
 function formatShortcutChord(
@@ -1955,7 +1966,7 @@ export function buildStatusLayout(
   if (viewOptions?.shutdownInProgress) {
     footerLines.push(`  ${RED}Closing...${RESET}`);
   } else if (viewOptions?.ctrlCPending) {
-    footerLines.push(`  ${YELLOW}Press Ctrl-C again to exit${RESET}`);
+    footerLines.push(formatPendingQuitFooterLine(viewOptions.pendingQuitKey));
   } else if (viewOptions?.mergeStrategy) {
     const left = formatStrategyFooterLine(
       viewOptions.mergeStrategy,
@@ -2318,7 +2329,7 @@ function buildPanelFooter(
   if (viewOptions?.shutdownInProgress) {
     footerLines.push(`  ${RED}Closing...${RESET}`);
   } else if (viewOptions?.ctrlCPending) {
-    footerLines.push(`  ${YELLOW}Press Ctrl-C again to exit${RESET}`);
+    footerLines.push(formatPendingQuitFooterLine(viewOptions.pendingQuitKey));
   } else if (viewOptions?.mergeStrategy) {
     footerLines.push(
       formatStrategyFooterLine(
@@ -2672,7 +2683,7 @@ export function renderHelpOverlay(
     `  Enter/i     Item detail panel`,
     `  Escape      Close overlay / pause or resume dashboard`,
     `  p           Pause or resume dashboard`,
-    `  q           Quit from any TUI state`,
+    `  q x2        Quit (double-tap) from any TUI state`,
     `  Ctrl+C x2   Quit (double-tap)`,
     `  d           Toggle blocker sub-lines`,
     `  x           Extend worker timeout`,
