@@ -80,6 +80,8 @@ function createFakeBundle(dir: string): string {
       "nw inbox --wait YOUR_WORK_ITEM_ID",
       "set the timeout to the longest practical value available",
       "immediately run the same wait command again",
+      "Write decision entries to .ninthwave/decisions/${TIMESTAMP}--YOUR_WORK_ITEM_ID.md",
+      "do **not** move them into archival review subdirectories",
       "",
     ].join("\n"),
   );
@@ -707,6 +709,7 @@ describe("initProject", () => {
     // Scaffolding completed
     expect(existsSync(join(projectDir, ".ninthwave/work/.gitkeep"))).toBe(true);
     expect(existsSync(join(projectDir, ".ninthwave/friction/.gitkeep"))).toBe(true);
+    expect(existsSync(join(projectDir, ".ninthwave/decisions/.gitkeep"))).toBe(true);
     expect(existsSync(join(projectDir, ".ninthwave/.gitignore"))).toBe(true);
     expect(existsSync(join(userStateDir(projectDir), "version"))).toBe(true);
 
@@ -737,6 +740,9 @@ describe("initProject", () => {
     expect(readFileSync(join(projectDir, ".claude/agents/implementer.md"), "utf-8")).toContain(
       "immediately run the same wait command again",
     );
+    expect(readFileSync(join(projectDir, ".claude/agents/implementer.md"), "utf-8")).toContain(
+      ".ninthwave/decisions/${TIMESTAMP}--YOUR_WORK_ITEM_ID.md",
+    );
 
     // Detection result returned
     expect(detection).toBeDefined();
@@ -760,9 +766,10 @@ describe("initProject", () => {
     expect(existsSync(join(projectDir, ".ninthwave/config.json"))).toBe(true);
     expect(existsSync(join(projectDir, ".ninthwave/work/.gitkeep"))).toBe(true);
     expect(existsSync(join(projectDir, ".ninthwave/friction/.gitkeep"))).toBe(true);
+    expect(existsSync(join(projectDir, ".ninthwave/decisions/.gitkeep"))).toBe(true);
   });
 
-  it("creates .ninthwave/work/ and .ninthwave/friction/ with .gitkeep files", () => {
+  it("creates .ninthwave/work/, friction/, and decisions/ with .gitkeep files", () => {
     const projectDir = setupTempRepo();
     const bundleDir = createFakeBundle(projectDir + "-bundle-parent");
 
@@ -776,14 +783,17 @@ describe("initProject", () => {
     // Both directories exist
     expect(existsSync(join(projectDir, ".ninthwave/work"))).toBe(true);
     expect(existsSync(join(projectDir, ".ninthwave/friction"))).toBe(true);
+    expect(existsSync(join(projectDir, ".ninthwave/decisions"))).toBe(true);
 
-    // .gitkeep files exist in both
+    // .gitkeep files exist in all inboxes
     expect(existsSync(join(projectDir, ".ninthwave/work/.gitkeep"))).toBe(true);
     expect(existsSync(join(projectDir, ".ninthwave/friction/.gitkeep"))).toBe(true);
+    expect(existsSync(join(projectDir, ".ninthwave/decisions/.gitkeep"))).toBe(true);
 
     // .gitkeep files are empty
     expect(readFileSync(join(projectDir, ".ninthwave/work/.gitkeep"), "utf-8")).toBe("");
     expect(readFileSync(join(projectDir, ".ninthwave/friction/.gitkeep"), "utf-8")).toBe("");
+    expect(readFileSync(join(projectDir, ".ninthwave/decisions/.gitkeep"), "utf-8")).toBe("");
   });
 
   it("overwrites .ninthwave/config.json with fresh detection (init is authoritative)", () => {
@@ -869,6 +879,7 @@ describe("initProject -- .ninthwave/.gitignore", () => {
     expect(content).toContain("!config.json");
     expect(content).toContain("!work/");
     expect(content).toContain("!schedules/");
+    expect(content).toContain("!decisions/");
   });
 
   it("does not create a root .gitignore when projectDir equals bundleDir", () => {
@@ -901,6 +912,7 @@ describe("initProject -- .ninthwave/.gitignore", () => {
     const nwGitignore = readFileSync(join(projectDir, ".ninthwave", ".gitignore"), "utf-8");
     expect(nwGitignore).toContain("*");
     expect(nwGitignore).toContain("!config.json");
+    expect(nwGitignore).toContain("!decisions/");
   });
 
   it("does not duplicate .ninthwave/.gitignore on re-run", () => {
@@ -1522,6 +1534,7 @@ describe("initProject -- prerequisite checking", () => {
     expect(existsSync(join(projectDir, ".ninthwave/config.json"))).toBe(true);
     expect(existsSync(join(projectDir, ".ninthwave/work/.gitkeep"))).toBe(true);
     expect(existsSync(join(projectDir, ".ninthwave/friction/.gitkeep"))).toBe(true);
+    expect(existsSync(join(projectDir, ".ninthwave/decisions/.gitkeep"))).toBe(true);
     expect(detection).toBeDefined();
   });
 
@@ -2251,6 +2264,7 @@ describe("initProject -- preserves existing files", () => {
     expect(content).toContain("!work/");
     expect(content).toContain("!schedules/");
     expect(content).toContain("!friction/");
+    expect(content).toContain("!decisions/");
   });
 
   it("does not modify root .gitignore", () => {

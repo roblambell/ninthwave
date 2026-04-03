@@ -174,7 +174,7 @@ TUI behavior:
 - If output matches a fatal tool failure, close the workspace and mark the item `stuck` with a specific `failureReason`.
 - If output indicates an active composing/generating state, treat it as a positive activity signal and suppress false stall detection.
 
-This directly addresses the friction note in `.ninthwave/friction/processed/2026-03-27T13-11-30Z--supervisor.md`.
+This directly addresses the friction note captured in `.ninthwave/friction/2026-03-27T13-11-30Z--supervisor.md` before review cleanup removed the inbox entry.
 
 ### 4. Headless workers
 
