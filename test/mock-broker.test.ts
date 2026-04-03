@@ -3,8 +3,18 @@
 // dependency filtering, duplicate claim prevention, disconnect/release/reconnect,
 // and JSONL logging.
 
-import { describe, it, expect, afterEach, beforeEach } from "vitest";
+import { describe, it, expect, afterEach } from "vitest";
 import { MockBroker, type CrewEvent } from "../core/mock-broker.ts";
+import {
+  checkCrewHeartbeats,
+  claimNextWorkItem,
+  claimScheduleSlot,
+  completeWorkItem,
+  connectDaemon,
+  disconnectDaemon,
+  syncCrewItems,
+} from "../core/broker-state.ts";
+import { InMemoryBrokerStore, type BrokerSocket } from "../core/broker-store.ts";
 import { readFileSync, existsSync, rmSync, mkdirSync } from "fs";
 import { join } from "path";
 import { tmpdir } from "os";
@@ -150,6 +160,10 @@ function tick(ms = 50): Promise<void> {
   return new Promise((r) => setTimeout(r, ms));
 }
 
+function fakeSocket(): BrokerSocket {
+  return { send() {} };
+}
+
 // ── Setup / Teardown ────────────────────────────────────────────────
 
 afterEach(() => {
@@ -164,6 +178,75 @@ afterEach(() => {
 // ── Tests ───────────────────────────────────────────────────────────
 
 describe("mock-broker", () => {
+  describe("shared broker core", () => {
+    it("applies author affinity and dependency gating in shared state", () => {
+      const store = new InMemoryBrokerStore();
+      const crew = store.createCrew("ABCD-EFGH-IJKL-MNOP");
+
+      connectDaemon(crew, "d1", "worker-1", fakeSocket(), "alice@example.com", 100);
+      connectDaemon(crew, "d2", "worker-2", fakeSocket(), "bob@example.com", 100);
+      syncCrewItems(crew, "d1", [
+        syncItem("blocked-alice", { author: "alice@example.com", dependencies: ["dep-a"] }),
+        syncItem("pool-work", { author: "charlie@example.com", priority: 1 }),
+        syncItem("dep-a", { author: "alice@example.com", priority: 3 }),
+      ], 101);
+
+      const firstClaim = claimNextWorkItem(crew, "d1");
+      expect(firstClaim.workItemId).toBe("dep-a");
+
+      const secondClaim = claimNextWorkItem(crew, "d2");
+      expect(secondClaim.workItemId).toBe("pool-work");
+
+      completeWorkItem(crew, "d1", "dep-a");
+
+      const thirdClaim = claimNextWorkItem(crew, "d1");
+      expect(thirdClaim.workItemId).toBe("blocked-alice");
+    });
+
+    it("dedupes schedule claims in shared state", () => {
+      const store = new InMemoryBrokerStore();
+      const crew = store.createCrew("ABCD-EFGH-IJKL-MNOP");
+
+      const first = claimScheduleSlot(crew, "d1", "daily-test", "2026-03-28T10:00:00.000Z", 100);
+      const second = claimScheduleSlot(crew, "d2", "daily-test", "2026-03-28T10:00:00.000Z", 101);
+
+      expect(first.granted).toBe(true);
+      expect(second.granted).toBe(false);
+    });
+
+    it("returns reconnect resume state before grace release", () => {
+      const store = new InMemoryBrokerStore();
+      const crew = store.createCrew("ABCD-EFGH-IJKL-MNOP");
+
+      connectDaemon(crew, "d1", "worker-1", fakeSocket(), "", 100);
+      syncCrewItems(crew, "d1", [syncItem("work-item-A")], 101);
+      claimNextWorkItem(crew, "d1");
+      disconnectDaemon(crew, "d1", 150);
+
+      const reconnect = connectDaemon(crew, "d1", "worker-1", fakeSocket(), "", 175);
+      expect(reconnect.reconnectState?.resumed).toEqual(["work-item-A"]);
+      expect(reconnect.reconnectState?.released).toEqual([]);
+      expect(reconnect.reconnectState?.reclaimed).toEqual([]);
+    });
+
+    it("releases claimed work after grace period in shared state", () => {
+      const store = new InMemoryBrokerStore();
+      const crew = store.createCrew("ABCD-EFGH-IJKL-MNOP");
+
+      connectDaemon(crew, "d1", "worker-1", fakeSocket(), "", 100);
+      connectDaemon(crew, "d2", "worker-2", fakeSocket(), "", 100);
+      syncCrewItems(crew, "d1", [syncItem("work-item-A")], 101);
+      claimNextWorkItem(crew, "d1");
+      disconnectDaemon(crew, "d1", 150);
+
+      const check = checkCrewHeartbeats(crew, { heartbeatTimeoutMs: 50, gracePeriodMs: 25 }, 176);
+      expect(check.events.some((event) => event.event === "abandon" && event.work_item_path === "work-item-A")).toBe(true);
+
+      const reclaim = claimNextWorkItem(crew, "d2");
+      expect(reclaim.workItemId).toBe("work-item-A");
+    });
+  });
+
   describe("crew creation", () => {
     it("creates a crew with a 16-char XXXX-XXXX-XXXX-XXXX code", async () => {
       const { port } = startBroker();

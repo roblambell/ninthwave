@@ -17,6 +17,22 @@
 
 import { appendFileSync, mkdirSync } from "fs";
 import { dirname } from "path";
+import type { ClientMessage as InboundMessage, ServerMessage as OutboundMessage, SyncItem as SyncItemPayload } from "./crew.ts";
+import {
+  buildCrewStatusUpdate,
+  checkCrewHeartbeats,
+  claimNextWorkItem,
+  claimScheduleSlot,
+  completeWorkItem,
+  connectDaemon,
+  disconnectDaemon,
+  recordHeartbeat,
+  syncCrewItems,
+  type CrewEvent,
+  type CrewStatusUpdate,
+  DEFAULT_SCHEDULE_CLAIM_EXPIRY_MS,
+} from "./broker-state.ts";
+import { InMemoryBrokerStore, type BrokerSocket, type CrewState } from "./broker-store.ts";
 
 // ── Types ───────────────────────────────────────────────────────────
 
@@ -33,122 +49,21 @@ export interface BrokerOptions {
   checkIntervalMs?: number;
 }
 
-export interface ScheduleClaimEntry {
-  daemonId: string;
-  expiresAt: number;
-}
-
-export interface CrewState {
-  code: string;
-  items: Map<string, WorkEntry>;
-  daemons: Map<string, DaemonState>;
-  /** Schedule claim deduplication: key = "taskId:scheduleTime" -> claim entry. */
-  scheduleClaims: Map<string, ScheduleClaimEntry>;
-}
-
-export interface WorkEntry {
-  path: string;
-  priority: number; // lower = higher priority
-  dependencies: string[]; // dependency IDs (from sync metadata)
-  author: string; // git author email (from sync metadata)
-  syncedAt: number;
-  creatorDaemonId: string;
-  claimedBy: string | null;
-  completedBy: string | null;
-}
-
-export interface DaemonState {
-  id: string;
-  name: string;
-  /** Operator identity (git email of the human running this daemon). */
-  operatorId: string;
-  ws: WebSocket | null;
-  lastHeartbeat: number;
-  disconnectedAt: number | null;
-  claimedItems: Set<string>;
-  /** True after grace period expired and work items were released. Prevents double-release. */
-  released: boolean;
-}
-
-export interface CrewEvent {
-  ts: string;
-  crew_id: string;
-  daemon_id: string;
-  event: "claim" | "sync" | "complete" | "disconnect" | "reconnect" | "abandon" | "schedule_claim" | "report";
-  work_item_path: string;
-  metadata: { affinity: "author" | "pool" } | Record<string, unknown>;
-}
-
-// ── Crew status type (shared with TUI) ─────────────────────────────
-
-export interface CrewStatusUpdate {
-  type: "crew_update";
-  crewCode: string;
-  daemonCount: number;
-  availableCount: number;
-  claimedCount: number;
-  completedCount: number;
-  daemonNames: string[];
-  claimedItems: Array<{ id: string; daemonId: string }>;
-}
-
-// ── Message types ───────────────────────────────────────────────────
-// Aligned with crew.ts ClientMessage / ServerMessage protocol.
-
-type SyncItemPayload = {
-  id: string;
-  dependencies: string[];
-  priority: number;
-  author: string;
-};
-
-type InboundMessage =
-  | { type: "sync"; daemonId: string; items: SyncItemPayload[] }
-  | { type: "claim"; requestId: string; daemonId: string }
-  | { type: "complete"; workItemId: string; daemonId: string }
-  | { type: "heartbeat"; daemonId: string; ts: string }
-  | {
-    type: "report";
-    daemonId: string;
-    event: string;
-    workItemPath: string;
-    metadata: Record<string, unknown>;
-    model?: string;
-    sessionId?: string;
-    tokenUsage?: {
-      inputTokens: number;
-      outputTokens: number;
-      cacheTokens?: number;
-    };
-  }
-  | { type: "schedule_claim"; requestId: string; daemonId: string; taskId: string; scheduleTime: string };
-
-type OutboundMessage =
-  | { type: "sync_ack"; crewCode: string; workItemIds: string[] }
-  | { type: "claim_response"; requestId: string; workItemId: string | null }
-  | { type: "complete_ack"; workItemId: string }
-  | { type: "report_ack"; event: string }
-  | { type: "heartbeat_ack"; ts: string }
-  | { type: "reconnect_state"; resumed: string[]; released: string[]; reclaimed: string[] }
-  | { type: "schedule_claim_response"; requestId: string; taskId: string; granted: boolean }
-  | CrewStatusUpdate
-  | { type: "error"; message: string };
-
-/** Default expiry for schedule claims: 30 minutes. */
-const SCHEDULE_CLAIM_EXPIRY_MS = 30 * 60 * 1_000;
+export type { ScheduleClaimEntry, WorkEntry, DaemonState } from "./broker-store.ts";
+export type { CrewEvent, CrewStatusUpdate } from "./broker-state.ts";
 
 // ── Broker ──────────────────────────────────────────────────────────
 
 export class MockBroker {
   private server: ReturnType<typeof Bun.serve> | null = null;
-  private crews = new Map<string, CrewState>();
+  private store = new InMemoryBrokerStore();
   private eventLogPath: string;
   private heartbeatTimeoutMs: number;
   private gracePeriodMs: number;
   private heartbeatInterval: ReturnType<typeof setInterval> | null = null;
 
   /** Mapping from WebSocket to { crewCode, daemonId } for routing. */
-  private wsMap = new Map<WebSocket, { crewCode: string; daemonId: string }>();
+  private wsMap = new Map<BrokerSocket, { crewCode: string; daemonId: string }>();
 
   constructor(private opts: BrokerOptions = {}) {
     this.eventLogPath = opts.eventLogPath ?? ".ninthwave/crew-events.jsonl";
@@ -168,12 +83,12 @@ export class MockBroker {
           POST: async (req: Request) => {
             let requestedCode: string | undefined;
             try {
-              const body = await req.json();
+              const body = await req.json() as { code?: unknown };
               if (body && typeof body.code === "string" && body.code.length > 0) {
                 requestedCode = body.code;
               }
             } catch { /* no body or malformed */ }
-            const code = requestedCode && broker.crews.has(requestedCode)
+            const code = requestedCode && broker.store.hasCrew(requestedCode)
               ? requestedCode
               : broker.createCrew(requestedCode);
             return Response.json({ code }, { status: 201 });
@@ -196,7 +111,7 @@ export class MockBroker {
             return new Response("Missing daemonId query param", { status: 400 });
           }
 
-          const crew = broker.crews.get(code);
+          const crew = broker.store.getCrew(code);
           if (!crew) {
             return new Response("Crew not found", { status: 404 });
           }
@@ -255,7 +170,7 @@ export class MockBroker {
       this.checkHeartbeats();
     }, this.opts.checkIntervalMs ?? 1_000);
 
-    return this.server.port;
+    return this.server?.port ?? 0;
   }
 
   /** Stop the broker and clean up. */
@@ -278,19 +193,14 @@ export class MockBroker {
 
   /** Get a crew by code. */
   getCrew(code: string): CrewState | undefined {
-    return this.crews.get(code);
+    return this.store.getCrew(code);
   }
 
   // ── Crew management ───────────────────────────────────────────────
 
   private createCrew(requestedCode?: string): string {
     const code = requestedCode ?? this.generateCode();
-    this.crews.set(code, {
-      code,
-      items: new Map(),
-      daemons: new Map(),
-      scheduleClaims: new Map(),
-    });
+    this.store.createCrew(code);
     return code;
   }
 
@@ -302,95 +212,36 @@ export class MockBroker {
         Array.from({ length: 4 }, () => chars[Math.floor(Math.random() * chars.length)]).join(""),
       );
       code = parts.join("-");
-    } while (this.crews.has(code));
+    } while (this.store.hasCrew(code));
     return code;
   }
 
   // ── Daemon lifecycle ──────────────────────────────────────────────
 
-  private handleDaemonConnect(crewCode: string, daemonId: string, name: string, ws: WebSocket, operatorId: string = ""): void {
-    const crew = this.crews.get(crewCode);
+  private handleDaemonConnect(crewCode: string, daemonId: string, name: string, ws: BrokerSocket, operatorId: string = ""): void {
+    const crew = this.store.getCrew(crewCode);
     if (!crew) return;
 
-    const existing = crew.daemons.get(daemonId);
-    if (existing) {
-      // Reconnecting daemon
-      const wasDisconnected = existing.disconnectedAt !== null || existing.released;
-      existing.ws = ws;
-      existing.lastHeartbeat = Date.now();
-      existing.disconnectedAt = null;
-      existing.released = false;
-      existing.name = name;
-      existing.operatorId = operatorId;
-
-      if (wasDisconnected) {
-        // Determine which work items are still claimed vs released/re-claimed
-        const resumed: string[] = [];
-        const released: string[] = [];
-        const reclaimed: string[] = [];
-
-        for (const workItemPath of existing.claimedItems) {
-          const workItem = crew.items.get(workItemPath);
-          if (!workItem) {
-            released.push(workItemPath);
-            continue;
-          }
-          if (workItem.claimedBy === daemonId) {
-            resumed.push(workItemPath);
-          } else if (workItem.claimedBy !== null) {
-            reclaimed.push(workItemPath);
-          } else {
-            released.push(workItemPath);
-          }
-        }
-
-        // Remove reclaimed and released from this daemon's claimed set
-        for (const p of [...released, ...reclaimed]) {
-          existing.claimedItems.delete(p);
-        }
-
-        this.logEvent(crewCode, daemonId, "reconnect", "", {});
-        this.send(ws, {
-          type: "reconnect_state",
-          resumed,
-          released,
-          reclaimed,
-        });
-      }
-    } else {
-      // New daemon
-      crew.daemons.set(daemonId, {
-        id: daemonId,
-        name,
-        operatorId,
-        ws,
-        lastHeartbeat: Date.now(),
-        disconnectedAt: null,
-        claimedItems: new Set(),
-        released: false,
-      });
+    const result = connectDaemon(crew, daemonId, name, ws, operatorId);
+    this.writeEvents(result.events);
+    if (result.reconnectState) {
+      this.send(ws, result.reconnectState);
     }
-
-    // Broadcast crew status to all connected daemons (including the new one)
     this.broadcastCrewUpdate(crew);
   }
 
   private handleDaemonDisconnect(crewCode: string, daemonId: string): void {
-    const crew = this.crews.get(crewCode);
+    const crew = this.store.getCrew(crewCode);
     if (!crew) return;
 
-    const daemon = crew.daemons.get(daemonId);
-    if (!daemon) return;
-
-    daemon.ws = null;
-    daemon.disconnectedAt = Date.now();
-    this.logEvent(crewCode, daemonId, "disconnect", "", {});
+    const result = disconnectDaemon(crew, daemonId);
+    this.writeEvents(result.events);
   }
 
   // ── Message handling ──────────────────────────────────────────────
 
-  private handleMessage(crewCode: string, daemonId: string, msg: InboundMessage, ws: WebSocket): void {
-    const crew = this.crews.get(crewCode);
+  private handleMessage(crewCode: string, daemonId: string, msg: InboundMessage, ws: BrokerSocket): void {
+    const crew = this.store.getCrew(crewCode);
     if (!crew) return;
 
     const daemon = crew.daemons.get(daemonId);
@@ -410,7 +261,7 @@ export class MockBroker {
         this.handleScheduleClaim(crew, daemonId, msg.requestId, msg.taskId, msg.scheduleTime, ws);
         break;
       case "heartbeat":
-        daemon.lastHeartbeat = Date.now();
+        recordHeartbeat(crew, daemonId);
         this.send(ws, { type: "heartbeat_ack", ts: msg.ts });
         break;
       case "report":
@@ -420,117 +271,31 @@ export class MockBroker {
     }
   }
 
-  private handleSync(crew: CrewState, daemonId: string, items: SyncItemPayload[], ws: WebSocket): void {
-    const syncedIds = new Set(items.map((i) => i.id));
-
-    for (const item of items) {
-      const existing = crew.items.get(item.id);
-      if (existing) {
-        // Idempotent upsert: update priority, dependencies, and author from latest sync
-        existing.priority = item.priority;
-        existing.dependencies = item.dependencies;
-        existing.author = item.author;
-      } else {
-        crew.items.set(item.id, {
-          path: item.id,
-          priority: item.priority,
-          dependencies: item.dependencies,
-          author: item.author,
-          syncedAt: Date.now(),
-          creatorDaemonId: daemonId,
-          claimedBy: null,
-          completedBy: null,
-        });
-        this.logEvent(crew.code, daemonId, "sync", item.id, { affinity: "author" });
-      }
-    }
-
-    // Reconcile stale items: items previously synced by this daemon that are no
-    // longer in the payload have been delivered/removed from the work directory.
-    // Mark them as completed so they don't block downstream dependency checks.
-    for (const [id, entry] of crew.items) {
-      if (
-        entry.creatorDaemonId === daemonId &&
-        !syncedIds.has(id) &&
-        entry.completedBy === null
-      ) {
-        entry.completedBy = daemonId;
-        entry.claimedBy = null;
-        this.logEvent(crew.code, daemonId, "reconcile_complete", id, {});
-      }
-    }
-
-    // Respond with sync_ack containing all known work item IDs.
-    const allWorkItemIds = Array.from(crew.items.keys());
-    this.send(ws, { type: "sync_ack", crewCode: crew.code, workItemIds: allWorkItemIds });
-    // Broadcast crew status after sync
+  private handleSync(crew: CrewState, daemonId: string, items: SyncItemPayload[], ws: BrokerSocket): void {
+    const result = syncCrewItems(crew, daemonId, items);
+    this.writeEvents(result.events);
+    this.send(ws, { type: "sync_ack", crewCode: crew.code, workItemIds: result.workItemIds });
     this.broadcastCrewUpdate(crew);
   }
 
-  private handleClaimRequest(crew: CrewState, daemonId: string, requestId: string, ws: WebSocket): void {
-    const daemon = crew.daemons.get(daemonId);
-    if (!daemon) return;
-
-    // Find available items: unclaimed, uncompleted, and all dependencies resolved.
-    // A dependency is resolved when it either doesn't exist in the crew's items
-    // map (external/previously completed) or exists with completedBy !== null.
-    // This matches the orchestrator's semantics: untracked deps = satisfied.
-    const available = Array.from(crew.items.values()).filter(
-      (t) =>
-        t.claimedBy === null &&
-        t.completedBy === null &&
-        t.dependencies.every((depId) => {
-          const dep = crew.items.get(depId);
-          return !dep || dep.completedBy !== null;
-        }),
-    );
-
-    if (available.length === 0) {
-      this.send(ws, { type: "claim_response", requestId, workItemId: null });
-      return;
+  private handleClaimRequest(crew: CrewState, daemonId: string, requestId: string, ws: BrokerSocket): void {
+    const result = claimNextWorkItem(crew, daemonId);
+    this.writeEvents(result.events);
+    this.send(ws, { type: "claim_response", requestId, workItemId: result.workItemId });
+    if (result.changed) {
+      this.broadcastCrewUpdate(crew);
     }
-
-    // Sort: author affinity first (human steering preference), then priority
-    // (lower = higher), then oldest first. Author affinity matches the requesting
-    // daemon's operatorId against each item's author field.
-    const operatorId = daemon.operatorId;
-    available.sort((a, b) => {
-      const aAuthor = operatorId !== "" && a.author === operatorId ? 0 : 1;
-      const bAuthor = operatorId !== "" && b.author === operatorId ? 0 : 1;
-      if (aAuthor !== bAuthor) return aAuthor - bAuthor;
-      if (a.priority !== b.priority) return a.priority - b.priority;
-      return a.syncedAt - b.syncedAt;
-    });
-
-    const workItem = available[0]!;
-    workItem.claimedBy = daemonId;
-    daemon.claimedItems.add(workItem.path);
-
-    const affinity: "author" | "pool" =
-      operatorId !== "" && workItem.author === operatorId ? "author" : "pool";
-    this.logEvent(crew.code, daemonId, "claim", workItem.path, { affinity });
-    this.send(ws, { type: "claim_response", requestId, workItemId: workItem.path });
-    // Broadcast crew status after claim
-    this.broadcastCrewUpdate(crew);
   }
 
-  private handleComplete(crew: CrewState, daemonId: string, workItemId: string, ws: WebSocket): void {
-    const workItem = crew.items.get(workItemId);
-    if (!workItem || workItem.claimedBy !== daemonId) {
-      this.send(ws, { type: "error", message: `Cannot complete: ${workItemId}` });
+  private handleComplete(crew: CrewState, daemonId: string, workItemId: string, ws: BrokerSocket): void {
+    const result = completeWorkItem(crew, daemonId, workItemId);
+    if (!result.ok) {
+      this.send(ws, { type: "error", message: result.error ?? `Cannot complete: ${workItemId}` });
       return;
     }
 
-    const daemon = crew.daemons.get(daemonId);
-    if (daemon) {
-      daemon.claimedItems.delete(workItemId);
-    }
-
-    workItem.completedBy = daemonId;
-    workItem.claimedBy = null;
-    this.logEvent(crew.code, daemonId, "complete", workItemId, {});
+    this.writeEvents(result.events);
     this.send(ws, { type: "complete_ack", workItemId });
-    // Broadcast crew status after completion
     this.broadcastCrewUpdate(crew);
   }
 
@@ -542,26 +307,11 @@ export class MockBroker {
     requestId: string,
     taskId: string,
     scheduleTime: string,
-    ws: WebSocket,
+    ws: BrokerSocket,
   ): void {
-    const key = `${taskId}:${scheduleTime}`;
-    const now = Date.now();
-    const existing = crew.scheduleClaims.get(key);
-
-    if (existing && existing.expiresAt > now) {
-      // Already claimed and not expired -- deny
-      this.logEvent(crew.code, daemonId, "schedule_claim", taskId, { granted: false, key });
-      this.send(ws, { type: "schedule_claim_response", requestId, taskId, granted: false });
-      return;
-    }
-
-    // Grant the claim: first-to-arrive wins (sequential message processing).
-    crew.scheduleClaims.set(key, {
-      daemonId,
-      expiresAt: now + SCHEDULE_CLAIM_EXPIRY_MS,
-    });
-    this.logEvent(crew.code, daemonId, "schedule_claim", taskId, { granted: true, key });
-    this.send(ws, { type: "schedule_claim_response", requestId, taskId, granted: true });
+    const result = claimScheduleSlot(crew, daemonId, taskId, scheduleTime, Date.now(), DEFAULT_SCHEDULE_CLAIM_EXPIRY_MS);
+    this.writeEvents(result.events);
+    this.send(ws, { type: "schedule_claim_response", requestId, taskId, granted: result.granted });
   }
 
   // ── Heartbeat monitoring ──────────────────────────────────────────
@@ -569,84 +319,24 @@ export class MockBroker {
   private checkHeartbeats(): void {
     const now = Date.now();
 
-    for (const crew of this.crews.values()) {
-      // Cleanup expired schedule claims
-      for (const [key, entry] of crew.scheduleClaims) {
-        if (now >= entry.expiresAt) {
-          crew.scheduleClaims.delete(key);
-        }
-      }
-
-      for (const daemon of crew.daemons.values()) {
-        // Check for heartbeat timeout on connected daemons
-        if (daemon.ws !== null && now - daemon.lastHeartbeat > this.heartbeatTimeoutMs) {
-          daemon.ws = null;
-          daemon.disconnectedAt = now;
-          this.logEvent(crew.code, daemon.id, "disconnect", "", {});
-        }
-
-        // Check for grace period expiry on disconnected daemons (only release once)
-        if (
-          daemon.disconnectedAt !== null &&
-          daemon.ws === null &&
-          !daemon.released &&
-          now - daemon.disconnectedAt > this.gracePeriodMs
-        ) {
-          this.releaseDaemonWorkItems(crew, daemon);
-          daemon.released = true;
-        }
+    for (const crew of this.store.listCrews()) {
+      const result = checkCrewHeartbeats(crew, {
+        heartbeatTimeoutMs: this.heartbeatTimeoutMs,
+        gracePeriodMs: this.gracePeriodMs,
+      }, now);
+      this.writeEvents(result.events);
+      if (result.changed) {
+        this.broadcastCrewUpdate(crew);
       }
     }
-  }
-
-  private releaseDaemonWorkItems(crew: CrewState, daemon: DaemonState): void {
-    for (const workItemPath of daemon.claimedItems) {
-      const workItem = crew.items.get(workItemPath);
-      if (workItem && workItem.claimedBy === daemon.id) {
-        workItem.claimedBy = null;
-        this.logEvent(crew.code, daemon.id, "abandon", workItemPath, {});
-      }
-    }
-    // Don't clear claimedItems here -- the reconnect handler needs it
-    // to build the reconnect_state message. It will clean up the set.
   }
 
   // ── Crew status broadcast ─────────────────────────────────────────
 
   /** Broadcast crew status update to all connected daemons in the crew. */
   private broadcastCrewUpdate(crew: CrewState): void {
-    const workItems = Array.from(crew.items.values());
-    const availableCount = workItems.filter(
-      (t) =>
-        t.claimedBy === null &&
-        t.completedBy === null &&
-        t.dependencies.every((depId) => {
-          const dep = crew.items.get(depId);
-          return !dep || dep.completedBy !== null;
-        }),
-    ).length;
-    const claimedCount = workItems.filter((t) => t.claimedBy !== null).length;
-    const completedCount = workItems.filter((t) => t.completedBy !== null).length;
-    const connectedDaemons = Array.from(crew.daemons.values()).filter((d) => d.ws !== null);
-    const daemonNames = connectedDaemons.map((d) => d.name);
-
-    // Build claimed items list for cross-daemon visibility
-    const claimedItems = workItems
-      .filter((t) => t.claimedBy !== null && t.completedBy === null)
-      .map((t) => ({ id: t.path, daemonId: t.claimedBy! }));
-
-    const update: CrewStatusUpdate = {
-      type: "crew_update",
-      crewCode: crew.code,
-      daemonCount: connectedDaemons.length,
-      availableCount,
-      claimedCount,
-      completedCount,
-      daemonNames,
-      claimedItems,
-    };
-
-    for (const daemon of connectedDaemons) {
+    const update: CrewStatusUpdate = buildCrewStatusUpdate(crew);
+    for (const daemon of crew.daemons.values()) {
       if (daemon.ws) {
         this.send(daemon.ws, update);
       }
@@ -679,9 +369,15 @@ export class MockBroker {
     }
   }
 
+  private writeEvents(events: CrewEvent[]): void {
+    for (const event of events) {
+      this.logEvent(event.crew_id, event.daemon_id, event.event, event.work_item_path, event.metadata);
+    }
+  }
+
   // ── Helpers ───────────────────────────────────────────────────────
 
-  private send(ws: WebSocket, msg: OutboundMessage): void {
+  private send(ws: BrokerSocket, msg: OutboundMessage | CrewStatusUpdate): void {
     try {
       ws.send(JSON.stringify(msg));
     } catch {
