@@ -3888,19 +3888,15 @@ export async function orchestrateLoop(
   return {};
 }
 
-// ── Memory-aware WIP default ────────────────────────────────────────
+// ── Default session limit ───────────────────────────────────────────
 
 /**
- * Compute a sensible default WIP limit based on available system memory.
- * Each parallel worker consumes ~2-3GB RAM (Claude Code + language server + git worktree),
- * so we allocate one slot per 3GB of total RAM, with a minimum of 2.
- *
- * @param getTotalMemory - Injectable for testing; defaults to os.totalmem()
+ * Default session limit for new users with no persisted preference.
+ * Users' chosen value is persisted to ~/.ninthwave/config.json and takes
+ * precedence on subsequent runs.
  */
-export function computeDefaultSessionLimit(getTotalMemory: () => number = totalmem): number {
-  const totalBytes = getTotalMemory();
-  const totalGB = totalBytes / (1024 ** 3);
-  return Math.max(2, Math.floor(totalGB / 3));
+export function computeDefaultSessionLimit(): number {
+  return 1;
 }
 
 // ── CLI command ─────────────────────────────────────────────────────

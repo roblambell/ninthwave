@@ -44,6 +44,7 @@ import type { AiToolProfile } from "../ai-tools.ts";
 import { detectInstalledAITools } from "../tool-select.ts";
 import { applyGithubToken } from "../gh.ts";
 import { ensureMuxInteractiveOrDie } from "../mux.ts";
+import { computeDefaultSessionLimit } from "./orchestrate.ts";
 import { requireCrewCode } from "./crew.ts";
 import { resolveTuiSettingsDefaults } from "../tui-settings.ts";
 import {
@@ -418,7 +419,8 @@ export async function cmdNoArgs(
   const defaultReviewMode = defaultSettings.reviewMode;
   const installedTools = detectInstalledAITools();
   const doInteractive = deps.runInteractiveFlow ?? runInteractiveFlow;
-  const result = await doInteractive(todos, 4, {
+  const defaultSessionLimit = userConfig.session_limit ?? computeDefaultSessionLimit();
+  const result = await doInteractive(todos, defaultSessionLimit, {
     defaultReviewMode,
     defaultSettings,
     installedTools,

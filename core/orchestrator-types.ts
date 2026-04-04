@@ -461,7 +461,7 @@ export interface ActionResult {
 // ── Default config ───────────────────────────────────────────────────
 
 export const DEFAULT_CONFIG: OrchestratorConfig = {
-  sessionLimit: 4,
+  sessionLimit: 1,
   mergeStrategy: "auto",
   bypassEnabled: false,
   maxCiRetries: 5,

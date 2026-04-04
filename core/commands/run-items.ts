@@ -9,6 +9,7 @@ import { splitIds } from "../work-item-files.ts";
 import { computeBatches, CircularDependencyError } from "./batch-order.ts";
 import { calculateMemorySessionLimit } from "../orchestrator.ts";
 import { computeDefaultSessionLimit } from "./orchestrate.ts";
+import { loadUserConfig } from "../config.ts";
 import { type Multiplexer, getMux } from "../mux.ts";
 import { cleanupStalePartitions } from "../partitions.ts";
 import { cmdConflicts } from "./conflicts.ts";
@@ -109,12 +110,13 @@ export async function cmdRunItems(
     console.log(`  Batch ${b}: ${labels.join(", ")}`);
   }
   // Compute WIP limit: explicit override honored directly, otherwise RAM-calculated
+  // Precedence: CLI --session-limit > persisted user preference > computed default
   let effectiveSessionLimit: number;
   if (sessionLimitOverride !== undefined) {
     effectiveSessionLimit = sessionLimitOverride;
     info(`Session limit: ${effectiveSessionLimit} concurrent session(s) (explicit override)`);
   } else {
-    const configuredLimit = computeDefaultSessionLimit();
+    const configuredLimit = loadUserConfig().session_limit ?? computeDefaultSessionLimit();
     effectiveSessionLimit = calculateMemorySessionLimit(configuredLimit, getAvailableMemory());
     const freeGB = Math.round(getAvailableMemory() / (1024 ** 3));
     info(`Session limit: ${effectiveSessionLimit} concurrent session(s) (${freeGB}GB free)`);
@@ -285,8 +287,8 @@ export async function cmdStart(
   const partitionDir = join(worktreeDir, ".partitions");
   cleanupStalePartitions(partitionDir, worktreeDir);
 
-  // Compute WIP limit from RAM
-  const configuredLimit = computeDefaultSessionLimit();
+  // Compute WIP limit: persisted user preference > computed default, then RAM-capped
+  const configuredLimit = loadUserConfig().session_limit ?? computeDefaultSessionLimit();
   const effectiveSessionLimit = calculateMemorySessionLimit(configuredLimit, getAvailableMemory());
   const freeGB = Math.round(getAvailableMemory() / (1024 ** 3));
   info(`Session limit: ${effectiveSessionLimit} concurrent session(s) (${freeGB}GB free)`);

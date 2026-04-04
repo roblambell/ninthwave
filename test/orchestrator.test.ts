@@ -920,7 +920,7 @@ describe("Orchestrator", () => {
   // ── 17. Default config ─────────────────────────────────────────
 
   it("uses sensible defaults", () => {
-    expect(DEFAULT_CONFIG.sessionLimit).toBe(4);
+    expect(DEFAULT_CONFIG.sessionLimit).toBe(1);
     expect(DEFAULT_CONFIG.mergeStrategy).toBe("auto");
     expect(DEFAULT_CONFIG.maxCiRetries).toBe(5);
   });
@@ -3652,6 +3652,7 @@ describe("Orchestrator", () => {
     });
 
     it("independent items with no deps all launch immediately", () => {
+      orch = new Orchestrator({ sessionLimit: 10 });
       orch.addItem(makeWorkItem("A-1-1"));
       orch.getItem("A-1-1")!.reviewCompleted = true;
       orch.addItem(makeWorkItem("A-1-2"));
@@ -5255,6 +5256,7 @@ describe("Orchestrator", () => {
 
     describe("processTransitions stacking", () => {
       it("promotes stackable-ready items and sets baseBranch", () => {
+        orch = new Orchestrator({ sessionLimit: 10 });
         orch.addItem(makeWorkItem("A-1-1"));
         orch.getItem("A-1-1")!.reviewCompleted = true;
         orch.addItem(makeWorkItem("A-1-2", ["A-1-1"]));
@@ -5286,6 +5288,7 @@ describe("Orchestrator", () => {
       });
 
       it("normal readyIds promotion still works alongside stacking", () => {
+        orch = new Orchestrator({ sessionLimit: 10 });
         orch.addItem(makeWorkItem("A-1-1"));
         orch.getItem("A-1-1")!.reviewCompleted = true;
         orch.addItem(makeWorkItem("A-1-2"));
@@ -5324,6 +5327,7 @@ describe("Orchestrator", () => {
 
     describe("launchReadyItems includes baseBranch", () => {
       it("launch action includes baseBranch for stacked items", () => {
+        orch = new Orchestrator({ sessionLimit: 10 });
         orch.addItem(makeWorkItem("A-1-1"));
         orch.getItem("A-1-1")!.reviewCompleted = true;
         orch.addItem(makeWorkItem("A-1-2", ["A-1-1"]));
