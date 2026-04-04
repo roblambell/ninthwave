@@ -14,12 +14,12 @@ import {
   type ReviewMode,
 } from "./tui-settings.ts";
 import { saveProjectScheduleEnabled, saveUserConfig } from "./config.ts";
+import type { InteractiveWatchTiming } from "./orchestrate-timing.ts";
 import type {
-  InteractiveWatchTiming,
   OrchestrateLoopConfig,
   OrchestrateLoopDeps,
   OrchestrateLoopResult,
-} from "./commands/orchestrate.ts";
+} from "./orchestrate-event-loop.ts";
 
 export interface WatchEngineSnapshotEvent {
   state: DaemonState;
