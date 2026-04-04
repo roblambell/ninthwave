@@ -46,7 +46,7 @@ No build step -- Bun executes TypeScript directly. Changes take effect immediate
 - `--smol` flag is used on all test runs for tighter GC. `--bail` fails fast on first failure.
 - Pre-commit runs `bun run test:pre-commit`, which executes `test/lint-tests.test.ts` with a 30s shell-level timeout.
 - `test/lint-tests.test.ts` scans all test files under `test/` for dangerous patterns. It runs as part of the regular test suite and is the pre-commit safety gate.
-- **Lint rules:** `no-leaked-server` (Bun.serve without cleanup), `no-uncleared-interval` (setInterval without clear), `no-long-timeout` (setTimeout > 30s), `no-unreset-globals` (globalThis override without restore), `no-leaked-mock` (vi.mock of module with its own test file), `no-describe-skip` (describe.skip/it.skip/test.skip).
+- **Lint rules:** `no-leaked-server` (Bun.serve without cleanup), `no-uncleared-interval` (setInterval without clear), `no-long-timeout` (setTimeout > 30s), `no-unreset-globals` (globalThis override without restore), `no-unrestored-process-exit` (process.exit override without restore), `no-unbounded-orchestrate-loop` (orchestrateLoop without maxIterations), `no-leaked-mock` (vi.mock of module with its own test file), `no-describe-skip` (describe.skip/it.skip/test.skip), `no-em-dash` (em dash characters in .ts/.md files).
 - To suppress a lint rule: add `// lint-ignore: <rule-id>` on or above the flagged line.
 
 ## Dogfooding Mode

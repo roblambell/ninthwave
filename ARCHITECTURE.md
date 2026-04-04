@@ -32,7 +32,7 @@ Each work item moves through a state machine defined in [`core/orchestrator.ts`]
 | `ci-pending` | PR created; CI checks running (or awaiting CI start) |
 | `ci-passed` | CI green; ready to merge (or review) |
 | `ci-failed` | CI red; worker being notified |
-| `repairing` | CI-fix worker active (direct repair mode) |
+| `rebasing` | Rebaser worker resolving merge conflicts |
 | `review-pending` | Awaiting review worker launch |
 | `reviewing` | Review worker active (tracked via separate `reviewSessionLimit`) |
 | `merging` | Merge in progress |
@@ -41,6 +41,7 @@ Each work item moves through a state machine defined in [`core/orchestrator.ts`]
 | `fix-forward-failed` | Post-merge CI failed; forward-fixer being launched |
 | `fixing-forward` | Forward-fixer worker fixing a broken main branch |
 | `done` | Cleanup complete |
+| `blocked` | Dependency is stuck; waiting for resolution |
 | `stuck` | Max retries exhausted or unrecoverable failure |
 
 ### Transition Diagram
@@ -49,32 +50,42 @@ Each work item moves through a state machine defined in [`core/orchestrator.ts`]
 stateDiagram-v2
     [*] --> queued : addItem()
     queued --> ready : deps done
+    queued --> blocked : dep stuck
     ready --> launching : WIP slot available
     launching --> implementing : worker started
     implementing --> ci_pending : PR detected
+    implementing --> stuck : launch/activity timeout
     ci_pending --> ci_passed : all checks green
     ci_pending --> ci_failed : check failure
+    ci_passed --> merging : merge (review skipped)
     ci_passed --> reviewing : review worker launched
-    reviewing --> ci_passed : approved
+    reviewing --> merging : approved
     reviewing --> ci_failed : CI regression
     reviewing --> review_pending : request-changes
+    review_pending --> ci_failed : CI failure
     review_pending --> ci_pending : implementer pushes fix
-    review_pending --> reviewing : re-review after CI passes
     ci_failed --> ci_pending : worker notified, retrying
+    ci_failed --> rebasing : merge conflict
     ci_failed --> stuck : maxCiRetries exceeded
+    rebasing --> ci_pending : rebase complete
     merging --> merged : gh merge succeeded
-    merged --> done : cleanup complete
-    implementing --> stuck : launch/activity timeout
+    merged --> done : cleanup complete (no fix-forward)
+    merged --> forward_fix_pending : fix-forward enabled
+    forward_fix_pending --> done : merge-commit CI passes
+    forward_fix_pending --> fix_forward_failed : merge-commit CI fails
+    fix_forward_failed --> fixing_forward : forward-fixer launched
+    fixing_forward --> done : fix merged
     stuck --> ready : retry command
+    blocked --> queued : dep recovers
 ```
 
 ### WIP Limit
 
-States that count toward the WIP limit (see `OrchestratorConfig.sessionLimit`): `launching`, `implementing`, `ci-pending`, `ci-passed`, `ci-failed`, `repairing`, `review-pending`, `merging`. Review workers (`reviewing`) have a separate limit (`reviewSessionLimit`).
+States that count toward the WIP limit (see `OrchestratorConfig.sessionLimit`): `launching`, `implementing`, `ci-pending`, `ci-passed`, `ci-failed`, `rebasing`, `review-pending`, `merging`. Review workers (`reviewing`) have a separate limit (`reviewSessionLimit`).
 
 ### Stacked Launches
 
-When `enableStacking=true`, an item whose only in-flight dependency is in a "stackable" state (`ci-passed`, `review-pending`, `merging`) can launch early against the dep's branch rather than waiting for the dep to fully merge. See `STACKABLE_STATES` in `core/orchestrator.ts`.
+When `enableStacking=true`, an item whose only in-flight dependency is in a "stackable" state (`ci-passed`, `reviewing`, `review-pending`, `merging`) can launch early against the dep's branch rather than waiting for the dep to fully merge. See `STACKABLE_STATES` in `core/orchestrator-types.ts`.
 
 ---
 
@@ -131,7 +142,7 @@ Abstracts terminal multiplexer operations behind a clean interface.
 
 ```typescript
 interface Multiplexer {
-  readonly type: MuxType;                                           // "cmux" | "tmux"
+  readonly type: MuxType;                                           // "cmux" | "tmux" | "headless"
   isAvailable(): boolean;
   diagnoseUnavailable(): string;
   launchWorkspace(cwd: string, command: string, workItemId?: string): string | null;
@@ -149,17 +160,18 @@ Shipped implementations:
 
 - `CmuxAdapter` -- wraps the cmux CLI. Workspace refs look like `workspace:1`. cmux supports sidebar-oriented status/progress updates, but it must be used from inside an active cmux session.
 - `TmuxAdapter` -- wraps tmux using a **windows-within-session** model: one tmux session per project, one `nw_<workItemId>` window per worker. Refs use tmux's `session:window` target syntax, typically `{session}:nw_<ID>` (that is, the `{session}:nw:{workItemId}` worker identity encoded as a tmux window target). Message delivery is paste-then-submit: `tmux load-buffer -`, `tmux paste-buffer`, then `tmux send-keys Enter`.
+- `HeadlessAdapter` -- fallback when no terminal multiplexer is available. Used for headless/remote execution. Workspace refs use `%<ID>` format.
 
 ### Multiplexer Detection Chain
 
 `detectMuxType()` and `checkAutoLaunch()` share the same six-step preference order:
 
-1. `NINTHWAVE_MUX` override (`tmux` or `cmux`) -- invalid values warn and fall through.
+1. `NINTHWAVE_MUX` override (`tmux`, `cmux`, or `headless`) -- invalid values warn and fall through.
 2. `CMUX_WORKSPACE_ID` -- if present, stay on cmux because the user is already inside a cmux workspace.
 3. `$TMUX` -- if present, stay on tmux because the user is already inside a tmux session.
 4. Installed `tmux` binary -- preferred over cmux when the user is **not** already inside a multiplexer session, because tmux can create/manage its own project session.
 5. Installed `cmux` binary -- usable for detection, but launch-time checks still require the user to actually be inside cmux.
-6. Error -- no supported multiplexer available.
+6. Headless fallback -- when no multiplexer is detected, falls back to `HeadlessAdapter`.
 
 ### iTerm2 + tmux
 
@@ -193,9 +205,16 @@ tmux works especially well with iTerm2's control mode (`tmux -CC`). In that mode
      cmdMyCommand(args);
      break;
    ```
-3. Add a help entry to the `COMMANDS` array in `core/cli.ts`:
+3. Add a `CommandEntry` to `COMMAND_REGISTRY` in `core/help.ts`:
    ```typescript
-   ["mycommand [--flag]", "One-line description"],
+   {
+     name: "mycommand",
+     usage: "mycommand [--flag]",
+     description: "One-line description",
+     group: "Advanced",
+     needsRoot: true,
+     handler: (ctx) => cmdMyCommand(ctx.args),
+   },
    ```
 4. Add tests in `test/mycommand.test.ts`.
 
@@ -221,10 +240,11 @@ The workspace ref is stored in `OrchestratorItem.workspaceRef` for later messagi
 
 ### Heartbeat and Health
 
-The orchestrator tracks two signals per worker:
+The orchestrator tracks multiple signals per worker:
 
-- **Commit freshness** (`lastCommitTime`): timestamp of the most recent commit on `ninthwave/<ID>`. A worker with recent commits is considered active regardless of screen state.
-- **Screen health** (`ScreenHealthStatus`): classified by `computeScreenHealth()` in [`core/worker-health.ts`](core/worker-health.ts). Categories: `healthy`, `stalled-empty`, `stalled-permission`, `stalled-error`, `stalled-unchanged`.
+- **Worker liveness** (`workerAlive`): determined by `isWorkerAliveWithCache()` in [`core/snapshot.ts`](core/snapshot.ts). Checks whether the worker's workspace ref appears in the multiplexer's workspace listing. Debounced via `notAliveCount` (3 consecutive not-alive checks required before declaring dead).
+- **Commit freshness** (`lastCommitTime`): timestamp of the most recent commit on `ninthwave/<ID>`. A worker with recent commits is considered active.
+- **Heartbeat** (`lastHeartbeat`): worker progress file with timestamp. A fresh heartbeat (< 5 min) suppresses all timeout checks.
 
 Timeout thresholds (configurable via `OrchestratorConfig`): 30 minutes for a worker with no commits since launch (`launchTimeoutMs`), 60 minutes for a worker with stale commits (`activityTimeoutMs`).
 
