@@ -3751,6 +3751,15 @@ describe("renderPausedOverlay", () => {
     const leftPad = inner.indexOf("Watch controls are paused.");
     const rightPad = inner.length - leftPad - "Watch controls are paused.".length;
     expect(Math.abs(leftPad - rightPad)).toBeLessThanOrEqual(1);
+
+    // Hint line should also be centered within the box
+    const hintLine = lines.map(stripAnsi).find((line) => line.includes("p resume") && line.includes("q quit"));
+    expect(hintLine).toBeDefined();
+    const hintInner = hintLine!.slice(hintLine!.indexOf("│") + 1, hintLine!.lastIndexOf("│"));
+    const hintText = hintInner.trim();
+    const hintLeftPad = hintInner.indexOf(hintText[0]!);
+    const hintRightPad = hintInner.length - hintLeftPad - hintText.length;
+    expect(Math.abs(hintLeftPad - hintRightPad)).toBeLessThanOrEqual(1);
   });
 
   it("stays within terminal bounds and uses boxed overlay chrome", () => {
@@ -3762,6 +3771,34 @@ describe("renderPausedOverlay", () => {
     for (const line of lines) {
       expect(stripAnsiForWidth(line).length).toBeLessThanOrEqual(44);
     }
+  });
+
+  it("shows pending q-quit message when ctrlCPending is true", () => {
+    const lines = renderPausedOverlay(80, 24, { ctrlCPending: true, pendingQuitKey: "q" });
+    const text = lines.map(stripAnsi).join("\n");
+    expect(text).toContain("Press q again to quit");
+    expect(text).not.toContain("p resume");
+  });
+
+  it("shows pending Ctrl-C message when ctrlCPending is true with ctrl-c key", () => {
+    const lines = renderPausedOverlay(80, 24, { ctrlCPending: true, pendingQuitKey: "ctrl-c" });
+    const text = lines.map(stripAnsi).join("\n");
+    expect(text).toContain("Press Ctrl-C again to exit");
+    expect(text).not.toContain("p resume");
+  });
+
+  it("shows closing message when shutdownInProgress is true", () => {
+    const lines = renderPausedOverlay(80, 24, { shutdownInProgress: true });
+    const text = lines.map(stripAnsi).join("\n");
+    expect(text).toContain("Closing...");
+    expect(text).not.toContain("p resume");
+  });
+
+  it("shows default hints when ctrlCPending is false", () => {
+    const lines = renderPausedOverlay(80, 24, { ctrlCPending: false });
+    const text = lines.map(stripAnsi).join("\n");
+    expect(text).toContain("p resume");
+    expect(text).toContain("q quit");
   });
 });
 

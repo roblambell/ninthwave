@@ -431,11 +431,11 @@ export function runCheckboxList(
       switch (key) {
         case "\x1B[A": // Up arrow
         case "k":
-          cursor = Math.max(0, cursor - 1);
+          cursor = (cursor - 1 + currentItems.length) % currentItems.length;
           break;
         case "\x1B[B": // Down arrow
         case "j":
-          cursor = Math.min(currentItems.length - 1, cursor + 1);
+          cursor = (cursor + 1) % currentItems.length;
           break;
         case " ": { // Space -- toggle
           const linkId = linkAllId;

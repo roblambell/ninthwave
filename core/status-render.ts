@@ -2885,16 +2885,26 @@ export function renderHelpOverlay(
 export function renderPausedOverlay(
   termWidth: number,
   termRows: number,
+  opts?: {
+    ctrlCPending?: boolean;
+    pendingQuitKey?: QuitConfirmKey;
+    shutdownInProgress?: boolean;
+  },
 ): string[] {
   const overlayTitle = "Paused";
   const contentLines = [
     `${BOLD}${YELLOW}Watch controls are paused.${RESET}`,
   ];
-  const overlayHint = `${formatShortcutHint("p", "resume")}  ${formatShortcutHint("q", "quit")}`;
+  const overlayHint = opts?.shutdownInProgress
+    ? `${RED}Closing...${RESET}`
+    : opts?.ctrlCPending
+      ? formatPendingQuitFooterLine(opts.pendingQuitKey).trimStart()
+    : `${formatShortcutHint("p", "resume")}  ${formatShortcutHint("q", "quit")}`;
+  const overlayHintWidth = stripAnsiForWidth(overlayHint).length;
 
   const maxContentWidth = Math.max(
     overlayTitle.length,
-    overlayHint.length,
+    overlayHintWidth,
     ...contentLines.map((line) => stripAnsiForWidth(line).length),
   );
   const innerWidth = Math.min(maxContentWidth + 4, termWidth - 4);
@@ -2919,8 +2929,8 @@ export function renderPausedOverlay(
   }
 
   boxLines.push(`${marginPad}│${" ".repeat(innerWidth)}│`);
-  const hintPad = Math.max(0, Math.floor((innerWidth - overlayHint.length) / 2));
-  boxLines.push(`${marginPad}│${" ".repeat(hintPad)}${DIM}${overlayHint}${RESET}${" ".repeat(Math.max(0, innerWidth - hintPad - overlayHint.length))}│`);
+  const hintPad = Math.max(0, Math.floor((innerWidth - overlayHintWidth) / 2));
+  boxLines.push(`${marginPad}│${" ".repeat(hintPad)}${DIM}${overlayHint}${RESET}${" ".repeat(Math.max(0, innerWidth - hintPad - overlayHintWidth))}│`);
   boxLines.push(`${marginPad}└${"─".repeat(innerWidth)}┘`);
 
   const totalBoxHeight = boxLines.length;

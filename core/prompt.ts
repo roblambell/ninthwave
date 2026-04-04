@@ -100,11 +100,11 @@ export async function checkboxPrompt(
 
       if (key === "\x1b[A" || key === "k") {
         // Up
-        cursor = Math.max(0, cursor - 1);
+        cursor = (cursor - 1 + items.length) % items.length;
         redraw();
       } else if (key === "\x1b[B" || key === "j") {
         // Down
-        cursor = Math.min(items.length - 1, cursor + 1);
+        cursor = (cursor + 1) % items.length;
         redraw();
       } else if (key === " ") {
         // Toggle current

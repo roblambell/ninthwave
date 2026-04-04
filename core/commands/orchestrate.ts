@@ -1361,7 +1361,11 @@ export function renderTuiPanelFrameFromStatusItems(
       break;
     }
     case "paused": {
-      const overlayLines = renderPausedOverlay(termWidth, termRows);
+      const overlayLines = renderPausedOverlay(termWidth, termRows, {
+        ctrlCPending: tuiState.viewOptions.ctrlCPending,
+        pendingQuitKey: tuiState.viewOptions.pendingQuitKey,
+        shutdownInProgress: tuiState.viewOptions.shutdownInProgress,
+      });
       const content = overlayLines.join("\n");
       write(content.replace(/\n/g, "\x1B[K\n") + "\x1B[K");
       break;

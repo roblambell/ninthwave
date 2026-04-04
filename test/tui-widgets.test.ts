@@ -257,24 +257,24 @@ describe("runCheckboxList", () => {
     expect(result.selectedIds).toEqual([]);
   });
 
-  it("cursor clamps at boundaries", async () => {
+  it("cursor wraps around at top boundary", async () => {
     const { io, sendKeys } = createMockIO();
     const items = makeCheckboxItems(2);
 
     const resultPromise = runCheckboxList(io, items);
-    // Try to go above first item, toggle (should toggle T-1)
+    // Up from first item wraps to last then back to first, toggle (should toggle T-1)
     sendKeys(["\x1B[A", "\x1B[A", " ", "\r"]);
 
     const result = await resultPromise;
     expect(result.selectedIds).toEqual(["T-1"]);
   });
 
-  it("cursor clamps at bottom boundary", async () => {
+  it("cursor wraps around at bottom boundary", async () => {
     const { io, sendKeys } = createMockIO();
     const items = makeCheckboxItems(2);
 
     const resultPromise = runCheckboxList(io, items);
-    // Try to go below last item, toggle (should toggle T-2)
+    // Down past last item wraps around, toggle (should toggle T-2)
     sendKeys(["\x1B[B", "\x1B[B", "\x1B[B", " ", "\r"]);
 
     const result = await resultPromise;
