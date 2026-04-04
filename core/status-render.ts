@@ -165,7 +165,7 @@ function formatStrategyFooterLine(
   pendingStrategyCountdownSeconds?: number,
 ): string {
   const badge = strategyFooterIndicator(strategy, pendingStrategy, pendingStrategyCountdownSeconds);
-  return `  ${badge} ${formatShortcutChord("shift+tab", "to toggle", { wrapInParens: true })}  ${formatShortcutHint("Esc/p", "pause")}  ${formatShortcutHint("q", "quit")}  ${formatShortcutHint("c", "controls")}  ${formatShortcutHint("?", "help")}`;
+  return `  ${badge} ${formatShortcutChord("shift+tab", "to toggle", { wrapInParens: true })}  ${formatShortcutHint("p", "pause")}  ${formatShortcutHint("q", "quit")}  ${formatShortcutHint("c", "controls")}  ${formatShortcutHint("?", "help")}`;
 }
 
 function formatShortcutHint(key: string, label: string): string {
@@ -2890,7 +2890,7 @@ export function renderPausedOverlay(
   const contentLines = [
     `${BOLD}${YELLOW}Watch controls are paused.${RESET}`,
   ];
-  const overlayHint = `${formatShortcutHint("Esc/p", "resume")}  ${formatShortcutHint("q", "quit")}`;
+  const overlayHint = `${formatShortcutHint("p", "resume")}  ${formatShortcutHint("q", "quit")}`;
 
   const maxContentWidth = Math.max(
     overlayTitle.length,

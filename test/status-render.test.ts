@@ -2821,7 +2821,7 @@ describe("buildStatusLayout", () => {
     const footerText = layout.footerLines.map(stripAnsi).join("\n");
     expect(footerText).toContain("› auto");
     expect(footerText).toContain("(shift+tab to toggle)");
-    expect(footerText).toContain("Esc/p pause");
+    expect(footerText).toContain("p pause");
     expect(footerText).toContain("q quit");
     expect(footerText).toContain("c controls");
     expect(footerText).toContain("? help");
@@ -2837,7 +2837,7 @@ describe("buildStatusLayout", () => {
     const footerText = layout.footerLines.map(stripAnsi).join("\n");
     expect(footerText).toContain("‖ manual");
     expect(footerText).toContain("(shift+tab to toggle)");
-    expect(footerText).toContain("Esc/p pause");
+    expect(footerText).toContain("p pause");
     expect(footerText).toContain("c controls");
   });
 
@@ -2849,7 +2849,7 @@ describe("buildStatusLayout", () => {
     const footerText = layout.footerLines.map(stripAnsi).join("\n");
     expect(footerText).toContain("» bypass");
     expect(footerText).toContain("(shift+tab to toggle)");
-    expect(footerText).toContain("Esc/p pause");
+    expect(footerText).toContain("p pause");
     expect(footerText).toContain("c controls");
   });
 
@@ -2859,7 +2859,7 @@ describe("buildStatusLayout", () => {
       mergeStrategy: "bypass",
     });
     const footerLine = stripAnsi(layout.footerLines[2] ?? "");
-    expect(footerLine).toContain("» bypass (shift+tab to toggle)  Esc/p pause");
+    expect(footerLine).toContain("» bypass (shift+tab to toggle)  p pause");
     expect(footerLine.length).toBeLessThanOrEqual(80);
   });
 
@@ -2874,7 +2874,7 @@ describe("buildStatusLayout", () => {
     expect(footerText).toContain("‖ manual (5s)");
     expect(footerText).not.toContain("› auto ->");
     expect(footerText).toContain("(shift+tab to toggle)");
-    expect(footerText).toContain("Esc/p pause");
+    expect(footerText).toContain("p pause");
     expect(footerText).toContain("c controls");
   });
 
@@ -3740,7 +3740,7 @@ describe("renderPausedOverlay", () => {
     expect(lines).toHaveLength(24);
     expect(text).toContain("Paused");
     expect(text).toContain("Watch controls are paused.");
-    expect(text).toContain("Esc/p resume");
+    expect(text).toContain("p resume");
     expect(text).toContain("q quit");
     expect(text).not.toContain("·");
 
