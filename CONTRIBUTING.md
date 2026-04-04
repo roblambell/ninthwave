@@ -107,6 +107,17 @@ bunx tsc --noEmit
 
 Changes to `.ts` files take effect immediately on the next invocation -- no compilation needed.
 
+### Broker Architecture (for contributors)
+
+The crew broker has a shared-core + runtime-split design:
+
+- **`core/broker-state.ts`** -- pure state-machine functions (claim, sync, complete, heartbeat, scheduling). All broker tests exercise this module directly.
+- **`core/broker-store.ts`** -- storage interfaces: `InMemoryBrokerStore` (tests and mock broker) and `FileBrokerStore` (self-hosted broker persistence).
+- **`core/mock-broker.ts`** -- in-process mock broker (`MockBroker`). Ephemeral, used by the orchestrator and unit tests.
+- **`core/broker-server.ts`** -- self-hosted broker runtime (`BrokerServer`). File-backed persistence and repo-reference enforcement. Started via `nw broker`.
+
+When writing broker tests, prefer testing against `broker-state.ts` functions with `InMemoryBrokerStore`. Use `MockBroker` for integration tests that need a live WebSocket server. `BrokerServer` is the production self-hosted runtime -- test its CLI surface via `core/commands/broker.ts`.
+
 ### Building and Releasing
 
 ninthwave is distributed as a compiled binary via Homebrew. The build and release pipeline is automated via GitHub Actions.

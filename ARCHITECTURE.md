@@ -264,6 +264,56 @@ Timeout thresholds (configurable via `OrchestratorConfig`): 30 minutes for a wor
 
 ---
 
+## Crew Broker
+
+The broker coordinates work-item scheduling across multiple `nw` daemons in a crew. The protocol surface (sync, claim, complete, heartbeat, schedule-claim) is defined once in shared modules and consumed by two runtimes.
+
+### Broker-Core + Runtime Split
+
+| Module | Role |
+|--------|------|
+| `core/broker-state.ts` | Pure state-machine functions (claim, sync, complete, heartbeat checks, author-affinity scheduling). No I/O. |
+| `core/broker-store.ts` | Storage interfaces and implementations: `InMemoryBrokerStore` (used by the in-process mock broker and tests) and `FileBrokerStore` (used by the self-hosted broker for JSON-file persistence). |
+| `core/mock-broker.ts` | In-process mock broker (`MockBroker`). Ephemeral, in-memory, started automatically by the orchestrator when crew mode is active and the daemon connects to the hosted service or needs a local test surface. |
+| `core/broker-server.ts` | Self-hosted broker runtime (`BrokerServer`). Long-running Bun HTTP+WebSocket server with file-backed persistence and repo-reference enforcement. Started via `nw broker`. |
+| `core/commands/broker.ts` | CLI command handler. Parses `--host`, `--port`, `--data-dir`, `--event-log`, and `--save-crew-url` flags, starts the `BrokerServer`, and optionally persists the broker URL as `crew_url` in project config. |
+
+Both runtimes delegate all scheduling decisions to `broker-state.ts`. The difference is lifecycle and persistence:
+
+- **MockBroker** -- starts and stops with the orchestrator process, state lives in memory.
+- **BrokerServer** -- runs independently (`nw broker`), persists crew state to `<data-dir>/<code>.json`, and enforces repo-reference matching on WebSocket connect.
+
+### `crew_url` Configuration
+
+By default, `nw` connects to the hosted broker at `wss://ninthwave.sh`. To point a project at a self-hosted broker instead:
+
+```bash
+nw broker --save-crew-url          # starts the broker and writes crew_url to .ninthwave/config.json
+```
+
+Or set it manually in `.ninthwave/config.json`:
+
+```json
+{ "crew_url": "ws://your-host:4444" }
+```
+
+The orchestrator resolves `crew_url` at startup: CLI `--crew-url` flag > project config > hosted default (`wss://ninthwave.sh`).
+
+### Repo-Reference Verification
+
+When a crew is created with a repo reference, the broker stores the normalized repo identity (`repoRef`). On every subsequent WebSocket connect, the daemon's repo URL/hash is resolved via `core/repo-ref.ts` and compared against the crew's stored `repoRef`. Mismatches are rejected with HTTP 403, preventing cross-project crew joins.
+
+### v1 Non-Goals
+
+The self-hosted broker is intentionally minimal in v1:
+
+- **No TLS termination** -- use a reverse proxy (nginx, Caddy, etc.) for HTTPS/WSS.
+- **No authentication** -- access control is via network boundaries; the broker trusts all connections that pass repo-reference verification.
+- **No multi-tenant isolation** -- one broker instance per trust boundary.
+- **No horizontal scaling** -- single-process, single-node.
+
+---
+
 ## Repo Reference Identity
 
 `core/repo-ref.ts` defines the shared repo identity rules used by client and broker code.

@@ -26,7 +26,7 @@ Ninthwave is the orchestration layer for parallel AI coding. Turn plans into sma
 - Run multiple native AI coding sessions in parallel, each isolated in its own worktree
 - Coordinate the full delivery loop through [Implementer](agents/implementer.md), CI, [Reviewer](agents/reviewer.md), [Rebaser](agents/rebaser.md), merge, and [Forward-Fixer](agents/forward-fixer.md)
 - Launch dependent work early as stacked PRs so reviewers get clean diffs
-- Share or join a crew to spread work across teammates or multiple machines
+- Share or join a crew to spread work across teammates or multiple machines, using the hosted broker by default or a [self-hosted broker](docs/faq.md#what-is-the-self-hosted-broker) when you need full control
 - Use the native tools directly, while Ninthwave's TUI shows live queue and pipeline status
 - Stay multi-tool and no-lock-in: [Claude Code](https://docs.anthropic.com/en/docs/claude-code/overview), [OpenCode](https://opencode.ai), [Codex CLI](https://github.com/openai/codex), or [Copilot CLI](https://docs.github.com/en/copilot/how-tos/set-up/install-copilot-cli)
 

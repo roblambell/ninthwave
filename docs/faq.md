@@ -361,6 +361,73 @@ nw crew join <crew-code>
 
 The broker handles WIP-bounded scheduling with author-affinity (tasks route to the operator who created them when possible).
 
+### What is the self-hosted broker?
+
+By default, crew mode connects to the hosted broker at `wss://ninthwave.sh`. If you need full control over the coordination layer -- for air-gapped networks, compliance, or local development -- you can run your own broker with `nw broker`:
+
+```bash
+nw broker
+```
+
+This starts a long-running Bun HTTP+WebSocket server on port 4444 (default). It uses the same protocol and scheduling logic as the hosted service, with file-backed persistence for crew state.
+
+The self-hosted broker is an explicit opt-in alternative. Most users never need it.
+
+### How do I set up a self-hosted broker?
+
+1. Start the broker (on the machine that will coordinate the crew):
+
+   ```bash
+   nw broker --save-crew-url
+   ```
+
+   `--save-crew-url` writes the broker's WebSocket URL (`ws://localhost:4444`) to `.ninthwave/config.json` as `crew_url`, so the local `nw` daemon connects to it automatically.
+
+2. On other machines joining the crew, set `crew_url` in `.ninthwave/config.json` to point at the broker host:
+
+   ```json
+   { "crew_url": "ws://broker-host:4444" }
+   ```
+
+   Or pass it at the CLI:
+
+   ```bash
+   nw --crew-url ws://broker-host:4444
+   ```
+
+3. Create and join the crew as usual:
+
+   ```bash
+   nw crew create       # on one machine
+   nw crew join <code>  # on other machines
+   ```
+
+The `crew_url` resolution order is: `--crew-url` CLI flag > `crew_url` in `.ninthwave/config.json` > hosted default (`wss://ninthwave.sh`).
+
+### What does the self-hosted broker handle vs. the hosted default?
+
+Both use the same crew protocol and scheduling logic (defined in `core/broker-state.ts`). The differences:
+
+| Aspect | Hosted (`wss://ninthwave.sh`) | Self-hosted (`nw broker`) |
+|--------|-------------------------------|---------------------------|
+| Setup | Zero config (default) | You run `nw broker` |
+| Persistence | Managed | File-backed JSON in `.ninthwave/broker/crews/` |
+| Repo verification | Yes | Yes |
+| TLS | Yes (WSS) | No -- use a reverse proxy for WSS |
+| Authentication | Managed | None -- trust via network boundaries |
+| Availability | Hosted uptime | You manage uptime |
+
+### What does the broker NOT do in v1?
+
+The self-hosted broker is intentionally minimal:
+
+- **No TLS termination** -- put nginx, Caddy, or another reverse proxy in front for HTTPS/WSS
+- **No authentication layer** -- the broker trusts all connections that pass repo-reference verification; restrict access via network boundaries (firewall, VPN, etc.)
+- **No multi-tenant isolation** -- one broker instance per trust boundary
+- **No horizontal scaling** -- single-process, single-node
+
+These are deliberate v1 scope boundaries, not missing features.
+
 ---
 
 ## Philosophy
