@@ -388,11 +388,9 @@ describe("cmdNoArgs", () => {
       bundleWith: [],
       status: "open",
       filePath: `2-test--${id}.md`,
-      repoAlias: "self",
       rawText: "",
       filePaths: [],
       testPlan: "",
-      bootstrap: false,
     };
   }
 

@@ -90,7 +90,6 @@ Key files: `path/to/file.ex`, `path/to/component.tsx:42`
 |-------|----------|--------|
 | Requires manual review | Metadata line | `**Requires manual review:** true` -- omit unless the item must stop for human review before merge |
 | Bundle with | Metadata line | `**Bundle with:** <ID>` |
-| Repo | Metadata line | `**Repo:** <alias>` -- target repo for cross-repo items |
 | Test plan | Body | `**Test plan:**` followed by bullet points |
 | Key files | Body | Backtick-quoted paths, `file:line` references |
 
@@ -152,14 +151,6 @@ Acceptance: `npx cap sync` completes without errors. Adapter correctly stores/re
 refresh tokens via Preferences. Platform detection switches adapters correctly. CapacitorHttp
 enabled. Tests pass for all paths.
 ```
-
-### Repo Field
-
-`**Repo:** <alias>` -- Optional. Short alias for the target repository where work should be done. If omitted, work targets the hub repo (the repo containing `.ninthwave/work/`).
-
-The alias is resolved via convention (sibling directory `../<alias>`) or explicit mapping in `.ninthwave/repos.conf`.
-
-Example: `**Repo:** api-service`
 
 ## ID Scheme
 

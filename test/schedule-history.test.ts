@@ -296,11 +296,9 @@ describe("structured log events", () => {
         bundleWith: [],
         status: "open",
         filePath: "",
-        repoAlias: "",
         rawText: "",
         filePaths: [],
         testPlan: "",
-        bootstrap: false,
       });
     }
     return orch;

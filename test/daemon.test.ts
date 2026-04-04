@@ -40,11 +40,9 @@ function makeWorkItem(id: string): WorkItem {
     bundleWith: [],
     status: "open",
     filePath: "",
-    repoAlias: "",
     rawText: `## ${id}\nTest item`,
     filePaths: [],
     testPlan: "",
-    bootstrap: false,
   };
 }
 
@@ -910,11 +908,10 @@ describe("writeStateFile atomic write", () => {
 // ── Crash recovery field serialization ──────────────────────────────
 
 describe("crash recovery fields serialization", () => {
-  it("includes workspaceRef, partition, and resolvedRepoRoot when present", () => {
+  it("includes workspaceRef and partition when present", () => {
     const item = makeOrchestratorItem("CR-1-1", "implementing", 10);
     item.workspaceRef = "workspace:3";
     item.partition = 5;
-    item.resolvedRepoRoot = "/Users/rob/code/target-repo";
 
     const state = serializeOrchestratorState(
       [item],
@@ -924,10 +921,9 @@ describe("crash recovery fields serialization", () => {
 
     expect(state.items[0]!.workspaceRef).toBe("workspace:3");
     expect(state.items[0]!.partition).toBe(5);
-    expect(state.items[0]!.resolvedRepoRoot).toBe("/Users/rob/code/target-repo");
   });
 
-  it("omits workspaceRef, partition, and resolvedRepoRoot when absent", () => {
+  it("omits workspaceRef and partition when absent", () => {
     const item = makeOrchestratorItem("CR-1-2", "queued");
 
     const state = serializeOrchestratorState(
@@ -938,15 +934,13 @@ describe("crash recovery fields serialization", () => {
 
     expect(state.items[0]!.workspaceRef).toBeUndefined();
     expect(state.items[0]!.partition).toBeUndefined();
-    expect(state.items[0]!.resolvedRepoRoot).toBeUndefined();
   });
 
-  it("roundtrips workspaceRef, partition, and resolvedRepoRoot through write/read", () => {
+  it("roundtrips workspaceRef and partition through write/read", () => {
     const io = createMockIO();
     const item = makeOrchestratorItem("CR-1-3", "implementing", 55);
     item.workspaceRef = "workspace:7";
     item.partition = 3;
-    item.resolvedRepoRoot = "/home/user/repos/target";
 
     const state = serializeOrchestratorState(
       [item],
@@ -960,7 +954,6 @@ describe("crash recovery fields serialization", () => {
     expect(restored).not.toBeNull();
     expect(restored!.items[0]!.workspaceRef).toBe("workspace:7");
     expect(restored!.items[0]!.partition).toBe(3);
-    expect(restored!.items[0]!.resolvedRepoRoot).toBe("/home/user/repos/target");
   });
 
   it("serializes partition=0 (falsy but valid)", () => {

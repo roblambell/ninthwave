@@ -36,7 +36,6 @@ import {
 } from "./orchestrator-types.ts";
 
 import {
-  executeBootstrap,
   executeLaunch,
   executeMerge,
   executeNotifyCiFailure,
@@ -379,12 +378,6 @@ export class Orchestrator {
         actions = [];
         break;
 
-      case "bootstrapping":
-        // Bootstrap is synchronous -- it transitions to launching or stuck
-        // in executeBootstrap. Nothing to do here in the snapshot-based loop.
-        actions = [];
-        break;
-
       case "launching":
         if (snap?.workerAlive) {
           item.notAliveCount = 0;
@@ -477,7 +470,7 @@ export class Orchestrator {
 
     // Stuck dep handling: roll back or pause stacked dependents when this item goes stuck
     if (this.config.enableStacking && item.state === "stuck" && prevState !== "stuck") {
-      const PRE_WIP_STATES = new Set(["ready", "bootstrapping", "launching"]);
+      const PRE_WIP_STATES = new Set(["ready", "launching"]);
       for (const other of this.getAllItems()) {
         if (other.baseBranch !== `ninthwave/${item.id}`) continue;
         if (PRE_WIP_STATES.has(other.state)) {
@@ -1466,8 +1459,6 @@ export class Orchestrator {
     };
 
     switch (action.type) {
-      case "bootstrap":
-        return executeBootstrap(handle, item, ctx, deps);
       case "launch":
         return executeLaunch(handle, item, action, ctx, deps);
       case "merge":
@@ -1646,34 +1637,15 @@ export class Orchestrator {
     for (let i = 0; i < Math.min(readyItems.length, slotsAvailable); i++) {
       const item = readyItems[i]!;
 
-      // Cross-repo items with bootstrap: true that have no resolvedRepoRoot
-      // need bootstrap before launch
-      if (this.needsBootstrap(item)) {
-        this.transition(item, "bootstrapping");
-        actions.push({ type: "bootstrap", itemId: item.id });
-      } else {
-        this.transition(item, "launching");
-        const action: Action = { type: "launch", itemId: item.id };
-        if (item.baseBranch) {
-          action.baseBranch = item.baseBranch;
-        }
-        actions.push(action);
+      this.transition(item, "launching");
+      const action: Action = { type: "launch", itemId: item.id };
+      if (item.baseBranch) {
+        action.baseBranch = item.baseBranch;
       }
+      actions.push(action);
     }
 
     return actions;
   }
 
-  /**
-   * Check if an item needs bootstrap before launch.
-   * True when the work item has bootstrap: true, has a cross-repo alias, and the repo isn't resolved yet.
-   */
-  private needsBootstrap(item: OrchestratorItem): boolean {
-    if (!item.workItem.bootstrap) return false;
-    const alias = item.workItem.repoAlias;
-    if (!alias || alias === "self" || alias === "hub") return false;
-    // If already resolved, no bootstrap needed
-    if (item.resolvedRepoRoot) return false;
-    return true;
-  }
 }

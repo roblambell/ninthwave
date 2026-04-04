@@ -9,7 +9,6 @@ import { cmdList } from "./commands/list.ts";
 import { cmdDeps } from "./commands/deps.ts";
 import { cmdConflicts } from "./commands/conflicts.ts";
 import { cmdBatchOrder } from "./commands/batch-order.ts";
-import { cmdRepos } from "./commands/repos.ts";
 import { cmdStatus, cmdStatusWatch, cmdPartitions } from "./commands/status.ts";
 import { cmdStart } from "./commands/run-items.ts";
 import {
@@ -404,17 +403,6 @@ export const COMMAND_REGISTRY: ReadonlyArray<CommandEntry> = [
     handler: (ctx) => cmdReviewInbox(ctx.args, ctx.projectRoot),
     flags: {},
     examples: ["nw review-inbox friction", "nw review-inbox decisions"],
-  },
-  {
-    name: "repos",
-    usage: "repos",
-    description: "List discovered sibling repositories",
-    group: "advanced",
-    needsRoot: true,
-    needsWork: false,
-    handler: (ctx) => cmdRepos(ctx.projectRoot),
-    flags: {},
-    examples: ["nw repos"],
   },
   {
     name: "version",

@@ -157,11 +157,9 @@ function makeWorkItem(id: string, deps: string[] = []): WorkItem {
     bundleWith: [],
     status: "open",
     filePath: "",
-    repoAlias: "",
     rawText: `## ${id}\nTest item`,
     filePaths: [],
     testPlan: "",
-    bootstrap: false,
   };
 }
 
@@ -182,7 +180,7 @@ function makeOrchestratorItem(id: string, state: OrchestratorItem["state"] = "im
 describe("stateColor", () => {
   it("returns a string for every valid state", () => {
     const states: ItemState[] = [
-      "merged", "verifying", "done", "blocked", "bootstrapping", "implementing", "rebasing", "ci-failed", "ci-pending",
+      "merged", "verifying", "done", "blocked", "implementing", "rebasing", "ci-failed", "ci-pending",
       "review", "in-progress", "queued",
     ];
     for (const state of states) {
@@ -197,7 +195,7 @@ describe("stateColor", () => {
     expect(stateColor("blocked")).toBe(YELLOW);
   });
   it("returns YELLOW for rebasing", () => {
-    // rebasing shares the same color as bootstrapping/implementing/in-progress
+    // rebasing shares the same color as implementing/in-progress
     expect(stateColor("rebasing")).toBe(stateColor("implementing"));
   });
 });
@@ -223,7 +221,7 @@ describe("stateIcon", () => {
   });
   it("returns a string for every valid state", () => {
     const states: ItemState[] = [
-      "merged", "verifying", "done", "blocked", "bootstrapping", "implementing", "rebasing", "ci-failed", "ci-pending",
+      "merged", "verifying", "done", "blocked", "implementing", "rebasing", "ci-failed", "ci-pending",
       "review", "in-progress", "queued",
     ];
     for (const state of states) {
@@ -541,14 +539,6 @@ describe("formatTelemetrySuffix", () => {
     expect(formatTelemetrySuffix(item)).toBe("");
   });
 
-  it("returns empty string for bootstrapping items", () => {
-    const item = makeStatusItem({
-      state: "bootstrapping",
-      startedAt: new Date(Date.now() - 5 * 60_000).toISOString(),
-    });
-    expect(formatTelemetrySuffix(item)).toBe("");
-  });
-
   it("includes exit code for ci-failed items", () => {
     const item = makeStatusItem({
       state: "ci-failed",
@@ -829,9 +819,8 @@ describe("computeStateColWidth", () => {
 
   it("caps at 24 even with very large PR numbers", () => {
     const items = [
-      makeStatusItem({ state: "bootstrapping", prNumber: 999999 }),
+      makeStatusItem({ state: "implementing", prNumber: 999999 }),
     ];
-    // "Bootstrapping (#999999)" = 23 chars, within cap
     expect(computeStateColWidth(items)).toBeLessThanOrEqual(24);
   });
 
@@ -1531,7 +1520,6 @@ describe("mapDaemonItemState", () => {
     expect(mapDaemonItemState("fixing-forward")).toBe("fixing-forward");
     expect(mapDaemonItemState("done")).toBe("done");
     expect(mapDaemonItemState("blocked")).toBe("blocked");
-    expect(mapDaemonItemState("bootstrapping")).toBe("bootstrapping");
     expect(mapDaemonItemState("implementing")).toBe("implementing");
     expect(mapDaemonItemState("launching")).toBe("implementing");
     expect(mapDaemonItemState("ci-failed")).toBe("ci-failed");
@@ -1907,7 +1895,6 @@ describe("orchestratorItemsToStatusItems", () => {
       ["fixing-forward", "fixing-forward"],
       ["done", "done"],
       ["blocked", "blocked"],
-      ["bootstrapping", "bootstrapping"],
       ["implementing", "implementing"],
       ["launching", "implementing"],
       ["ci-failed", "ci-failed"],
@@ -1927,16 +1914,7 @@ describe("orchestratorItemsToStatusItems", () => {
     }
   });
 
-  it("uses resolvedRepoRoot basename as repoLabel for cross-repo items", () => {
-    const item: OrchestratorItem = {
-      ...makeOrchestratorItem("C-1-1"),
-      resolvedRepoRoot: "/Users/rob/code/my-service",
-    };
-    const [result] = orchestratorItemsToStatusItems([item]);
-    expect(result!.repoLabel).toBe("my-service");
-  });
-
-  it("uses empty repoLabel for hub-local items", () => {
+  it("uses empty repoLabel for all items", () => {
     const item = makeOrchestratorItem("C-1-1");
     const [result] = orchestratorItemsToStatusItems([item]);
     expect(result!.repoLabel).toBe("");
@@ -3713,7 +3691,6 @@ describe("renderTuiFrame with showHelp", () => {
       lastTransition: new Date().toISOString(),
       failureReason: undefined,
       worktreeCreated: true,
-      resolvedRepoRoot: "/test",
       startedAt: new Date().toISOString(),
       endedAt: undefined,
       exitCode: null,

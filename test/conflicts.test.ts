@@ -53,35 +53,6 @@ Key files: \`lib/shared.ex\`, \`lib/unique_b.ex\`
     expect(output).toContain("cloud-infrastructure");
   });
 
-  it("cross-repo items don't conflict", () => {
-    const repo = setupTempRepo();
-    const workDir = useFixtureDir(repo, "cross_repo.md");
-    const worktreeDir = join(repo, ".ninthwave", ".worktrees");
-
-    // H-API-1 (target-repo-a) and H-WA-1 (target-repo-b) target different repos
-    const output = captureOutput(() =>
-      cmdConflicts(["H-API-1", "H-WA-1"], workDir, worktreeDir),
-    );
-
-    expect(output).not.toContain("CONFLICT");
-    expect(output).toContain("CLEAR");
-  });
-
-  it("same-repo items are still compared", () => {
-    const repo = setupTempRepo();
-    const workDir = useFixtureDir(repo, "cross_repo.md");
-    const worktreeDir = join(repo, ".ninthwave", ".worktrees");
-
-    // H-API-1 and M-API-2 both target target-repo-a
-    const output = captureOutput(() =>
-      cmdConflicts(["H-API-1", "M-API-2"], workDir, worktreeDir),
-    );
-
-    // They share the same domain (api-service), so should show POTENTIAL
-    expect(output).toContain("POTENTIAL");
-    expect(output).toContain("api-service");
-  });
-
   it("reports CLEAR when no conflicts found", () => {
     const repo = setupTempRepo();
     const workDir = useFixtureDir(repo, "valid.md");

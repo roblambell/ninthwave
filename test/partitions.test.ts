@@ -7,7 +7,6 @@ import {
   getPartitionFor,
   cleanupStalePartitions,
 } from "../core/partitions.ts";
-import type { WorktreeInfo } from "../core/types.ts";
 import { tmpdir } from "os";
 
 const TEST_DIR = join(tmpdir(), `nw-partition-test-${process.pid}`);
@@ -96,57 +95,17 @@ describe("cleanupStalePartitions", () => {
     allocatePartition(PARTITION_DIR, "H-GONE-1");
     // No worktree exists for H-GONE-1
 
-    cleanupStalePartitions(PARTITION_DIR, WORKTREE_DIR, () => null);
+    cleanupStalePartitions(PARTITION_DIR, WORKTREE_DIR);
 
     expect(existsSync(join(PARTITION_DIR, "1"))).toBe(false);
   });
 
-  it("keeps partitions for items with a hub worktree", () => {
+  it("keeps partitions for items with a worktree on disk", () => {
     allocatePartition(PARTITION_DIR, "H-KEEP-1");
     mkdirSync(join(WORKTREE_DIR, "ninthwave-H-KEEP-1"), { recursive: true });
 
-    cleanupStalePartitions(PARTITION_DIR, WORKTREE_DIR, () => null);
+    cleanupStalePartitions(PARTITION_DIR, WORKTREE_DIR);
 
     expect(existsSync(join(PARTITION_DIR, "1"))).toBe(true);
-  });
-
-  it("keeps partitions for items with a cross-repo worktree", () => {
-    allocatePartition(PARTITION_DIR, "X-CR-1");
-    const crossRepoPath = join(TEST_DIR, "other-repo", ".ninthwave", ".worktrees", "ninthwave-X-CR-1");
-    mkdirSync(crossRepoPath, { recursive: true });
-
-    const getInfo = (workItemId: string): WorktreeInfo | null => {
-      if (workItemId === "X-CR-1") {
-        return {
-          workItemId: "X-CR-1",
-          repoRoot: join(TEST_DIR, "other-repo"),
-          worktreePath: crossRepoPath,
-        };
-      }
-      return null;
-    };
-
-    cleanupStalePartitions(PARTITION_DIR, WORKTREE_DIR, getInfo);
-
-    expect(existsSync(join(PARTITION_DIR, "1"))).toBe(true);
-  });
-
-  it("removes partitions for cross-repo items where worktree path is gone", () => {
-    allocatePartition(PARTITION_DIR, "X-GONE-1");
-
-    const getInfo = (workItemId: string): WorktreeInfo | null => {
-      if (workItemId === "X-GONE-1") {
-        return {
-          workItemId: "X-GONE-1",
-          repoRoot: "/nonexistent/repo",
-          worktreePath: "/nonexistent/path",
-        };
-      }
-      return null;
-    };
-
-    cleanupStalePartitions(PARTITION_DIR, WORKTREE_DIR, getInfo);
-
-    expect(existsSync(join(PARTITION_DIR, "1"))).toBe(false);
   });
 });

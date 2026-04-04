@@ -59,11 +59,9 @@ function makeWorkItem(id: string, title: string, deps: string[] = []): WorkItem 
     bundleWith: [],
     status: "open",
     filePath: "",
-    repoAlias: "",
     rawText: `# ${title} (${id})\n\n**Priority:** High\n**Domain:** test\n`,
     filePaths: [],
     testPlan: "",
-    bootstrap: false,
   };
 }
 

@@ -35,13 +35,6 @@ export function cmdConflicts(
       const item1 = itemMap.get(id1)!;
       const item2 = itemMap.get(id2)!;
 
-      // Normalize repo aliases for comparison
-      const normRepo1 = normalizeRepo(item1.repoAlias);
-      const normRepo2 = normalizeRepo(item2.repoAlias);
-
-      // Items targeting different repos can never have file conflicts
-      if (normRepo1 !== normRepo2) continue;
-
       // Check file overlap
       const files1 = new Set(item1.filePaths);
       const common = item2.filePaths.filter((f) => files1.has(f));
@@ -73,7 +66,3 @@ export function cmdConflicts(
   }
 }
 
-function normalizeRepo(alias: string): string {
-  if (!alias || alias === "self" || alias === "hub") return "hub";
-  return alias;
-}

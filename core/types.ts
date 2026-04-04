@@ -23,12 +23,10 @@ export interface WorkItem {
   bundleWith: string[]; // list of bundle IDs
   status: Status;
   filePath: string; // path to the individual work item file
-  repoAlias: string; // "" | "self" | "hub" | repo name
   rawText: string; // full markdown text of the work item
   filePaths: string[]; // extracted file paths mentioned in the item
   testPlan: string; // extracted from **Test plan:** section (empty if not present)
   descriptionSnippet?: string; // brief snippet extracted from the markdown body for status detail views
-  bootstrap: boolean; // whether the orchestrator should bootstrap the target repo before launch
   requiresManualReview?: boolean; // force a human merge hold regardless of session merge strategy
 }
 
@@ -49,12 +47,6 @@ export interface WorkspaceConfig {
   tool: "pnpm" | "yarn" | "npm" | "turborepo";
   root: string;
   packages: WorkspacePackage[];
-}
-
-export interface WorktreeInfo {
-  itemId: string;
-  repoRoot: string;
-  worktreePath: string;
 }
 
 export interface WatchResult {

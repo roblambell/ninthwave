@@ -1,7 +1,7 @@
 // CLI commands for launching work items: `nw <ID>...` and `nw start <ID>...`.
 
 import { mkdirSync } from "fs";
-import { join, basename } from "path";
+import { join } from "path";
 import { getAvailableMemory } from "../memory.ts";
 import { parseWorkItems } from "../parser.ts";
 import { die, warn, info, GREEN, BOLD, DIM, RESET } from "../output.ts";
@@ -11,7 +11,6 @@ import { calculateMemorySessionLimit } from "../orchestrator.ts";
 import { computeDefaultSessionLimit } from "./orchestrate.ts";
 import { type Multiplexer, getMux } from "../mux.ts";
 import { cleanupStalePartitions } from "../partitions.ts";
-import { getWorktreeInfo } from "../cross-repo.ts";
 import { cmdConflicts } from "./conflicts.ts";
 import { applyGithubToken } from "../gh.ts";
 import { launchSingleItem, validatePickupCandidate } from "./launch.ts";
@@ -136,10 +135,7 @@ export async function cmdRunItems(
 
   // Clean stale partition locks before allocating
   const partitionDir = join(worktreeDir, ".partitions");
-  const crossRepoIndex = join(worktreeDir, ".cross-repo-index");
-  cleanupStalePartitions(partitionDir, worktreeDir, (itemId) =>
-    getWorktreeInfo(itemId, crossRepoIndex, worktreeDir),
-  );
+  cleanupStalePartitions(partitionDir, worktreeDir);
 
   const mux = muxEarly;
   const launched: string[] = [];
@@ -257,8 +253,6 @@ export async function cmdStart(
     }
   }
 
-  const resolvedRepos = new Map<string, string>();
-
   // Check for file-level conflicts between selected items (warn only)
   if (ids.length > 1) {
     info("Checking for file-level conflicts...");
@@ -269,10 +263,6 @@ export async function cmdStart(
       for (let j = i + 1; j < conflictItems.length; j++) {
         const a = conflictItems[i]!;
         const b = conflictItems[j]!;
-        const normA = normalizeRepoAlias(a.repoAlias);
-        const normB = normalizeRepoAlias(b.repoAlias);
-        if (normA !== normB) continue;
-
         const filesA = new Set(a.filePaths);
         const common = b.filePaths.filter((f) => filesA.has(f));
         if (common.length > 0 || a.domain === b.domain) {
@@ -293,10 +283,7 @@ export async function cmdStart(
 
   // Clean stale partition locks before allocating
   const partitionDir = join(worktreeDir, ".partitions");
-  const crossRepoIndex = join(worktreeDir, ".cross-repo-index");
-  cleanupStalePartitions(partitionDir, worktreeDir, (itemId) =>
-    getWorktreeInfo(itemId, crossRepoIndex, worktreeDir),
-  );
+  cleanupStalePartitions(partitionDir, worktreeDir);
 
   // Compute WIP limit from RAM
   const configuredLimit = computeDefaultSessionLimit();
@@ -323,7 +310,6 @@ export async function cmdStart(
       warn(`Skipping ${id}: existing PR #${validation.existingPrNumber} already matches this item.`);
       continue;
     }
-    resolvedRepos.set(id, validation.targetRepo);
     launchSingleItem(item, workDir, worktreeDir, projectRoot, aiTool, mux);
     launched.push(id);
   }
@@ -334,12 +320,7 @@ export async function cmdStart(
   );
   for (const id of launched) {
     const item = itemMap.get(id)!;
-    const targetRepo = resolvedRepos.get(id)!;
-    if (targetRepo === projectRoot) {
-      console.log(`  - ${id}: ${item.title}`);
-    } else {
-      console.log(`  - ${id}: ${item.title} [${basename(targetRepo)}]`);
-    }
+    console.log(`  - ${id}: ${item.title}`);
   }
 
   if (skipped.length > 0) {
@@ -356,7 +337,3 @@ export async function cmdStart(
   }
 }
 
-function normalizeRepoAlias(alias: string): string {
-  if (!alias || alias === "self" || alias === "hub") return "hub";
-  return alias;
-}

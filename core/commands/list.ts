@@ -148,21 +148,12 @@ export function cmdList(
     let scolor = "";
     if (item.status === "in-progress") scolor = YELLOW;
 
-    // Truncate title, add repo suffix
+    // Truncate title
     let displayTitle = item.title;
-    let repoSuffix = "";
-    if (
-      item.repoAlias &&
-      item.repoAlias !== "self" &&
-      item.repoAlias !== "hub"
-    ) {
-      repoSuffix = ` [${item.repoAlias}]`;
-    }
-    const maxTitleLen = 53 - repoSuffix.length;
+    const maxTitleLen = 53;
     if (displayTitle.length > maxTitleLen) {
       displayTitle = displayTitle.slice(0, maxTitleLen - 3) + "...";
     }
-    displayTitle = displayTitle + repoSuffix;
 
     // Format deps
     let displayDeps = "-";

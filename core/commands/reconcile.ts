@@ -6,7 +6,6 @@ import { info, warn, GREEN, RESET } from "../output.ts";
 import { run } from "../shell.ts";
 import { commitCount } from "../git.ts";
 import { prList } from "../gh.ts";
-import { listCrossRepoEntries } from "../cross-repo.ts";
 import { cmdMarkDone } from "./mark-done.ts";
 import { cleanSingleWorktree, closeWorkspacesForIds } from "./clean.ts";
 import { getMux } from "../mux.ts";
@@ -26,7 +25,7 @@ export interface ReconcileDeps {
   /** Pull latest main with rebase. Returns { ok, conflict, error }. */
   pullRebase(projectRoot: string): { ok: boolean; conflict: boolean; error?: string };
 
-  /** Get IDs and PR titles of merged ninthwave/* PRs from GitHub. Queries hub repo and any cross-repo targets. */
+  /** Get IDs and PR titles of merged ninthwave/* PRs from GitHub. */
   getMergedWorkItemIds(projectRoot: string, worktreeDir: string): Array<{
     id: string;
     prTitle: string;
@@ -128,32 +127,12 @@ function getMergedWorkItemIdsFromRepo(repoRoot: string): Array<{
   }
 }
 
-function defaultGetMergedWorkItemIds(projectRoot: string, worktreeDir: string): Array<{
+function defaultGetMergedWorkItemIds(projectRoot: string, _worktreeDir: string): Array<{
   id: string;
   prTitle: string;
   lineageToken?: string;
 }> {
-  // Query hub repo for merged ninthwave/* PRs
-  const mergedItems = [...getMergedWorkItemIdsFromRepo(projectRoot)];
-
-  // Also query cross-repo targets discovered from the cross-repo index
-  const indexPath = join(worktreeDir, ".cross-repo-index");
-  const entries = listCrossRepoEntries(indexPath);
-  const targetRepos = new Set<string>();
-  for (const entry of entries) {
-    if (entry.repoRoot !== projectRoot) {
-      targetRepos.add(entry.repoRoot);
-    }
-  }
-  for (const repo of targetRepos) {
-    try {
-      mergedItems.push(...getMergedWorkItemIdsFromRepo(repo));
-    } catch (e) {
-      warn(`Failed to query merged PRs in ${repo}: ${e instanceof Error ? e.message : String(e)}`);
-    }
-  }
-
-  return mergedItems;
+  return getMergedWorkItemIdsFromRepo(projectRoot);
 }
 
 function defaultGetOpenWorkItemIds(workDir: string): string[] {
@@ -356,7 +335,7 @@ export function reconcile(
     return;
   }
 
-  // Step 2: Get merged work item IDs from GitHub (hub + cross-repo targets).
+  // Step 2: Get merged work item IDs from GitHub.
   info("Querying GitHub for merged ninthwave/* PRs...");
   const mergedItems = deps.getMergedWorkItemIds(projectRoot, worktreeDir);
   if (mergedItems.length === 0) {
@@ -428,21 +407,6 @@ export function reconcile(
     }
   }
 
-  // Also clean cross-repo worktrees for done items
-  const crossRepoIndex = join(worktreeDir, ".cross-repo-index");
-  const crossRepoEntries = listCrossRepoEntries(crossRepoIndex);
-  const crossRepoCleaned = new Set<string>();
-
-  for (const entry of crossRepoEntries) {
-    if (doneIds.has(entry.itemId) && !crossRepoCleaned.has(entry.itemId)) {
-      const targetWtDir = join(entry.repoRoot, ".ninthwave", ".worktrees");
-      if (deps.cleanWorktree(entry.itemId, targetWtDir, entry.repoRoot)) {
-        cleanedCount++;
-        crossRepoCleaned.add(entry.itemId);
-      }
-    }
-  }
-
   if (cleanedCount > 0) {
     info(`Cleaned ${cleanedCount} stale worktree(s).`);
   }
@@ -462,17 +426,6 @@ export function reconcile(
     if (!doneIds.has(wtId) && !refreshedOpenIds.has(wtId)) {
       if (deps.cleanWorktree(wtId, worktreeDir, projectRoot)) {
         orphanCount++;
-      }
-    }
-  }
-  // Also clean orphaned cross-repo worktrees
-  for (const entry of crossRepoEntries) {
-    if (crossRepoCleaned.has(entry.itemId)) continue;
-    if (!doneIds.has(entry.itemId) && !refreshedOpenIds.has(entry.itemId)) {
-      const targetWtDir = join(entry.repoRoot, ".ninthwave", ".worktrees");
-      if (deps.cleanWorktree(entry.itemId, targetWtDir, entry.repoRoot)) {
-        orphanCount++;
-        crossRepoCleaned.add(entry.itemId);
       }
     }
   }
@@ -497,21 +450,6 @@ export function reconcile(
     info(`Cleaning stale worktree for ${wtId} (zero commits, no open PR)`);
     if (deps.cleanWorktree(wtId, worktreeDir, projectRoot)) {
       staleCount++;
-    }
-  }
-  // Also check cross-repo worktrees for staleness
-  for (const entry of crossRepoEntries) {
-    if (crossRepoCleaned.has(entry.itemId)) continue;
-    if (doneIds.has(entry.itemId)) continue;
-    if (!refreshedOpenIds.has(entry.itemId)) continue;
-    const targetWtDir = join(entry.repoRoot, ".ninthwave", ".worktrees");
-    if (deps.worktreeHasCommits(entry.itemId, targetWtDir, entry.repoRoot)) continue;
-    if (deps.branchHasOpenPR(entry.itemId, entry.repoRoot)) continue;
-
-    info(`Cleaning stale cross-repo worktree for ${entry.itemId} (zero commits, no open PR)`);
-    if (deps.cleanWorktree(entry.itemId, targetWtDir, entry.repoRoot)) {
-      staleCount++;
-      crossRepoCleaned.add(entry.itemId);
     }
   }
   if (staleCount > 0) {

@@ -4,7 +4,6 @@
 
 import { join } from "path";
 import { existsSync, unlinkSync } from "fs";
-import { getWorktreeInfo, listCrossRepoEntries } from "./cross-repo.ts";
 import { heartbeatFilePath, writeHeartbeat } from "./daemon.ts";
 import { cleanInbox } from "./commands/inbox.ts";
 import { validatePickupCandidate } from "./commands/launch.ts";
@@ -20,8 +19,8 @@ import {
   getNextTool,
 } from "./orchestrator-types.ts";
 
-type InboxTargetSource = "cross-repo-index" | "hub-worktree" | "item-worktree";
-type InboxTargetReason = "no-worktree-path" | "cross-repo-worktree-missing" | "item-worktree-missing";
+type InboxTargetSource = "hub-worktree" | "item-worktree";
+type InboxTargetReason = "no-worktree-path" | "item-worktree-missing";
 type InboxDeliveryOutcome = "delivered" | "missing-target" | "relaunch-requested";
 
 interface InboxTargetResolution {
@@ -34,24 +33,7 @@ interface InboxTargetResolution {
 function resolveImplementerInboxTarget(
   item: OrchestratorItem,
   ctx: ExecutionContext,
-  cachedEntries?: ReturnType<typeof listCrossRepoEntries>,
 ): InboxTargetResolution {
-  const indexPath = join(ctx.worktreeDir, ".cross-repo-index");
-  const entries = cachedEntries ?? listCrossRepoEntries(indexPath);
-  const indexedEntry = entries.find((entry) => entry.itemId === item.id);
-  if (indexedEntry?.worktreePath && existsSync(indexedEntry.worktreePath)) {
-    return {
-      projectRoot: indexedEntry.worktreePath,
-      source: "cross-repo-index",
-    };
-  }
-  if (indexedEntry?.worktreePath) {
-    return {
-      projectRoot: null,
-      reason: "cross-repo-worktree-missing",
-      candidateProjectRoot: indexedEntry.worktreePath,
-    };
-  }
   const hubWorktreePath = join(ctx.worktreeDir, `ninthwave-${item.id}`);
   if (existsSync(hubWorktreePath)) {
     return {
@@ -109,9 +91,8 @@ function deliverToImplementerInbox(
   message: string,
   ctx: ExecutionContext,
   deps: OrchestratorDeps,
-  cachedEntries?: ReturnType<typeof listCrossRepoEntries>,
 ): InboxTargetResolution {
-  const resolution = resolveImplementerInboxTarget(item, ctx, cachedEntries);
+  const resolution = resolveImplementerInboxTarget(item, ctx);
   if (!resolution.projectRoot) {
     logInboxDelivery(orch, item, actionType, message, resolution, "missing-target");
     return resolution;
@@ -162,46 +143,6 @@ function resolveExpectedPrBase(
   }
 
   return item.baseBranch;
-}
-
-/**
- * Bootstrap a target repo for a cross-repo item.
- * On success, sets resolvedRepoRoot and transitions to launching.
- * On failure, marks the item stuck with a descriptive reason.
- */
-export function executeBootstrap(
-  orch: OrchestratorHandle,
-  item: OrchestratorItem,
-  ctx: ExecutionContext,
-  deps: OrchestratorDeps,
-): ActionResult {
-  if (!deps.bootstrapRepo) {
-    orch.transition(item, "stuck");
-    item.failureReason = "bootstrap-failed: bootstrapRepo dependency not provided";
-    return { success: false, error: `Bootstrap not available for ${item.id}` };
-  }
-
-  const alias = item.workItem.repoAlias;
-  const result = deps.bootstrapRepo(alias, ctx.projectRoot);
-
-  if (result.status === "failed") {
-    orch.transition(item, "stuck");
-    item.failureReason = `bootstrap-failed: ${result.reason}`;
-    return { success: false, error: `Bootstrap failed for ${item.id}: ${result.reason}` };
-  }
-
-  // Resolve the repo root now that bootstrap succeeded
-  if (result.status === "cloned" || result.status === "created") {
-    item.resolvedRepoRoot = result.path;
-  }
-  // status === "exists" should not normally happen (needsBootstrap checks resolvedRepoRoot),
-  // but is harmless -- resolvedRepoRoot remains unset and launch will resolve normally.
-
-  // Transition to launching -- the next processTransitions cycle will not
-  // re-emit a launch action (launching is handled by transitionItem).
-  // Instead, we return success so the execution layer can emit a follow-up launch.
-  orch.transition(item, "launching");
-  return { success: true };
 }
 
 /** Launch a worker for an item. Stores workspaceRef on success, marks stuck or schedules retry on failure. */
@@ -339,7 +280,7 @@ export function executeMerge(
     return { success: false, error: `No PR number for ${item.id}` };
   }
 
-  const repoRoot = item.resolvedRepoRoot ?? ctx.projectRoot;
+  const repoRoot = ctx.projectRoot;
   const defaultBranch = resolveDefaultBranch(item, repoRoot, deps);
   const expectedBase = resolveExpectedPrBase(orch, item, defaultBranch);
 
@@ -401,10 +342,7 @@ export function executeMerge(
       // Do NOT increment mergeFailCount since this isn't a genuine merge failure.
       item.rebaseRequested = false; // Reset so the rebase path works correctly
       if (deps.daemonRebase) {
-        const indexPath = join(ctx.worktreeDir, ".cross-repo-index");
-        const wtInfo = getWorktreeInfo(item.id, indexPath, ctx.worktreeDir);
-        const wtRepoRoot = wtInfo?.repoRoot ?? item.resolvedRepoRoot ?? ctx.projectRoot;
-        const worktreePath = wtInfo?.worktreePath ?? join(wtRepoRoot, ".ninthwave", ".worktrees", `ninthwave-${item.id}`);
+        const worktreePath = item.worktreePath ?? join(ctx.worktreeDir, `ninthwave-${item.id}`);
         const branch = `ninthwave/${item.id}`;
         try {
           const rebaseSuccess = deps.daemonRebase(worktreePath, branch);
@@ -481,17 +419,6 @@ export function executeMerge(
     // Non-fatal -- default branch will be pulled on next cycle
   }
 
-  // Also pull the latest hub default branch if this was cross-repo
-  if (repoRoot !== ctx.projectRoot) {
-    const hubDefaultBranch = deps.getDefaultBranch?.(ctx.projectRoot) ?? "main";
-    try {
-      deps.fetchOrigin(ctx.projectRoot, hubDefaultBranch);
-      deps.ffMerge(ctx.projectRoot, hubDefaultBranch);
-    } catch {
-      // Non-fatal
-    }
-  }
-
   if (deps.completeMergedWorkItem) {
     try {
       const cleanupResult = deps.completeMergedWorkItem(item.workItem, ctx.workDir, ctx.projectRoot);
@@ -514,10 +441,6 @@ export function executeMerge(
   const restackedIds = new Set<string>();
   const successfulRestacks = new Set<string>();
 
-  // Cache cross-repo index for worktree lookups in sibling loops
-  const crossRepoIndex = join(ctx.worktreeDir, ".cross-repo-index");
-  const cachedEntries = listCrossRepoEntries(crossRepoIndex);
-
   for (const other of orch.getAllItems()) {
     if (other.id === item.id) continue;
     if (!other.workItem.dependencies.includes(item.id)) continue;
@@ -526,17 +449,14 @@ export function executeMerge(
 
     restackedIds.add(other.id);
 
-    const otherWtInfo = getWorktreeInfo(other.id, crossRepoIndex, ctx.worktreeDir, cachedEntries);
-    const otherRepoRoot = otherWtInfo?.repoRoot ?? other.resolvedRepoRoot ?? ctx.projectRoot;
     const otherWorktreePath = other.worktreePath
-      ?? otherWtInfo?.worktreePath
-      ?? join(otherRepoRoot, ".ninthwave", ".worktrees", `ninthwave-${other.id}`);
+      ?? join(ctx.worktreeDir, `ninthwave-${other.id}`);
     const otherBranch = `ninthwave/${other.id}`;
 
     if (!deps.rebaseOnto || !deps.forcePush) {
       // rebaseOnto or forcePush not available -- send worker manual rebase instructions
       const restackMsg = `[ORCHESTRATOR] Restack Required: dependency ${item.id} was squash-merged. Run: git rebase --onto ${defaultBranch} ${depBranch} ${otherBranch} && git push --force-with-lease`;
-      deliverToImplementerInbox(orch, other, "rebase", restackMsg, ctx, deps, cachedEntries);
+      deliverToImplementerInbox(orch, other, "rebase", restackMsg, ctx, deps);
       continue;
     }
 
@@ -549,12 +469,12 @@ export function executeMerge(
       } else {
         // Conflict -- send worker manual rebase instructions
         const conflictMsg = `[ORCHESTRATOR] Restack Conflict: dependency ${item.id} was squash-merged but rebase --onto had conflicts. Run manually: git rebase --onto ${defaultBranch} ${depBranch} ${otherBranch}`;
-        deliverToImplementerInbox(orch, other, "rebase", conflictMsg, ctx, deps, cachedEntries);
+        deliverToImplementerInbox(orch, other, "rebase", conflictMsg, ctx, deps);
       }
     } catch {
       // Unexpected error -- fall back to worker message
       const restackMsg2 = `[ORCHESTRATOR] Restack Required: dependency ${item.id} was squash-merged. Run: git rebase --onto ${defaultBranch} ${depBranch} ${otherBranch} && git push --force-with-lease`;
-      deliverToImplementerInbox(orch, other, "rebase", restackMsg2, ctx, deps, cachedEntries);
+      deliverToImplementerInbox(orch, other, "rebase", restackMsg2, ctx, deps);
     }
   }
 
@@ -566,29 +486,21 @@ export function executeMerge(
     if (!ACTIVE_SESSION_STATES.has(other.state)) continue;
     if (restackedIds.has(other.id)) continue;
     const rebaseMsg2 = `Dependency ${item.id} merged. Please rebase onto latest ${defaultBranch}.`;
-    deliverToImplementerInbox(orch, other, "rebase", rebaseMsg2, ctx, deps, cachedEntries);
+    deliverToImplementerInbox(orch, other, "rebase", rebaseMsg2, ctx, deps);
   }
 
-  // Post-merge daemon-rebase: proactively rebase in-flight sibling PRs in the same repo.
+  // Post-merge daemon-rebase: proactively rebase in-flight sibling PRs.
   // This eliminates most conflicts before workers notice, reducing CI churn.
   // Skip restacked items -- they were already rebased with --onto above.
-  // Skip items in different repos -- their default branch didn't change from this merge.
   for (const other of orch.getAllItems()) {
     if (other.id === item.id) continue;
     if (!ACTIVE_SESSION_STATES.has(other.state)) continue;
     if (!other.prNumber) continue;
     if (restackedIds.has(other.id)) continue;
 
-    // Only rebase siblings in the same target repo -- a merge in repo-B
-    // doesn't affect the default branch in repo-A
-    const otherRepoRoot2 = other.resolvedRepoRoot ?? ctx.projectRoot;
-    if (otherRepoRoot2 !== repoRoot) continue;
-
     const otherBranch = `ninthwave/${other.id}`;
-    const otherWtInfo2 = getWorktreeInfo(other.id, crossRepoIndex, ctx.worktreeDir, cachedEntries);
     const otherWorktreePath = other.worktreePath
-      ?? otherWtInfo2?.worktreePath
-      ?? join(otherRepoRoot2, ".ninthwave", ".worktrees", `ninthwave-${other.id}`);
+      ?? join(ctx.worktreeDir, `ninthwave-${other.id}`);
 
     // Try daemon-rebase first for all siblings
     let daemonSuccess = false;
@@ -604,7 +516,7 @@ export function executeMerge(
 
     // Daemon rebase failed or unavailable -- check if actually conflicting
     if (deps.checkPrMergeable) {
-      const mergeable = deps.checkPrMergeable(otherRepoRoot2, other.prNumber);
+      const mergeable = deps.checkPrMergeable(repoRoot, other.prNumber);
       if (!mergeable) {
         // Actually conflicting -- send worker rebase message as fallback
         const siblingMsg = `Sibling PR #${other.prNumber} has merge conflicts after ${item.id} was merged. Please rebase onto latest ${defaultBranch}.`;
@@ -615,7 +527,6 @@ export function executeMerge(
           siblingMsg,
           ctx,
           deps,
-          cachedEntries,
         );
         if (!delivery.projectRoot) {
           deps.warn?.(
@@ -669,7 +580,7 @@ export function executeNotifyCiFailure(
   logInboxDelivery(orch, item, "notify-ci-failure", message, delivery, "delivered");
 
   if (item.prNumber) {
-    const repoRoot = item.resolvedRepoRoot ?? ctx.projectRoot;
+    const repoRoot = ctx.projectRoot;
     if (deps.upsertOrchestratorComment) {
       deps.upsertOrchestratorComment(repoRoot, item.prNumber, item.id, "CI failure detected. Worker notified.");
     } else {
@@ -718,11 +629,7 @@ export function executeClean(
     ? deps.closeWorkspace(item.workspaceRef)
     : null; // null = not attempted (no workspace to close)
 
-  const indexPath = join(ctx.worktreeDir, ".cross-repo-index");
-  const wtInfo = getWorktreeInfo(item.id, indexPath, ctx.worktreeDir);
-  const repoRoot = wtInfo?.repoRoot ?? item.resolvedRepoRoot ?? ctx.projectRoot;
-  const worktreeDir = repoRoot !== ctx.projectRoot ? join(repoRoot, ".ninthwave", ".worktrees") : ctx.worktreeDir;
-  const worktreeCleaned = deps.cleanSingleWorktree(item.id, worktreeDir, repoRoot);
+  const worktreeCleaned = deps.cleanSingleWorktree(item.id, ctx.worktreeDir, ctx.projectRoot);
 
   // Clean up heartbeat file (best-effort)
   try {
@@ -733,7 +640,7 @@ export function executeClean(
   } catch { /* best-effort -- heartbeat cleanup failure doesn't block clean */ }
 
   // Clean up inbox files in the active and legacy namespaces (best-effort)
-  for (const inboxRoot of new Set([item.worktreePath, repoRoot, ctx.projectRoot])) {
+  for (const inboxRoot of new Set([item.worktreePath, ctx.projectRoot])) {
     if (!inboxRoot) continue;
     try {
       cleanInbox(inboxRoot, item.id);
@@ -819,7 +726,7 @@ export function executeSetCommitStatus(
 
   const state = action.statusState ?? "pending";
   const description = action.statusDescription ?? "";
-  const repoRoot = item.resolvedRepoRoot ?? ctx.projectRoot;
+  const repoRoot = ctx.projectRoot;
 
   const ok = deps.setCommitStatus(repoRoot, prNum, state, "Ninthwave / Review", description);
   return ok
@@ -861,10 +768,7 @@ export function executeDaemonRebase(
 
   // Try daemon-side rebase if the dep is available
   if (deps.daemonRebase) {
-    const indexPath = join(ctx.worktreeDir, ".cross-repo-index");
-    const wtInfo = getWorktreeInfo(item.id, indexPath, ctx.worktreeDir);
-    const repoRoot = wtInfo?.repoRoot ?? item.resolvedRepoRoot ?? ctx.projectRoot;
-    const worktreePath = wtInfo?.worktreePath ?? join(repoRoot, ".ninthwave", ".worktrees", `ninthwave-${item.id}`);
+    const worktreePath = item.worktreePath ?? join(ctx.worktreeDir, `ninthwave-${item.id}`);
     try {
       const success = deps.daemonRebase(worktreePath, branch);
       if (success) {
@@ -901,9 +805,7 @@ export function executeDaemonRebase(
 
   // Launch rebaser worker if available (focused rebase-only prompt)
   if (deps.launchRebaser && item.prNumber) {
-    const repoRoot = deps.daemonRebase
-      ? (getWorktreeInfo(item.id, join(ctx.worktreeDir, ".cross-repo-index"), ctx.worktreeDir)?.repoRoot ?? item.resolvedRepoRoot ?? ctx.projectRoot)
-      : (item.resolvedRepoRoot ?? ctx.projectRoot);
+    const repoRoot = ctx.projectRoot;
     try {
       const result = deps.launchRebaser(item.id, item.prNumber, repoRoot, item.aiTool ?? ctx.aiTool);
       if (result) {
@@ -1006,7 +908,7 @@ export function executeLaunchRebaser(
     return { success: false, error: `No PR number for rebaser launch of ${item.id}` };
   }
 
-  const repoRoot = item.resolvedRepoRoot ?? ctx.projectRoot;
+  const repoRoot = ctx.projectRoot;
   try {
     const result = deps.launchRebaser(item.id, prNum, repoRoot, item.aiTool ?? ctx.aiTool);
     if (result) {
@@ -1072,7 +974,7 @@ export function executeLaunchReview(
     return { success: false, error: `No PR number for review launch of ${item.id}` };
   }
 
-  const repoRoot = item.resolvedRepoRoot ?? ctx.projectRoot;
+  const repoRoot = ctx.projectRoot;
   try {
     const result = deps.launchReview(item.id, prNum, repoRoot, item.worktreePath, item.aiTool ?? ctx.aiTool);
     if (result) {
@@ -1146,7 +1048,7 @@ export function executePostReview(
     NINTHWAVE_FOOTER,
   ].join("\n");
 
-  const repoRoot = item.resolvedRepoRoot ?? ctx.projectRoot;
+  const repoRoot = ctx.projectRoot;
   try {
     deps.prComment(repoRoot, prNum, body);
     return { success: true };
@@ -1170,7 +1072,7 @@ export function executeLaunchForwardFixer(
     return { success: false, error: `No merge commit SHA for forward-fixer launch of ${item.id}` };
   }
 
-  const repoRoot = item.resolvedRepoRoot ?? ctx.projectRoot;
+  const repoRoot = ctx.projectRoot;
   const defaultBranch = resolveDefaultBranch(item, repoRoot, deps);
   try {
     const result = deps.launchForwardFixer(

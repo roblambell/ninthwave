@@ -316,40 +316,6 @@ describe("cmdStart", () => {
     expect(mockMux.launchWorkspace).not.toHaveBeenCalled();
   });
 
-  it("skips a blocked item and continues to a later valid item", async () => {
-    const mockMux = createMockMux();
-    const repo = setupTempRepo();
-    const workDir = setupWorkItemsDir(repo);
-    const worktreeDir = join(repo, ".ninthwave", ".worktrees");
-
-    writeFileSync(
-      join(workDir, "1-queue-admission--H-BAD-9.md"),
-      [
-        "# Broken cross-repo launch (H-BAD-9)",
-        "",
-        "**Priority:** High",
-        "**Source:** Test",
-        "**Depends on:** None",
-        "**Domain:** queue-admission",
-        "**Repo:** missing-repo",
-        "",
-        "Exercise blocked direct-launch validation.",
-        "",
-        "Acceptance: Item is blocked before launch side effects.",
-        "",
-        "Key files: `core/commands/run-items.ts`",
-      ].join("\n"),
-    );
-
-    const output = await captureOutput(() =>
-      cmdStart(["H-BAD-9", "M-CI-1", "--tool", "claude"], workDir, worktreeDir, repo, mockMux),
-    );
-
-    expect(output).toContain("Blocking H-BAD-9:");
-    expect(output).toContain("Launched 1 session");
-    expect(output).toContain("M-CI-1");
-    expect(mockMux.launchWorkspace).toHaveBeenCalledTimes(1);
-  });
 });
 
 describe("validatePickupCandidate", () => {
@@ -483,20 +449,6 @@ describe("validatePickupCandidate", () => {
     expect(result.failureReason).toContain("non-matching work item metadata (mismatch)");
   });
 
-  it("returns unlaunchable when the target repo cannot be resolved", () => {
-    const repo = setupTempRepo();
-    const workDir = setupWorkItemsDir(repo);
-    const worktreeDir = join(repo, ".ninthwave", ".worktrees");
-    const item = parseWorkItems(workDir, worktreeDir).find((candidate) => candidate.id === "M-CI-1")!;
-    item.repoAlias = "missing-repo";
-
-    const result = validatePickupCandidate(item, repo);
-
-    expect(result.status).toBe("blocked");
-    if (result.status !== "blocked") throw new Error("expected blocked result");
-    expect(result.code).toBe("unlaunchable");
-    expect(result.failureReason).toContain("Repo 'missing-repo' not found");
-  });
 });
 
 describe("launchSingleItem", () => {

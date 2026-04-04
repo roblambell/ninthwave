@@ -352,11 +352,9 @@ describe("processScheduledTasks", () => {
         bundleWith: [],
         status: "open",
         filePath: "",
-        repoAlias: "",
         rawText: "",
         filePaths: [],
         testPlan: "",
-        bootstrap: false,
       });
     }
     return orch;

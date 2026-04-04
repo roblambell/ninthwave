@@ -48,11 +48,9 @@ function makeWorkItem(
     bundleWith: [],
     status: "open",
     filePath: "",
-    repoAlias: "",
     rawText: `## ${id}\n${title}`,
     filePaths: [],
     testPlan: "",
-    bootstrap: false,
   };
 }
 

@@ -10,8 +10,6 @@ import {
   writeSync,
 } from "fs";
 import { join, basename } from "path";
-import type { WorktreeInfo } from "./types.ts";
-
 /**
  * Allocate the lowest available partition number for a work item ID.
  * Creates a file at partitionDir/<N> containing the work item ID.
@@ -85,12 +83,11 @@ export function getPartitionFor(
 
 /**
  * Remove stale partition locks (worktree gone but lock remains).
- * Uses getWorktreeInfo to check cross-repo index + disk verification.
+ * Checks if the worktree directory still exists on disk.
  */
 export function cleanupStalePartitions(
   partitionDir: string,
   worktreeDir: string,
-  getWorktreeInfo: (workItemId: string) => WorktreeInfo | null,
 ): void {
   if (!existsSync(partitionDir)) return;
   for (const entry of readdirSync(partitionDir)) {
@@ -102,18 +99,12 @@ export function cleanupStalePartitions(
       continue;
     }
 
-    // Check hub worktree first (backwards compat)
+    // Check if the worktree directory exists on disk
     if (existsSync(join(worktreeDir, `ninthwave-${lockId}`))) {
       continue;
     }
 
-    // Check cross-repo index + verify on disk
-    const wtInfo = getWorktreeInfo(lockId);
-    if (wtInfo && existsSync(wtInfo.worktreePath)) {
-      continue;
-    }
-
-    // Worktree not found anywhere -- stale lock
+    // Worktree not found -- stale lock
     try {
       unlinkSync(path);
     } catch {

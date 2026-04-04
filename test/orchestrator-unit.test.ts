@@ -48,11 +48,9 @@ function makeWorkItem(id: string, deps: string[] = [], priority: Priority = "med
     bundleWith: [],
     status: "open",
     filePath: "",
-    repoAlias: "",
     rawText: `## ${id}\nTest item`,
     filePaths: [],
     testPlan: "",
-    bootstrap: false,
   };
 }
 
@@ -4129,110 +4127,6 @@ describe("implementer inbox delivery resolution", () => {
     return { orch, events };
   }
 
-  it("delivers review feedback to the indexed live worktree namespace", () => {
-    const hubRepo = setupTempRepo();
-    const targetRepo = setupTempRepo();
-    const worktreeDir = join(hubRepo, ".ninthwave", ".worktrees");
-    const targetWorktree = join(targetRepo, ".ninthwave", ".worktrees", "ninthwave-H-1-1");
-    mkdirSync(worktreeDir, { recursive: true });
-    mkdirSync(targetWorktree, { recursive: true });
-    writeFileSync(
-      join(worktreeDir, ".cross-repo-index"),
-      `H-1-1\t${targetRepo}\t${targetWorktree}\n`,
-      "utf-8",
-    );
-
-    const { orch, events } = createEventCollector();
-    orch.addItem(makeWorkItem("H-1-1"));
-    orch.getItem("H-1-1")!.reviewCompleted = true;
-    const item = orch.getItem("H-1-1")!;
-    item.resolvedRepoRoot = targetRepo;
-    item.workspaceRef = "workspace:1";
-
-    const writes: Array<{ targetRoot: string; itemId: string; message: string }> = [];
-    const deps = makeMinimalDeps({
-      writeInbox: (targetRoot, itemId, message) => {
-        writes.push({ targetRoot, itemId, message });
-      },
-    });
-    const ctx: ExecutionContext = {
-      projectRoot: hubRepo,
-      worktreeDir,
-      workDir: join(hubRepo, ".ninthwave", "work"),
-      aiTool: "claude",
-    };
-
-    const result = orch.executeAction(
-      { type: "notify-review", itemId: "H-1-1", message: "Please address feedback." },
-      ctx,
-      deps,
-    );
-
-    expect(result.success).toBe(true);
-    expect(writes).toEqual([
-      { targetRoot: targetWorktree, itemId: "H-1-1", message: "Please address feedback." },
-    ]);
-    expect(events).toContainEqual({
-      itemId: "H-1-1",
-      event: "inbox-delivery",
-      data: expect.objectContaining({
-        actionType: "notify-review",
-        outcome: "delivered",
-        targetProjectRoot: targetWorktree,
-        targetSource: "cross-repo-index",
-      }),
-    });
-  });
-
-  it("does not fall back to repo-root namespaces for missing review targets", () => {
-    const hubRepo = setupTempRepo();
-    const targetRepo = setupTempRepo();
-    const worktreeDir = join(hubRepo, ".ninthwave", ".worktrees");
-    const missingWorktree = join(targetRepo, ".ninthwave", ".worktrees", "ninthwave-H-1-1");
-    mkdirSync(worktreeDir, { recursive: true });
-    writeFileSync(
-      join(worktreeDir, ".cross-repo-index"),
-      `H-1-1\t${targetRepo}\t${missingWorktree}\n`,
-      "utf-8",
-    );
-
-    const { orch, events } = createEventCollector();
-    orch.addItem(makeWorkItem("H-1-1"));
-    orch.getItem("H-1-1")!.reviewCompleted = true;
-    const item = orch.getItem("H-1-1")!;
-    item.resolvedRepoRoot = targetRepo;
-    item.workspaceRef = "workspace:1";
-    item.worktreePath = missingWorktree;
-
-    const writeInbox = vi.fn();
-    const deps = makeMinimalDeps({ writeInbox });
-    const ctx: ExecutionContext = {
-      projectRoot: hubRepo,
-      worktreeDir,
-      workDir: join(hubRepo, ".ninthwave", "work"),
-      aiTool: "claude",
-    };
-
-    const result = orch.executeAction(
-      { type: "notify-review", itemId: "H-1-1", message: "Please address feedback." },
-      ctx,
-      deps,
-    );
-
-    expect(result.success).toBe(false);
-    expect(writeInbox).not.toHaveBeenCalled();
-    expect(events).toContainEqual({
-      itemId: "H-1-1",
-      event: "inbox-delivery",
-      data: expect.objectContaining({
-        actionType: "notify-review",
-        outcome: "missing-target",
-        reason: "cross-repo-worktree-missing",
-        candidateProjectRoot: missingWorktree,
-      }),
-    });
-  });
-
   it("logs CI failure relaunch when no safe inbox target exists", () => {
     const hubRepo = setupTempRepo();
     const worktreeDir = join(hubRepo, ".ninthwave", ".worktrees");
@@ -4277,7 +4171,6 @@ describe("implementer inbox delivery resolution", () => {
 
   it("does not fall back to repo-root namespaces for generic worker nudges", () => {
     const hubRepo = setupTempRepo();
-    const targetRepo = setupTempRepo();
     const worktreeDir = join(hubRepo, ".ninthwave", ".worktrees");
     mkdirSync(worktreeDir, { recursive: true });
 
@@ -4285,7 +4178,6 @@ describe("implementer inbox delivery resolution", () => {
     orch.addItem(makeWorkItem("H-1-1"));
     orch.getItem("H-1-1")!.reviewCompleted = true;
     const item = orch.getItem("H-1-1")!;
-    item.resolvedRepoRoot = targetRepo;
     item.workspaceRef = "workspace:1";
 
     const writeInbox = vi.fn();

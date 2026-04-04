@@ -73,7 +73,6 @@ const defaultPrMonitorAsyncDeps: PrMonitorAsyncDeps = {
   prChecksAsync: (...args) => ghModule.prChecksAsync(...args),
   isAvailable: () => ghModule.isAvailable(),
 };
-import { listCrossRepoEntries } from "../cross-repo.ts";
 
 // ── External PR scanning ──────────────────────────────────────────────
 
@@ -181,9 +180,8 @@ export function cmdWatchReady(
   }
 
   const results: string[] = [];
-  const crossRepoIndex = join(worktreeDir, ".cross-repo-index");
 
-  // Iterate hub-local worktrees
+  // Iterate worktrees
   try {
     for (const entry of readdirSync(worktreeDir)) {
       if (!entry.startsWith("ninthwave-")) continue;
@@ -197,13 +195,6 @@ export function cmdWatchReady(
     // ignore
   }
 
-  // Iterate cross-repo worktrees (PRs live in target repos)
-  const hubCheckedIds = new Set(results.map((r) => r.split("\t")[0]));
-  for (const entry of listCrossRepoEntries(crossRepoIndex)) {
-    if (hubCheckedIds.has(entry.itemId)) continue;
-    const statusLine = checkPrStatus(entry.itemId, entry.repoRoot, deps);
-    if (statusLine) results.push(statusLine);
-  }
 
   const output = results.join("\n");
   if (print && output) console.log(output);

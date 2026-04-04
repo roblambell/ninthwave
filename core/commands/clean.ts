@@ -1,6 +1,6 @@
 // clean commands: worktree cleanup and workspace management.
 
-import { existsSync, readdirSync, readFileSync, rmSync } from "fs";
+import { existsSync, readdirSync, rmSync } from "fs";
 import { join, basename } from "path";
 import { die, warn, info, GREEN, RESET } from "../output.ts";
 import {
@@ -13,6 +13,7 @@ import { prList as defaultPrList } from "../gh.ts";
 import { type Multiplexer, getMux } from "../mux.ts";
 import { cleanInbox } from "./inbox.ts";
 import { findMatchingPrForWorkItem, readWorkItem } from "../work-item-files.ts";
+import { releasePartition } from "../partitions.ts";
 
 /** Injectable dependencies for clean commands, for testing. */
 export interface CleanDeps {
@@ -30,11 +31,6 @@ const defaultCleanDeps: CleanDeps = {
   deleteRemoteBranch: defaultDeleteRemoteBranch,
   prList: defaultPrList,
 };
-import { releasePartition } from "../partitions.ts";
-import {
-  getWorktreeInfo,
-  removeCrossRepoIndex,
-} from "../cross-repo.ts";
 
 function extractWorkspaceRef(line: string): string {
   return line.trim().split(/\s+/, 1)[0] ?? line;
@@ -209,19 +205,18 @@ export function cmdClean(
   }
 
   const partitionDir = join(worktreeDir, ".partitions");
-  const crossRepoIndex = join(worktreeDir, ".cross-repo-index");
   const workDir = join(projectRoot, ".ninthwave", "work");
   let cleaned = 0;
   const mergedIds = new Set<string>();
 
   // Helper to clean a single worktree item
-  function cleanItem(id: string, repoRoot: string, wtDir: string): boolean {
+  function cleanItem(id: string, wtDir: string): boolean {
     if (targetId && id !== targetId) return false;
 
     const branch = `ninthwave/${id}`;
     const workItem = readWorkItem(workDir, id);
     const merged = isMerged(
-      repoRoot,
+      projectRoot,
       branch,
       workItem ? { id: workItem.id, title: workItem.title, lineageToken: workItem.lineageToken } : undefined,
       deps,
@@ -229,9 +224,9 @@ export function cmdClean(
 
     if (merged || targetId) {
       if (merged && !targetId) mergedIds.add(id);
-      info(`Removing worktree for ${id} from ${basename(repoRoot)}`);
+      info(`Removing worktree for ${id} from ${basename(projectRoot)}`);
       try {
-        deps.removeWorktree(repoRoot, wtDir, true);
+        deps.removeWorktree(projectRoot, wtDir, true);
       } catch (e) {
         warn(`Failed to remove worktree for ${id}: ${e instanceof Error ? e.message : e}`);
         try {
@@ -241,53 +236,34 @@ export function cmdClean(
         }
       }
       try {
-        deps.deleteBranch(repoRoot, branch);
+        deps.deleteBranch(projectRoot, branch);
       } catch (e) {
         warn(`Failed to delete local branch ${branch}: ${e instanceof Error ? e.message : e}`);
       }
       try {
-        deps.deleteRemoteBranch(repoRoot, branch);
+        deps.deleteRemoteBranch(projectRoot, branch);
       } catch (e) {
         warn(`Failed to delete remote branch ${branch}: ${e instanceof Error ? e.message : e}`);
       }
       releasePartition(partitionDir, id);
-      removeCrossRepoIndex(crossRepoIndex, id);
       return true;
     }
     return false;
   }
 
-  // Clean hub-local worktrees
+  // Clean worktrees
   try {
     for (const entry of readdirSync(worktreeDir)) {
       if (!entry.startsWith("ninthwave-")) continue;
       const wtDir = join(worktreeDir, entry);
       if (!existsSync(wtDir)) continue;
       const id = entry.slice(10); // strip "ninthwave-"
-      if (cleanItem(id, projectRoot, wtDir)) {
+      if (cleanItem(id, wtDir)) {
         cleaned++;
       }
     }
   } catch {
     // worktreeDir might not be iterable
-  }
-
-  // Clean cross-repo worktrees
-  const indexPath = join(worktreeDir, ".cross-repo-index");
-  if (existsSync(indexPath)) {
-    const content = readFileSync(indexPath, "utf-8");
-    for (const line of content.split("\n")) {
-      if (!line || line.startsWith("#")) continue;
-      const parts = line.split("\t");
-      const idxId = parts[0];
-      const idxRepo = parts[1];
-      const idxPath = parts[2];
-      if (!idxId || !idxRepo || !idxPath) continue;
-      if (!existsSync(idxPath)) continue;
-      if (cleanItem(idxId, idxRepo, idxPath)) {
-        cleaned++;
-      }
-    }
   }
 
   // For broad cleanup, close workspaces only for confirmed-merged items.
@@ -300,7 +276,7 @@ export function cmdClean(
 }
 
 /**
- * Remove a single worktree and all associated resources (branches, partition, index entry).
+ * Remove a single worktree and all associated resources (branches, partition).
  * When `mux` is provided, also closes the cmux workspace for this item (best-effort).
  * Returns true if the worktree was found and cleaned, false otherwise.
  */
@@ -322,28 +298,15 @@ export function cleanSingleWorktree(
 
   const branch = `ninthwave/${id}`;
   const partitionDir = join(worktreeDir, ".partitions");
-  const crossRepoIndex = join(worktreeDir, ".cross-repo-index");
-
-  // Check cross-repo index first, then fall back to hub worktree
-  const wtInfo = getWorktreeInfo(id, crossRepoIndex, worktreeDir);
-  let targetRepo: string;
-  let worktreePath: string;
-
-  if (wtInfo) {
-    targetRepo = wtInfo.repoRoot;
-    worktreePath = wtInfo.worktreePath;
-  } else {
-    worktreePath = join(worktreeDir, `ninthwave-${id}`);
-    targetRepo = projectRoot;
-  }
+  const worktreePath = join(worktreeDir, `ninthwave-${id}`);
 
   if (!existsSync(worktreePath)) {
     return false;
   }
 
-  info(`Removing worktree for ${id} from ${basename(targetRepo)}`);
+  info(`Removing worktree for ${id} from ${basename(projectRoot)}`);
   try {
-    deps.removeWorktree(targetRepo, worktreePath, true);
+    deps.removeWorktree(projectRoot, worktreePath, true);
   } catch (e) {
     warn(`Failed to remove worktree for ${id}: ${e instanceof Error ? e.message : e}`);
     try {
@@ -353,18 +316,17 @@ export function cleanSingleWorktree(
     }
   }
   try {
-    deps.deleteBranch(targetRepo, branch);
+    deps.deleteBranch(projectRoot, branch);
   } catch (e) {
     warn(`Failed to delete local branch ${branch}: ${e instanceof Error ? e.message : e}`);
   }
   try {
-    deps.deleteRemoteBranch(targetRepo, branch);
+    deps.deleteRemoteBranch(projectRoot, branch);
   } catch (e) {
     warn(`Failed to delete remote branch ${branch}: ${e instanceof Error ? e.message : e}`);
   }
-  cleanInboxNamespaces(id, [worktreePath, targetRepo, projectRoot]);
+  cleanInboxNamespaces(id, [worktreePath, projectRoot]);
   releasePartition(partitionDir, id);
-  removeCrossRepoIndex(crossRepoIndex, id);
   return true;
 }
 

@@ -9,7 +9,6 @@ import type { PickupCandidateValidation } from "./commands/launch.ts";
 export type OrchestratorItemState =
   | "queued"
   | "ready"
-  | "bootstrapping"
   | "launching"
   | "implementing"
   | "ci-pending"
@@ -62,8 +61,6 @@ export interface OrchestratorItem {
   lastScreenOutput?: string;
   /** Base branch for stacked launches (e.g., "ninthwave/H-1-1"). When set, the worker creates its branch from this instead of main. */
   baseBranch?: string;
-  /** Absolute path to the repo where the PR lives. For hub-local items, equals projectRoot. For cross-repo items, points to the target repo. */
-  resolvedRepoRoot?: string;
   /** Multiplexer workspace reference for the review worker session. */
   reviewWorkspaceRef?: string;
   /** Absolute path to the verdict file written by the review worker. */
@@ -133,7 +130,7 @@ export interface OrchestratorItem {
 }
 
 export interface OrchestratorConfig {
-  /** Max concurrent items in all WIP states (bootstrapping/launching/implementing/ci-pending/ci-passed/ci-failed/rebasing/reviewing/review-pending/merging). */
+  /** Max concurrent items in all WIP states (launching/implementing/ci-pending/ci-passed/ci-failed/rebasing/reviewing/review-pending/merging). */
   sessionLimit: number;
   /** When to auto-merge: auto (CI pass, respects review gate + CHANGES_REQUESTED), manual (never auto-merge), bypass (admin override, skips branch protection human review). */
   mergeStrategy: MergeStrategy;
@@ -231,7 +228,6 @@ export interface PollSnapshot {
 // ── Actions ──────────────────────────────────────────────────────────
 
 export type ActionType =
-  | "bootstrap"
   | "launch"
   | "merge"
   | "notify-ci-failure"
@@ -368,12 +364,6 @@ export interface OrchestratorDeps {
    * Non-fatal -- launch proceeds even if cleanup fails.
    */
   cleanStaleBranch?: (workItem: WorkItem, projectRoot: string) => void;
-  /**
-   * Bootstrap a target repo (clone from remote or create new).
-   * Called before launch when a cross-repo work item has bootstrap: true and the repo doesn't exist locally.
-   * Returns the resolved repo path on success, or an error string on failure.
-   */
-  bootstrapRepo?: (alias: string, projectRoot: string) => { status: "exists" | "cloned" | "created"; path?: string } | { status: "failed"; reason: string };
   /**
    * Launch a review worker for a PR. Returns a workspace reference on success.
    * Actual logic lives in H-RVW-3; stub for now.
@@ -528,7 +518,6 @@ export const LAUNCHING_TIMEOUT_MS = 5 * 60 * 1000;
 // ── WIP states: states that count toward the WIP limit ───────────────
 
 export const ACTIVE_SESSION_STATES: Set<OrchestratorItemState> = new Set([
-  "bootstrapping",
   "launching",
   "implementing",
   "ci-pending",

@@ -27,7 +27,6 @@ Each work item moves through a state machine defined in [`core/orchestrator.ts`]
 |-------|-------------|
 | `queued` | Added to orchestration; waiting for dependencies to complete |
 | `ready` | Dependencies done; waiting for a WIP slot |
-| `bootstrapping` | Cross-repo target being cloned/initialised |
 | `launching` | Worktree created, AI session being started |
 | `implementing` | Worker is active and coding |
 | `ci-pending` | PR created; CI checks running (or awaiting CI start) |
@@ -50,10 +49,7 @@ Each work item moves through a state machine defined in [`core/orchestrator.ts`]
 stateDiagram-v2
     [*] --> queued : addItem()
     queued --> ready : deps done
-    ready --> bootstrapping : cross-repo item
-    ready --> launching : hub-local item
-    bootstrapping --> launching : repo ready
-    bootstrapping --> stuck : clone failed
+    ready --> launching : WIP slot available
     launching --> implementing : worker started
     implementing --> ci_pending : PR detected
     ci_pending --> ci_passed : all checks green
@@ -74,7 +70,7 @@ stateDiagram-v2
 
 ### WIP Limit
 
-States that count toward the WIP limit (see `OrchestratorConfig.sessionLimit`): `bootstrapping`, `launching`, `implementing`, `ci-pending`, `ci-passed`, `ci-failed`, `repairing`, `review-pending`, `merging`. Review workers (`reviewing`) have a separate limit (`reviewSessionLimit`).
+States that count toward the WIP limit (see `OrchestratorConfig.sessionLimit`): `launching`, `implementing`, `ci-pending`, `ci-passed`, `ci-failed`, `repairing`, `review-pending`, `merging`. Review workers (`reviewing`) have a separate limit (`reviewSessionLimit`).
 
 ### Stacked Launches
 
@@ -255,4 +251,4 @@ Timeout thresholds (configurable via `OrchestratorConfig`): 30 minutes for a wor
 - `normalizeRepoUrl()` strips transport details (SSH vs HTTPS), auth, trailing slashes, and `.git`, then normalizes equivalent references to one host-and-path form such as `github.com/org/repo`.
 - `hashRepoUrl()` and `hashNormalizedRepoUrl()` derive the stable SHA-256 repo identity persisted as `repoHash`/`repoRef`.
 - `resolveRepoRef()` accepts any supported identity input (`repoUrl`, `repoHash`, or stored `repoRef`), validates consistency when more than one is present, and returns one canonical comparison value.
-- `compareRepoRefs()` gives later join and runtime checks a shared primitive for rejecting cross-repo mismatches without duplicating normalization logic.
+- `compareRepoRefs()` gives later join and runtime checks a shared primitive for rejecting repo mismatches without duplicating normalization logic.

@@ -263,13 +263,11 @@ const METADATA_PREFIXES = [
   "**Lineage:**",
   "**Requires manual review:**",
   "**Bundle with:**",
-  "**Repo:**",
-  "**Bootstrap:**",
 ];
 
 /**
  * Extract the body text from a work item file's rawText, stripping the # header
- * and metadata lines (Priority, Source, Depends on, Domain, Lineage, Bundle with, Repo).
+ * and metadata lines (Priority, Source, Depends on, Domain, Lineage, Bundle with).
  * Trims trailing empty lines.
  */
 export function extractBody(rawText: string): string[] {
@@ -561,8 +559,6 @@ export function parseWorkItemFile(filePath: string): WorkItem | null {
   let bundle = "";
   let domain = "";
   let lineageToken: string | undefined;
-  let repoAlias = "";
-  let bootstrap = false;
   let requiresManualReview = false;
 
   for (const line of lines) {
@@ -608,15 +604,6 @@ export function parseWorkItemFile(filePath: string): WorkItem | null {
       requiresManualReview = true;
     }
 
-    const repoMatch = line.match(/^\*\*Repo:\*\*\s+(.+)/);
-    if (repoMatch) {
-      repoAlias = repoMatch[1]!.trim();
-    }
-
-    const bootstrapMatch = line.match(/^\*\*Bootstrap:\*\*\s+(.+)/i);
-    if (bootstrapMatch) {
-      bootstrap = bootstrapMatch[1]!.trim().toLowerCase() === "true";
-    }
   }
 
   if (!priority) return null;
@@ -651,12 +638,10 @@ export function parseWorkItemFile(filePath: string): WorkItem | null {
     bundleWith,
     status: "open",
     filePath,
-    repoAlias,
     rawText,
     filePaths: [],
     testPlan: extractTestPlan(rawText),
     descriptionSnippet: extractDescriptionSnippet(rawText),
-    bootstrap,
     requiresManualReview,
   };
 
@@ -684,21 +669,6 @@ export function listWorkItems(workDir: string, worktreeDir: string): WorkItem[] 
       }
     } catch {
       // worktreeDir might not be a directory
-    }
-  }
-
-  // Check cross-repo index for in-progress items in other repos
-  const crossRepoIndex = join(worktreeDir, ".cross-repo-index");
-  if (existsSync(crossRepoIndex)) {
-    const indexContent = readFileSync(crossRepoIndex, "utf-8");
-    for (const line of indexContent.split("\n")) {
-      if (!line || line.startsWith("#")) continue;
-      const parts = line.split("\t");
-      const idxId = parts[0];
-      const idxPath = parts[2];
-      if (idxId && idxPath && existsSync(idxPath)) {
-        inProgressIds.add(idxId);
-      }
     }
   }
 
@@ -789,7 +759,7 @@ export function writeWorkItemFile(
   const priorityDisplay =
     item.priority.charAt(0).toUpperCase() + item.priority.slice(1);
   lines.push(`**Priority:** ${priorityDisplay}`);
-  lines.push(`**Source:** ${item.repoAlias || "local"}`);
+  lines.push(`**Source:** local`);
 
   // Dependencies
   if (item.dependencies.length > 0) {
@@ -811,16 +781,6 @@ export function writeWorkItemFile(
   // Bundle
   if (item.bundleWith.length > 0) {
     lines.push(`**Bundle with:** ${item.bundleWith.join(", ")}`);
-  }
-
-  // Repo
-  if (item.repoAlias) {
-    lines.push(`**Repo:** ${item.repoAlias}`);
-  }
-
-  // Bootstrap
-  if (item.bootstrap) {
-    lines.push(`**Bootstrap:** true`);
   }
 
   lines.push("");

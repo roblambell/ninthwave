@@ -21,7 +21,7 @@ v0.1.0 shipped March 2026. Twelve grind cycles (0-11) have shipped since then. S
 - **Decompose + orchestrate.** `/decompose` breaks a spec into batched work items (~200-400 LOC each). `ninthwave orchestrate` runs an event-driven daemon that launches workers, monitors CI and PR state, merges, cleans up, and recovers from crashes. The full cycle: spec in, merged PRs out.
 - **Deterministic orchestrator, intelligent workers.** The orchestrator is a TypeScript state machine with 13 states and pure transition functions -- no LLM calls. Workers are the intelligent agents. This split keeps orchestration predictable, auditable, and cheap.
 - **Multi-tool, no lock-in.** Works with Claude Code, OpenCode, Copilot CLI, and anything supporting the [Agent Skills standard](https://agentskills.io).
-- **Convention over configuration.** Cross-repo resolves via sibling directories. Port isolation via partition math. Domain slugs from section headers. Zero config for the common case.
+- **Convention over configuration.** Port isolation via partition math. Domain slugs from section headers. Zero config for the common case.
 
 **Key capabilities:**
 - `ninthwave init` -- zero-config project onboarding with CI and test command auto-detection
@@ -85,7 +85,8 @@ Worker sandboxing is a longer-term vision being developed as a separate project:
 
 - **External task backends.** GitHub Issues, ClickUp, Sentry, PagerDuty integrations were removed in 0.2.0. May return as separate packages or plugins.
 - **Remote session access.** Cloud tunnel provider and persistent domains. Foundation shipped; full implementation deferred.
-- **Cross-repo maturity and adaptive resource management.** Future extensions beyond current capabilities.
+- **Cross-repo orchestration.** Removed in scope reduction. May return as a plugin if there is demand.
+- **Adaptive resource management.** Future extension beyond current capabilities.
 
 ## Non-Goals
 

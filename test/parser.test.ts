@@ -34,11 +34,9 @@ function makeWorkItem(overrides: Partial<WorkItem> & { id: string; priority: Pri
     bundleWith: [],
     status: "open",
     filePath: "",
-    repoAlias: "",
     rawText: "",
     filePaths: [],
     testPlan: "",
-    bootstrap: false,
     ...overrides,
   };
 }
@@ -531,96 +529,6 @@ describe("parseWorkItems -- multi-domain items", () => {
   });
 });
 
-describe("parseWorkItems -- cross-repo items", () => {
-  it("parses repo aliases", () => {
-    const repo = setupTempRepo();
-    const workDir = setupWorkItemsDir(repo);
-
-    writeRawWorkItemFile(workDir, "1-api-service--H-API-1.md", `# Add rate limiting (H-API-1)
-
-**Priority:** High
-**Depends on:** None
-**Domain:** api-service
-**Repo:** target-repo-a
-
-Acceptance: Rate limiting returns 429 after threshold.
-
-Key files: \`lib/gateway/rate_limiter.ex\`
-`);
-
-    writeRawWorkItemFile(workDir, "2-api-service--M-API-2.md", `# Connection pool timeout (M-API-2)
-
-**Priority:** Medium
-**Depends on:** H-API-1
-**Domain:** api-service
-**Repo:** target-repo-a
-`);
-
-    writeRawWorkItemFile(workDir, "1-web-app--H-WA-1.md", `# Add onboarding flow (H-WA-1)
-
-**Priority:** High
-**Depends on:** None
-**Domain:** web-app
-**Repo:** target-repo-b
-`);
-
-    writeRawWorkItemFile(workDir, "2-documentation--M-DOC-1.md", `# Update ADR for rate limiting (M-DOC-1)
-
-**Priority:** Medium
-**Depends on:** H-API-1
-**Domain:** documentation
-`);
-
-    const items = parseWorkItems(workDir, join(repo, ".ninthwave", ".worktrees"));
-    const byId = new Map(items.map((i) => [i.id, i]));
-
-    expect(byId.get("H-API-1")!.repoAlias).toBe("target-repo-a");
-    expect(byId.get("M-API-2")!.repoAlias).toBe("target-repo-a");
-    expect(byId.get("H-WA-1")!.repoAlias).toBe("target-repo-b");
-    // M-DOC-1 has no Repo line
-    expect(byId.get("M-DOC-1")!.repoAlias).toBe("");
-  });
-
-  it("parses all items from cross-repo directory", () => {
-    const repo = setupTempRepo();
-    const workDir = setupWorkItemsDir(repo);
-
-    writeRawWorkItemFile(workDir, "1-api--H-API-1.md", `# Rate limiting (H-API-1)
-
-**Priority:** High
-**Depends on:** None
-**Domain:** api
-**Repo:** target-repo-a
-`);
-
-    writeRawWorkItemFile(workDir, "2-api--M-API-2.md", `# Pool timeout (M-API-2)
-
-**Priority:** Medium
-**Depends on:** H-API-1
-**Domain:** api
-**Repo:** target-repo-a
-`);
-
-    writeRawWorkItemFile(workDir, "1-web--H-WA-1.md", `# Onboarding (H-WA-1)
-
-**Priority:** High
-**Depends on:** None
-**Domain:** web
-**Repo:** target-repo-b
-`);
-
-    writeRawWorkItemFile(workDir, "2-docs--M-DOC-1.md", `# ADR (M-DOC-1)
-
-**Priority:** Medium
-**Depends on:** H-API-1
-**Domain:** docs
-`);
-
-    const items = parseWorkItems(workDir, join(repo, ".ninthwave", ".worktrees"));
-    expect(items).toHaveLength(4);
-  });
-});
-
 describe("parseWorkItems -- in-progress detection", () => {
   it("detects in-progress from worktree directories", () => {
     const repo = setupTempRepo();
@@ -651,43 +559,6 @@ describe("parseWorkItems -- in-progress detection", () => {
     expect(byId.get("H-CI-2")!.status).toBe("open");
   });
 
-  it("detects in-progress from cross-repo index", () => {
-    const repo = setupTempRepo();
-    const workDir = setupWorkItemsDir(repo);
-
-    writeRawWorkItemFile(workDir, "2-test--M-CI-1.md", `# Item (M-CI-1)
-
-**Priority:** Medium
-**Depends on:** None
-**Domain:** test
-`);
-
-    writeRawWorkItemFile(workDir, "1-test--H-CI-2.md", `# Item (H-CI-2)
-
-**Priority:** High
-**Depends on:** M-CI-1
-**Domain:** test
-`);
-
-    // Create the worktrees dir and cross-repo index
-    const wtDir = join(repo, ".ninthwave", ".worktrees");
-    mkdirSync(wtDir, { recursive: true });
-
-    // Create a dummy target path that exists
-    const targetPath = join(repo, ".ninthwave", ".worktrees", "ninthwave-H-CI-2");
-    mkdirSync(targetPath, { recursive: true });
-
-    // Write cross-repo index pointing to the existing path
-    writeFileSync(
-      join(wtDir, ".cross-repo-index"),
-      `H-CI-2\ttarget-repo\t${targetPath}\n`,
-    );
-
-    const items = parseWorkItems(workDir, join(repo, ".ninthwave", ".worktrees"));
-    const byId = new Map(items.map((i) => [i.id, i]));
-
-    expect(byId.get("H-CI-2")!.status).toBe("in-progress");
-  });
 });
 
 describe("parseWorkItems -- circular deps", () => {
@@ -1238,7 +1109,6 @@ function fakeItem(rawText: string) {
     bundleWith: [],
     status: "open" as const,
     filePath: "",
-    repoAlias: "",
     rawText,
     filePaths: [],
   };

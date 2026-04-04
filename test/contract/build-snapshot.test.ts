@@ -794,45 +794,6 @@ describe("buildSnapshot contract", () => {
     });
   });
 
-  // ── Cross-repo items (resolvedRepoRoot) ───────────────────────────
-
-  describe("cross-repo items", () => {
-    it("uses resolvedRepoRoot for checkPr instead of projectRoot", () => {
-      orch.addItem(makeWorkItem("X-1"));
-      orch.hydrateState("X-1", "ci-pending");
-      const orchItem = orch.getItem("X-1")!;
-      orchItem.resolvedRepoRoot = "/other/repo";
-
-      let capturedRepoRoot: string | undefined;
-      const result = snap(orch, {
-        checkPr: (id, repoRoot) => {
-          capturedRepoRoot = repoRoot;
-          return fakeGh.checkPr(id, repoRoot);
-        },
-      });
-
-      expect(capturedRepoRoot).toBe("/other/repo");
-    });
-
-    it("uses resolvedRepoRoot for lastCommitTime in implementing state", () => {
-      orch.addItem(makeWorkItem("X-2"));
-      orch.hydrateState("X-2", "implementing");
-      const orchItem = orch.getItem("X-2")!;
-      orchItem.resolvedRepoRoot = "/other/repo";
-      orchItem.workspaceRef = fakeMux.launchWorkspace("/tmp/wt", "claude", "X-2")!;
-
-      let capturedRepoRoot: string | undefined;
-      const result = snap(orch, {
-        mux: fakeMux,
-        getLastCommitTime: (repoRoot, branch) => {
-          capturedRepoRoot = repoRoot;
-          return "2026-03-29T12:00:00Z";
-        },
-      });
-
-      expect(capturedRepoRoot).toBe("/other/repo");
-    });
-  });
 
   // ── Comment fetching ──────────────────────────────────────────────
 

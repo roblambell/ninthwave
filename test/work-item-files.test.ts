@@ -49,11 +49,9 @@ function makeWorkItem(overrides: Partial<WorkItem> = {}): WorkItem {
     bundleWith: [],
     status: "open",
     filePath: "",
-    repoAlias: "",
     rawText: "",
     filePaths: [],
     testPlan: "",
-    bootstrap: false,
     ...overrides,
   };
 }
@@ -139,7 +137,6 @@ describe("parseWorkItemFile", () => {
     expect(item!.bundleWith).toEqual([]);
     expect(item!.status).toBe("open");
     expect(item!.filePath).toBe(fp);
-    expect(item!.repoAlias).toBe("");
     expect(item!.testPlan).toContain("Run unit tests");
     expect(item!.filePaths).toContain("core/worker.ts");
     expect(item!.filePaths).toContain("core/retry.ts");
@@ -179,24 +176,6 @@ describe("parseWorkItemFile", () => {
     const item = parseWorkItemFile(fp);
     expect(item).not.toBeNull();
     expect(item!.bundleWith).toEqual(["M-FT-2", "M-FT-3"]);
-  });
-
-  it("extracts repo alias", () => {
-    const dir = makeTempDir();
-    const content = `# Cross-repo work (H-CR-1)
-
-**Priority:** High
-**Source:** local
-**Depends on:** None
-**Domain:** cross-repo
-**Repo:** target-repo-a
-`;
-    const fp = join(dir, "1-cross-repo--H-CR-1.md");
-    writeFileSync(fp, content);
-
-    const item = parseWorkItemFile(fp);
-    expect(item).not.toBeNull();
-    expect(item!.repoAlias).toBe("target-repo-a");
   });
 
   it("extracts requires-manual-review when explicitly enabled", () => {
@@ -795,7 +774,7 @@ describe("isPriority", () => {
 // --- extractBody ---
 
 describe("extractBody", () => {
-  it("strips metadata prefixes including Lineage and Bootstrap", () => {
+  it("strips metadata prefixes including Lineage", () => {
     const raw = [
       "# Title (H-T-1)",
       "",
@@ -804,32 +783,10 @@ describe("extractBody", () => {
       "**Depends on:** None",
       "**Domain:** test",
       `**Lineage:** ${FIXTURE_LINEAGE}`,
-      "**Bootstrap:** true",
       "",
       "Body text here.",
     ].join("\n");
     const body = extractBody(raw);
     expect(body).toEqual(["Body text here."]);
-  });
-
-  it("does not leak Bootstrap line into body", () => {
-    const raw = [
-      "# Title (H-T-1)",
-      "",
-      "**Priority:** High",
-      "**Source:** local",
-      "**Depends on:** None",
-      "**Domain:** test",
-      `**Lineage:** ${FIXTURE_LINEAGE}`,
-      "**Repo:** my-repo",
-      "**Bootstrap:** true",
-      "",
-      "Description of work.",
-      "",
-      "More details.",
-    ].join("\n");
-    const body = extractBody(raw);
-    expect(body.join("\n")).not.toContain("Bootstrap");
-    expect(body[0]).toBe("Description of work.");
   });
 });

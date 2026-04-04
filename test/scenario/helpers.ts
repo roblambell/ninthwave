@@ -30,11 +30,9 @@ export function makeWorkItem(
     bundleWith: [],
     status: "open",
     filePath: `/project/.ninthwave/work/1--${id}.md`,
-    repoAlias: "",
     rawText: `## ${id}\nTest item`,
     filePaths: [],
     testPlan: "",
-    bootstrap: false,
   };
 }
 

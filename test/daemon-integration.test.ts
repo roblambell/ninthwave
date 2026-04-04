@@ -50,11 +50,9 @@ function makeWorkItem(
     bundleWith: [],
     status: "open",
     filePath: `/project/.ninthwave/work/1--${id}.md`,
-    repoAlias: "",
     rawText: `## ${id}\nTest item`,
     filePaths: [],
     testPlan: "",
-    bootstrap: false,
   };
 }
 
@@ -1201,7 +1199,7 @@ describe("Daemon lifecycle: crash recovery round-trip", () => {
     orch.hydrateState("CR-1", "launching");
     cr1.workspaceRef = "workspace:1";
     cr1.partition = 1;
-    cr1.resolvedRepoRoot = "/repos/project-a";
+
     cr1.startedAt = "2026-03-25T09:00:00.000Z";
     cr1.retryCount = 1;
     cr1.worktreePath = "/tmp/worktrees/ninthwave-CR-1";
@@ -1212,7 +1210,7 @@ describe("Daemon lifecycle: crash recovery round-trip", () => {
     orch.hydrateState("CR-2", "implementing");
     cr2.workspaceRef = "workspace:2";
     cr2.partition = 2;
-    cr2.resolvedRepoRoot = "/repos/project-b";
+
     cr2.startedAt = "2026-03-25T09:05:00.000Z";
     cr2.retryCount = 2;
     cr2.rebaseRequested = true;
@@ -1226,7 +1224,7 @@ describe("Daemon lifecycle: crash recovery round-trip", () => {
     cr3.prNumber = 301;
     cr3.partition = 3;
     cr3.workspaceRef = "workspace:3";
-    cr3.resolvedRepoRoot = "/repos/project-c";
+
     cr3.ciFailCount = 2;
     cr3.retryCount = 0;
     cr3.startedAt = "2026-03-25T08:30:00.000Z";
@@ -1244,7 +1242,7 @@ describe("Daemon lifecycle: crash recovery round-trip", () => {
     cr4.prNumber = 401;
     cr4.partition = 4;
     cr4.workspaceRef = "workspace:4";
-    cr4.resolvedRepoRoot = "/repos/project-d";
+
     cr4.reviewWorkspaceRef = "workspace:review-4";
     cr4.reviewCompleted = true;
     cr4.reviewRound = 2;
@@ -1258,7 +1256,7 @@ describe("Daemon lifecycle: crash recovery round-trip", () => {
     cr5.prNumber = 501;
     cr5.partition = 5;
     cr5.workspaceRef = "workspace:5";
-    cr5.resolvedRepoRoot = "/repos/project-e";
+
     cr5.reviewCompleted = true;
     cr5.startedAt = "2026-03-25T06:00:00.000Z";
     cr5.exitCode = 0;
@@ -1284,13 +1282,13 @@ describe("Daemon lifecycle: crash recovery round-trip", () => {
     // ── Step 4: Verify all non-transient fields survived the round-trip ──
     const byId = new Map(restored!.items.map((i) => [i.id, i]));
 
-    // Item 1: launching -- workspaceRef, partition, resolvedRepoRoot, startedAt, retryCount, worktreePath
+    // Item 1: launching -- workspaceRef, partition, startedAt, retryCount, worktreePath
     const r1 = byId.get("CR-1")!;
     expect(r1).toBeDefined();
     expect(r1.state).toBe("launching");
     expect(r1.workspaceRef).toBe("workspace:1");
     expect(r1.partition).toBe(1);
-    expect(r1.resolvedRepoRoot).toBe("/repos/project-a");
+
     expect(r1.startedAt).toBe("2026-03-25T09:00:00.000Z");
     expect(r1.retryCount).toBe(1);
     expect(r1.ciFailCount).toBe(0);
@@ -1302,7 +1300,7 @@ describe("Daemon lifecycle: crash recovery round-trip", () => {
     expect(r2.state).toBe("implementing");
     expect(r2.workspaceRef).toBe("workspace:2");
     expect(r2.partition).toBe(2);
-    expect(r2.resolvedRepoRoot).toBe("/repos/project-b");
+
     expect(r2.startedAt).toBe("2026-03-25T09:05:00.000Z");
     expect(r2.retryCount).toBe(2);
     expect(r2.rebaseRequested).toBe(true);
@@ -1316,7 +1314,7 @@ describe("Daemon lifecycle: crash recovery round-trip", () => {
     expect(r3.prNumber).toBe(301);
     expect(r3.partition).toBe(3);
     expect(r3.workspaceRef).toBe("workspace:3");
-    expect(r3.resolvedRepoRoot).toBe("/repos/project-c");
+
     expect(r3.ciFailCount).toBe(2);
     expect(r3.ciFailureNotified).toBe(true);
     expect(r3.ciFailureNotifiedAt).toBe("2026-03-25T08:45:00.000Z");
@@ -1333,7 +1331,7 @@ describe("Daemon lifecycle: crash recovery round-trip", () => {
     expect(r4.prNumber).toBe(401);
     expect(r4.partition).toBe(4);
     expect(r4.workspaceRef).toBe("workspace:4");
-    expect(r4.resolvedRepoRoot).toBe("/repos/project-d");
+
     expect(r4.reviewWorkspaceRef).toBe("workspace:review-4");
     expect(r4.reviewCompleted).toBe(true);
     expect(r4.reviewRound).toBe(2);
@@ -1348,7 +1346,7 @@ describe("Daemon lifecycle: crash recovery round-trip", () => {
     expect(r5.prNumber).toBe(501);
     expect(r5.partition).toBe(5);
     expect(r5.workspaceRef).toBe("workspace:5");
-    expect(r5.resolvedRepoRoot).toBe("/repos/project-e");
+
     expect(r5.reviewCompleted).toBe(true);
     expect(r5.exitCode).toBe(0);
     expect(r5.worktreePath).toBe("/tmp/worktrees/ninthwave-CR-5");
@@ -1377,7 +1375,7 @@ describe("Daemon lifecycle: crash recovery round-trip", () => {
       item.retryCount = savedItem.retryCount;
       if (savedItem.workspaceRef) item.workspaceRef = savedItem.workspaceRef;
       if (savedItem.partition != null) item.partition = savedItem.partition;
-      if (savedItem.resolvedRepoRoot) item.resolvedRepoRoot = savedItem.resolvedRepoRoot;
+
       if (savedItem.reviewWorkspaceRef) item.reviewWorkspaceRef = savedItem.reviewWorkspaceRef;
       if (savedItem.reviewCompleted) item.reviewCompleted = savedItem.reviewCompleted;
       if (savedItem.reviewRound != null) item.reviewRound = savedItem.reviewRound;
@@ -1397,7 +1395,6 @@ describe("Daemon lifecycle: crash recovery round-trip", () => {
     expect(fresh1.state).toBe("launching");
     expect(fresh1.workspaceRef).toBe("workspace:1");
     expect(fresh1.partition).toBe(1);
-    expect(fresh1.resolvedRepoRoot).toBe("/repos/project-a");
     expect(fresh1.retryCount).toBe(1);
     expect(fresh1.worktreePath).toBe("/tmp/worktrees/ninthwave-CR-1");
 
@@ -1405,7 +1402,6 @@ describe("Daemon lifecycle: crash recovery round-trip", () => {
     expect(fresh2.state).toBe("implementing");
     expect(fresh2.workspaceRef).toBe("workspace:2");
     expect(fresh2.partition).toBe(2);
-    expect(fresh2.resolvedRepoRoot).toBe("/repos/project-b");
     expect(fresh2.retryCount).toBe(2);
     expect(fresh2.rebaseRequested).toBe(true);
     expect(fresh2.lastCommentCheck).toBe("2026-03-25T09:10:00.000Z");
@@ -1417,7 +1413,6 @@ describe("Daemon lifecycle: crash recovery round-trip", () => {
     expect(fresh3.ciFailCount).toBe(2);
     expect(fresh3.workspaceRef).toBe("workspace:3");
     expect(fresh3.partition).toBe(3);
-    expect(fresh3.resolvedRepoRoot).toBe("/repos/project-c");
     expect(fresh3.ciFailureNotified).toBe(true);
     // Transient fields were never hydrated and must remain absent
     expect(fresh3.notAliveCount).toBeUndefined();
@@ -1428,7 +1423,6 @@ describe("Daemon lifecycle: crash recovery round-trip", () => {
     expect(fresh4.state).toBe("reviewing");
     expect(fresh4.reviewWorkspaceRef).toBe("workspace:review-4");
     expect(fresh4.reviewRound).toBe(2);
-    expect(fresh4.resolvedRepoRoot).toBe("/repos/project-d");
     expect(fresh4.partition).toBe(4);
     expect(fresh4.prNumber).toBe(401);
     expect(fresh4.lastCommentCheck).toBe("2026-03-25T09:15:00.000Z");
@@ -1440,7 +1434,6 @@ describe("Daemon lifecycle: crash recovery round-trip", () => {
     expect(fresh5.rebaserWorkspaceRef).toBe("workspace:rebaser-5");
     expect(fresh5.exitCode).toBe(0);
     expect(fresh5.partition).toBe(5);
-    expect(fresh5.resolvedRepoRoot).toBe("/repos/project-e");
   });
 });
 

@@ -6,7 +6,7 @@ Core principles and hard boundaries for ninthwave. This is a guardrail document 
 
 ### 1. Convention over configuration
 
-Sensible defaults, minimal config files. Cross-repo resolves via sibling directories. Port isolation via partition math. Domain slugs from section headers. Zero config for the common case.
+Sensible defaults, minimal config files. Port isolation via partition math. Domain slugs from section headers. Zero config for the common case.
 
 ### 2. Deterministic core, advisory AI
 

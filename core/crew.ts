@@ -171,7 +171,6 @@ export type CrewRemoteItemState =
   | "verifying"
   | "done"
   | "blocked"
-  | "bootstrapping"
   | "implementing"
   | "rebasing"
   | "ci-failed"
@@ -208,7 +207,6 @@ const CREW_REMOTE_ITEM_STATES: ReadonlySet<CrewRemoteItemState> = new Set([
   "verifying",
   "done",
   "blocked",
-  "bootstrapping",
   "implementing",
   "rebasing",
   "ci-failed",

@@ -5,7 +5,6 @@ import { existsSync } from "fs";
 import { join } from "path";
 import type { Orchestrator, OrchestratorItem, OrchestratorItemState } from "./orchestrator.ts";
 import type { DaemonState } from "./daemon.ts";
-import { getWorktreeInfo } from "./cross-repo.ts";
 import { checkPrStatus } from "./commands/pr-monitor.ts";
 import { classifyPrMetadataMatch } from "./work-item-files.ts";
 import type { Multiplexer } from "./mux.ts";
@@ -193,7 +192,6 @@ export function reconstructState(
     fixForwardWorkspaceRef?: string;
     worktreePath?: string;
     workspaceRef?: string;
-    resolvedRepoRoot?: string;
     aiTool?: string;
   }>();
   if (daemonState?.items) {
@@ -227,7 +225,6 @@ export function reconstructState(
         fixForwardWorkspaceRef,
         worktreePath: si.worktreePath,
         workspaceRef: si.workspaceRef,
-        resolvedRepoRoot: si.resolvedRepoRoot,
         aiTool: si.aiTool,
       });
     }
@@ -235,9 +232,6 @@ export function reconstructState(
 
   // Pre-fetch workspace list once (avoid per-item shell calls)
   const workspaceList = mux ? mux.listWorkspaces() : "";
-
-  // Build cross-repo index path for worktree lookup
-  const crossRepoIndex = join(worktreeDir, ".cross-repo-index");
 
   for (const item of orch.getAllItems()) {
     // Restore persisted counters and review fields from daemon state (before any state transitions)
@@ -264,14 +258,13 @@ export function reconstructState(
       if (saved.fixForwardFailCount) item.fixForwardFailCount = saved.fixForwardFailCount;
       if (saved.fixForwardWorkspaceRef) item.fixForwardWorkspaceRef = saved.fixForwardWorkspaceRef;
       if (saved.worktreePath) item.worktreePath = saved.worktreePath;
-      if (saved.resolvedRepoRoot) item.resolvedRepoRoot = saved.resolvedRepoRoot;
       if (saved.aiTool) item.aiTool = saved.aiTool;
     }
     const savedWorkspaceRef = saved?.workspaceRef;
 
     // Preserve merged waiting state across restart even when the clean action
     // already removed the worktree and mergeCommitSha was not captured yet.
-    if (saved?.state === "merged" && restoreMergedWaitingState(orch, item, item.resolvedRepoRoot ?? projectRoot, checkPr)) {
+    if (saved?.state === "merged" && restoreMergedWaitingState(orch, item, projectRoot, checkPr)) {
       continue;
     }
 
@@ -288,7 +281,7 @@ export function reconstructState(
       if (savedState === "verify-failed") savedState = "fix-forward-failed";
       if (savedState === "repairing-main") savedState = "fixing-forward";
       if (savedState === "fixing-forward") {
-        if (restoreRepairPrTrackingState(orch, item, item.resolvedRepoRoot ?? projectRoot, checkPr, "fixing-forward")) {
+        if (restoreRepairPrTrackingState(orch, item, projectRoot, checkPr, "fixing-forward")) {
           continue;
         }
         orch.hydrateState(item.id, "fixing-forward");
@@ -301,17 +294,15 @@ export function reconstructState(
     }
 
     if (saved && saved.priorPrNumbers?.length && isRepairReentryState(saved.state)) {
-      if (restoreRepairPrTrackingState(orch, item, item.resolvedRepoRoot ?? projectRoot, checkPr, saved.state)) {
+      if (restoreRepairPrTrackingState(orch, item, projectRoot, checkPr, saved.state)) {
         continue;
       }
     }
 
-    // Check for worktree: cross-repo index first, then hub-local fallback
-    const repoRoot = item.resolvedRepoRoot ?? projectRoot;
-    const wtInfo = getWorktreeInfo(item.id, crossRepoIndex, worktreeDir);
-    const fallbackWtPath = join(worktreeDir, `ninthwave-${item.id}`);
+    // Check for worktree
+    const hubWtPath = join(worktreeDir, `ninthwave-${item.id}`);
     let wtPath: string | undefined;
-    for (const candidate of [wtInfo?.worktreePath, item.worktreePath, fallbackWtPath]) {
+    for (const candidate of [item.worktreePath, hubWtPath]) {
       if (candidate && existsSync(candidate)) {
         wtPath = candidate;
         break;
@@ -324,8 +315,8 @@ export function reconstructState(
     }
     item.worktreePath = wtPath;
 
-    // Item has a worktree -- check PR status in the correct repo
-    const statusLine = resolveTrackedPrStatus(item, repoRoot, checkPr);
+    // Item has a worktree -- check PR status
+    const statusLine = resolveTrackedPrStatus(item, projectRoot, checkPr);
     if (!statusLine) {
       hydrateKnownPrTrackingOrImplementing(orch, item.id);
       const workspaceRecovery = recoverWorkspaceRef(orch, item.id, workspaceList, savedWorkspaceRef);

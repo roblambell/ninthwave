@@ -35,11 +35,9 @@ function makeWorkItem(id: string, deps: string[] = [], priority: Priority = "med
     bundleWith: [],
     status: "open",
     filePath: "",
-    repoAlias: "",
     rawText: `## ${id}\nTest item`,
     filePaths: [],
     testPlan: "",
-    bootstrap: false,
   };
 }
 

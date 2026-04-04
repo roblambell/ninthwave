@@ -155,17 +155,6 @@ describe("list", () => {
     expect(output).toContain("--depth requires a positive integer");
   });
 
-  it("shows repo label for cross-repo items", () => {
-    const repo = setupTempRepo();
-    const workDir = useFixtureDir(repo, "cross_repo.md");
-    const worktreeDir = join(repo, ".ninthwave", ".worktrees");
-
-    const output = captureOutput(() => cmdList([], workDir, worktreeDir));
-
-    expect(output).toContain("target-repo-a");
-    expect(output).toContain("H-API-1");
-  });
-
   it("--remote flag is parsed without error", () => {
     const repo = setupTempRepo();
     const workDir = useFixtureDir(repo, "valid.md");

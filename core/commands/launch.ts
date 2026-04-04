@@ -16,7 +16,7 @@ import {
 } from "../git.ts";
 import { type Multiplexer, getMux } from "../mux.ts";
 import { allocatePartition, getPartitionFor, releasePartition } from "../partitions.ts";
-import { resolveRepo, writeCrossRepoIndex, removeCrossRepoIndex, ensureWorktreeExcluded } from "../cross-repo.ts";
+import { ensureWorktreeExcluded } from "../worktree-utils.ts";
 import { classifyPrMetadataMatch, readWorkItem } from "../work-item-files.ts";
 import { prList as defaultPrList } from "../gh.ts";
 import { headlessLogFilePath } from "../headless.ts";
@@ -108,12 +108,10 @@ export type PickupCandidateValidationCode = "merged" | "stale" | "unlaunchable";
 export type PickupCandidateValidation =
   | {
     status: "launch";
-    targetRepo: string;
     branchName: string;
   }
   | {
     status: "skip-with-pr";
-    targetRepo: string;
     branchName: string;
     existingPrNumber: number;
   }
@@ -249,26 +247,13 @@ export function validatePickupCandidate(
 ): PickupCandidateValidation {
   const branchName = `ninthwave/${item.id}`;
 
-  let targetRepo: string;
-  try {
-    targetRepo = resolveRepo(item.repoAlias, projectRoot);
-  } catch (error) {
-    return {
-      status: "blocked",
-      code: "unlaunchable",
-      branchName,
-      failureReason: `launch-blocked: ${(error as Error).message}`,
-    };
-  }
-
-  const openPrs = tryListPrs(deps, targetRepo, branchName, "open");
+  const openPrs = tryListPrs(deps, projectRoot, branchName, "open");
   if (openPrs.length > 0) {
     for (const pr of openPrs) {
       const match = classifyPrMetadataMatch({ title: pr.title, body: pr.body }, item);
       if (match.matches) {
         return {
           status: "skip-with-pr",
-          targetRepo,
           branchName,
           existingPrNumber: pr.number,
         };
@@ -283,7 +268,7 @@ export function validatePickupCandidate(
     }
   }
 
-  const mergedPrs = tryListPrs(deps, targetRepo, branchName, "merged");
+  const mergedPrs = tryListPrs(deps, projectRoot, branchName, "merged");
   if (mergedPrs.length > 0) {
     for (const pr of mergedPrs) {
       const match = classifyPrMetadataMatch({ title: pr.title, body: pr.body }, item);
@@ -307,7 +292,7 @@ export function validatePickupCandidate(
     }
   }
 
-  return { status: "launch", targetRepo, branchName };
+  return { status: "launch", branchName };
 }
 
 // ── Branch and worktree management ──────────────────────────────────
@@ -336,12 +321,6 @@ export function ensureWorktreeAndBranch(
   if (existsSync(worktreePath)) {
     warn(`Worktree already exists for ${item.id} at ${worktreePath}, reusing`);
     return { action: "launch" };
-  }
-
-  // Ensure target worktree dir exists for cross-repo items
-  if (targetRepo !== projectRoot) {
-    mkdirSync(join(targetRepo, ".ninthwave", ".worktrees"), { recursive: true });
-    ensureWorktreeExcluded(targetRepo);
   }
 
   // Fetch the appropriate base (dependency branch or main)
@@ -451,53 +430,31 @@ export function launchSingleItem(
   options: { baseBranch?: string; forceWorkerLaunch?: boolean; hubRepoNwo?: string; resolveMux?: RuntimeMuxResolver; launchOverride?: LaunchOverride; throwOnLaunchFailure?: boolean } = {},
   deps: LaunchGitDeps = defaultLaunchGitDeps,
 ): LaunchResult | null {
-  let targetRepo: string;
-  try {
-    targetRepo = resolveRepo(item.repoAlias, projectRoot);
-  } catch (err) {
-    warn(`Skipping ${item.id}: ${(err as Error).message}`);
-    return null;
-  }
   const branchName = `ninthwave/${item.id}`;
 
   // Stale branch cleanup (safety net for direct `ninthwave start` callers)
-  cleanStaleBranchForReuse(item.id, item.title, targetRepo, undefined, item.lineageToken);
+  cleanStaleBranchForReuse(item.id, item.title, projectRoot, undefined, item.lineageToken);
 
   // Ensure worktree directory exists
   mkdirSync(worktreeDir, { recursive: true });
 
-  // Determine worktree path based on target repo
-  let worktreePath: string;
-  if (targetRepo === projectRoot) {
-    worktreePath = join(worktreeDir, `ninthwave-${item.id}`);
-  } else {
-    worktreePath = join(targetRepo, ".ninthwave", ".worktrees", `ninthwave-${item.id}`);
-  }
+  const worktreePath = join(worktreeDir, `ninthwave-${item.id}`);
 
   // Ensure worktree and branch are ready (handles all branch collision/PR detection)
   const branchResult = ensureWorktreeAndBranch(
-    item, targetRepo, projectRoot, worktreePath, branchName,
+    item, projectRoot, projectRoot, worktreePath, branchName,
     options.baseBranch, options.forceWorkerLaunch, deps,
   );
   if (branchResult.action === "skip-with-pr") {
     return { worktreePath, workspaceRef: "", existingPrNumber: branchResult.existingPrNumber };
   }
 
-  // Track resources created after worktree for cleanup on failure
-  let wroteIndex = false;
-  const crossRepoIndex = join(worktreeDir, ".cross-repo-index");
   const partitionDir = join(worktreeDir, ".partitions");
 
   try {
     const launchMux = resolveRuntimeLaunchMux(mux, options.resolveMux);
 
-    // Track cross-repo items in the index
-    if (targetRepo !== projectRoot) {
-      writeCrossRepoIndex(crossRepoIndex, item.id, targetRepo, worktreePath);
-      wroteIndex = true;
-    }
-
-    // Seed agent files into worktree if missing (cross-repo or first-time setup)
+    // Seed agent files into worktree if missing
     const seededFiles = seedAgentFiles(worktreePath, projectRoot);
 
     // Allocate partition
@@ -529,7 +486,6 @@ export function launchSingleItem(
 YOUR_PARTITION: ${partition}
 PROJECT_ROOT: ${worktreePath}
 HUB_ROOT: ${projectRoot}
-IS_HUB_LOCAL: ${targetRepo === projectRoot}
 ${baseBranchLine}${hubRepoNwoLine}${seededFilesLine}
 ${itemText}`;
 
@@ -564,12 +520,7 @@ ${itemText}`;
     try { releasePartition(partitionDir, item.id); } catch (e) {
       warn(`Failed to release partition for ${item.id}: ${e instanceof Error ? e.message : e}`);
     }
-    if (wroteIndex) {
-      try { removeCrossRepoIndex(crossRepoIndex, item.id); } catch (e) {
-        warn(`Failed to remove cross-repo index for ${item.id}: ${e instanceof Error ? e.message : e}`);
-      }
-    }
-    try { deps.removeWorktree(targetRepo, worktreePath, /* force */ true); } catch (e) {
+    try { deps.removeWorktree(projectRoot, worktreePath, /* force */ true); } catch (e) {
       warn(`Failed to remove worktree for ${item.id}: ${e instanceof Error ? e.message : e}`);
     }
     if (err instanceof AiSessionLaunchError && options.throwOnLaunchFailure) {

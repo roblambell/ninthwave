@@ -412,37 +412,6 @@ function gatherStatusItems(
     // worktreeDir might not be readable
   }
 
-  // Cross-repo worktrees
-  const crossRepoIndex = join(worktreeDir, ".cross-repo-index");
-  if (existsSync(crossRepoIndex)) {
-    const content = readFileSync(crossRepoIndex, "utf-8");
-    for (const line of content.split("\n")) {
-      if (!line || line.startsWith("#")) continue;
-      const parts = line.split("\t");
-      const idxId = parts[0];
-      const idxRepo = parts[1];
-      const idxPath = parts[2];
-      if (!idxId || !idxRepo || !idxPath) continue;
-      if (!existsSync(idxPath)) continue;
-      const meta = workItemMeta.get(idxId);
-      const { state, prNumber } = determineItemState(
-        idxId,
-        idxRepo,
-        meta ? { id: idxId, title: meta.title, lineageToken: meta.lineageToken } : undefined,
-        deps,
-      );
-      items.push({
-        id: idxId,
-        title: meta?.title ?? "",
-        state,
-        prNumber,
-        ageMs: getWorktreeAge(idxPath),
-        repoLabel: basename(idxRepo),
-        dependencies: meta?.dependencies ?? [],
-      });
-    }
-  }
-
   return { items, sessionLimit: undefined };
 }
 
@@ -529,37 +498,6 @@ export function renderStatus(
     }
   } catch {
     // worktreeDir might not be readable
-  }
-
-  // Cross-repo worktrees
-  const crossRepoIndex = join(worktreeDir, ".cross-repo-index");
-  if (existsSync(crossRepoIndex)) {
-    const content = readFileSync(crossRepoIndex, "utf-8");
-    for (const line of content.split("\n")) {
-      if (!line || line.startsWith("#")) continue;
-      const parts = line.split("\t");
-      const idxId = parts[0];
-      const idxRepo = parts[1];
-      const idxPath = parts[2];
-      if (!idxId || !idxRepo || !idxPath) continue;
-      if (!existsSync(idxPath)) continue;
-      const meta = workItemMeta.get(idxId);
-      const { state, prNumber } = determineItemState(
-        idxId,
-        idxRepo,
-        meta ? { id: idxId, title: meta.title, lineageToken: meta.lineageToken } : undefined,
-        deps,
-      );
-      items.push({
-        id: idxId,
-        title: meta?.title ?? "",
-        state,
-        prNumber,
-        ageMs: getWorktreeAge(idxPath),
-        repoLabel: basename(idxRepo),
-        dependencies: meta?.dependencies ?? [],
-      });
-    }
   }
 
   return formatStatusTable(items, getTerminalWidth(), undefined, flat, viewOptions) + "\n";

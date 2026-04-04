@@ -147,11 +147,9 @@ function makeWorkItem(id: string, deps: string[] = []): WorkItem {
     bundleWith: [],
     status: "open",
     filePath: "",
-    repoAlias: "",
     rawText: `## ${id}\nTest item`,
     filePaths: [],
     testPlan: "",
-    bootstrap: false,
   };
 }
 
@@ -2356,7 +2354,6 @@ describe("reconstructState rebase persistence", () => {
           lastRebaseNudgeAt: "2026-04-01T00:45:00Z",
           rebaseNudgeCount: 3,
           worktreePath: savedWorktreePath,
-          resolvedRepoRoot: "/tmp/target-repo",
         },
       ],
     };
@@ -2368,7 +2365,6 @@ describe("reconstructState rebase persistence", () => {
     expect(item.lastRebaseNudgeAt).toBe("2026-04-01T00:45:00Z");
     expect(item.rebaseNudgeCount).toBe(3);
     expect(item.worktreePath).toBe(savedWorktreePath);
-    expect(item.resolvedRepoRoot).toBe("/tmp/target-repo");
 
     require("fs").rmSync(tmpDir, { recursive: true, force: true });
   });
@@ -2409,121 +2405,6 @@ describe("reconstructState rebase persistence", () => {
     expect(item.worktreePath).toBe(wtPath);
 
     require("fs").rmSync(tmpDir, { recursive: true, force: true });
-  });
-});
-
-describe("reconstructState cross-repo", () => {
-  it("uses cross-repo index to find worktree paths", () => {
-    const orch = new Orchestrator();
-    const item = makeWorkItem("XR-1-1");
-    item.repoAlias = "target";
-    orch.addItem(item);
-
-    const tmpDir = join(require("os").tmpdir(), `nw-xr-reconstruct-${Date.now()}`);
-    const wtDir = join(tmpDir, ".ninthwave", ".worktrees");
-    const targetWtPath = join("/tmp/target-repo", ".ninthwave", ".worktrees", "ninthwave-XR-1-1");
-    require("fs").mkdirSync(wtDir, { recursive: true });
-
-    // Write cross-repo index pointing to target repo worktree
-    const indexPath = join(wtDir, ".cross-repo-index");
-    require("fs").writeFileSync(indexPath, `XR-1-1\t/tmp/target-repo\t${targetWtPath}\n`);
-
-    // But the worktree doesn't actually exist on disk, so item stays queued
-    const noopCheckPr = () => null;
-    reconstructState(orch, tmpDir, wtDir, undefined, noopCheckPr);
-
-    // Item should still be queued (worktree path doesn't exist)
-    expect(orch.getItem("XR-1-1")!.state).toBe("queued");
-
-    require("fs").rmSync(tmpDir, { recursive: true, force: true });
-  });
-
-  it("uses resolvedRepoRoot for PR query when cross-repo", () => {
-    const orch = new Orchestrator();
-    const item = makeWorkItem("XR-2-1");
-    orch.addItem(item);
-    orch.getItem("XR-2-1")!.resolvedRepoRoot = "/target-repo";
-
-    const tmpDir = join(require("os").tmpdir(), `nw-xr-reconstruct2-${Date.now()}`);
-    const wtDir = join(tmpDir, ".ninthwave", ".worktrees");
-    const wtPath = join(wtDir, "ninthwave-XR-2-1");
-    require("fs").mkdirSync(wtPath, { recursive: true });
-
-    // Track which repo root is passed to checkPr
-    let checkPrRepo: string | undefined;
-    const trackingCheckPr = (id: string, repoRoot: string) => {
-      checkPrRepo = repoRoot;
-      return null;
-    };
-
-    reconstructState(orch, tmpDir, wtDir, undefined, trackingCheckPr);
-
-    // Should use resolvedRepoRoot for PR query
-    expect(checkPrRepo).toBe("/target-repo");
-
-    require("fs").rmSync(tmpDir, { recursive: true, force: true });
-  });
-});
-
-describe("buildSnapshot cross-repo", () => {
-  it("uses resolvedRepoRoot for PR checks", () => {
-    const orch = new Orchestrator();
-    orch.addItem(makeWorkItem("BS-1-1"));
-    orch.getItem("BS-1-1")!.reviewCompleted = true;
-    orch.hydrateState("BS-1-1", "implementing");
-    orch.getItem("BS-1-1")!.resolvedRepoRoot = "/target-repo";
-
-    let checkedRepo: string | undefined;
-    const trackingCheckPr = (id: string, repoRoot: string) => {
-      checkedRepo = repoRoot;
-      return null;
-    };
-
-    const fakeMux = {
-      type: "cmux" as const,
-      isAvailable: () => false,
-      diagnoseUnavailable: () => "not available",
-      launchWorkspace: () => null,
-      splitPane: () => null,
-      sendMessage: () => true,
-      writeInbox: () => {},
-      readScreen: () => "",
-      listWorkspaces: () => "",
-      closeWorkspace: () => true,
-    };
-
-    buildSnapshot(orch, "/hub-root", "/hub-root/.ninthwave/.worktrees", fakeMux, () => null, trackingCheckPr);
-    expect(checkedRepo).toBe("/target-repo");
-  });
-
-  it("uses resolvedRepoRoot for commit time checks", () => {
-    const orch = new Orchestrator();
-    orch.addItem(makeWorkItem("BS-2-1"));
-    orch.getItem("BS-2-1")!.reviewCompleted = true;
-    orch.hydrateState("BS-2-1", "implementing");
-    orch.getItem("BS-2-1")!.resolvedRepoRoot = "/target-repo";
-
-    let commitTimeRepo: string | undefined;
-    const trackingCommitTime = (repoRoot: string, _branch: string) => {
-      commitTimeRepo = repoRoot;
-      return null;
-    };
-
-    const fakeMux = {
-      type: "cmux" as const,
-      isAvailable: () => false,
-      diagnoseUnavailable: () => "not available",
-      launchWorkspace: () => null,
-      splitPane: () => null,
-      sendMessage: () => true,
-      writeInbox: () => {},
-      readScreen: () => "",
-      listWorkspaces: () => "",
-      closeWorkspace: () => true,
-    };
-
-    buildSnapshot(orch, "/hub-root", "/hub-root/.ninthwave/.worktrees", fakeMux, trackingCommitTime, () => null);
-    expect(commitTimeRepo).toBe("/target-repo");
   });
 });
 
@@ -9506,7 +9387,6 @@ function makeOrchestratorItem(id: string): OrchestratorItem {
     failureReason: undefined,
     prNumber: undefined,
     workspaceRef: undefined,
-    resolvedRepoRoot: undefined,
     startedAt: undefined,
     endedAt: undefined,
     exitCode: undefined,

@@ -4,7 +4,7 @@
 // Supports daemon mode (--daemon) for background operation with state persistence.
 
 import { existsSync, mkdirSync, readdirSync, appendFileSync } from "fs";
-import { join, basename, dirname } from "path";
+import { join, dirname } from "path";
 import { totalmem, freemem, hostname } from "os";
 import { randomUUID } from "crypto";
 import { execSync, spawn } from "node:child_process";
@@ -26,7 +26,6 @@ import {
   type OrchestratorItemState,
 } from "../orchestrator.ts";
 import { parseWorkItems } from "../parser.ts";
-import { resolveRepo, bootstrapRepo } from "../cross-repo.ts";
 import { scanExternalPRs } from "./pr-monitor.ts";
 import type { ConnectionAction } from "./crew.ts";
 import { launchSingleItem, launchReviewWorker, launchRebaserWorker, launchForwardFixerWorker, validatePickupCandidate } from "./launch.ts";
@@ -569,7 +568,7 @@ export const INTERACTIVE_STARTUP_OVERLAYS = {
   preparingQueue: {
     phaseLabel: "Preparing work queue",
     detailLines: [
-      "Checking labels and cross-repo metadata.",
+      "Checking labels.",
       "Execution stays blocked until the queue is safe to run.",
     ],
   },
@@ -1153,7 +1152,7 @@ export function orchestratorItemsToStatusItems(
       timeoutExtensions: item.timeoutDeadline
         ? `${item.timeoutExtensionCount ?? 0}/${maxTimeoutExtensions}`
         : undefined,
-      repoLabel: item.resolvedRepoRoot ? basename(item.resolvedRepoRoot) : "",
+      repoLabel: "",
       failureReason: item.failureReason,
       dependencies: item.workItem.dependencies ?? [],
       startedAt: item.startedAt,
@@ -3586,11 +3585,6 @@ export async function orchestrateLoop(
         const mainRefreshStartMs = interactiveTiming ? nowMs() : 0;
         lastMainRefreshMs = nowRefreshMs;
         const reposToRefresh = new Set<string>([ctx.projectRoot]);
-        for (const item of orch.getAllItems()) {
-          if (item.resolvedRepoRoot && !TERMINAL_STATES.has(item.state)) {
-            reposToRefresh.add(item.resolvedRepoRoot);
-          }
-        }
         for (const repoRoot of reposToRefresh) {
           try { deps.actionDeps.fetchOrigin(repoRoot, "main"); } catch { /* non-fatal */ }
           try { deps.actionDeps.ffMerge(repoRoot, "main"); } catch { /* non-fatal -- dirty tree or diverged */ }
@@ -4221,37 +4215,6 @@ export async function cmdOrchestrate(
   if (fixForward) domainSet.add("verify");
   ensureDomainLabels(projectRoot, [...domainSet]);
 
-  // Populate resolvedRepoRoot for cross-repo items
-  for (const item of orch.getAllItems()) {
-    const alias = item.workItem.repoAlias;
-    if (alias && alias !== "self" && alias !== "hub") {
-      try {
-        item.resolvedRepoRoot = resolveRepo(alias, projectRoot);
-      } catch {
-        // Resolution failed -- if item has bootstrap: true, the orchestrator will
-        // bootstrap the repo before launch (via the bootstrap action). Log the
-        // deferred resolution. Non-bootstrap items stay hub-local as fallback.
-        if (item.workItem.bootstrap) {
-          log({
-            ts: new Date().toISOString(),
-            level: "info",
-            event: "cross_repo_bootstrap_deferred",
-            itemId: item.id,
-            alias,
-          });
-        } else {
-          log({
-            ts: new Date().toISOString(),
-            level: "warn",
-            event: "cross_repo_resolve_failed",
-            itemId: item.id,
-            alias,
-          });
-        }
-      }
-    }
-  }
-
   // Real action dependencies -- create mux before state reconstruction so
   // workspace refs can be recovered from live workspaces.
   emitInteractiveEngineStartupOverlay(isInteractiveEngineChild, INTERACTIVE_STARTUP_OVERLAYS.restoringState);
@@ -4368,13 +4331,7 @@ export async function cmdOrchestrate(
         throwOnLaunchFailure: true,
       }),
     cleanStaleBranch: (item, projRoot) => {
-      let targetRepo: string;
-      try {
-        targetRepo = resolveRepo(item.repoAlias, projRoot);
-      } catch {
-        return; // Can't resolve repo -- launchSingleItem will handle the error
-      }
-      cleanStaleBranchForReuse(item.id, item.title, targetRepo, undefined, item.lineageToken);
+      cleanStaleBranchForReuse(item.id, item.title, projRoot, undefined, item.lineageToken);
     },
     cleanSingleWorktree,
     prMerge: (repoRoot, prNumber, options) => prMerge(repoRoot, prNumber, options),
@@ -4410,7 +4367,6 @@ export async function cmdOrchestrate(
       if (!result) return null;
       return { workspaceRef: result.workspaceRef, verdictPath: result.verdictPath };
     },
-    bootstrapRepo: (alias, projRoot) => bootstrapRepo(alias, projRoot),
     cleanReview: (itemId, reviewWorkspaceRef) => {
       // Close the review workspace
       try { muxForWorkspaceRef(reviewWorkspaceRef).closeWorkspace(reviewWorkspaceRef); } catch { /* best-effort */ }

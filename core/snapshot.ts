@@ -370,9 +370,8 @@ export function buildSnapshot(
     if ((orchItem.state === "forward-fix-pending" || orchItem.state === "fix-forward-failed") && orchItem.mergeCommitSha) {
       const snap: ItemSnapshot = createBaseSnapshot(orchItem);
       if (checkCommitCI) {
-        const repoRoot = orchItem.resolvedRepoRoot ?? projectRoot;
         try {
-          snap.mergeCommitCIStatus = checkCommitCI(repoRoot, orchItem.mergeCommitSha);
+          snap.mergeCommitCIStatus = checkCommitCI(projectRoot, orchItem.mergeCommitSha);
         } catch {
           // Non-fatal -- will retry next cycle
         }
@@ -383,10 +382,9 @@ export function buildSnapshot(
     }
 
     const snap: ItemSnapshot = createBaseSnapshot(orchItem);
+    const repoRoot = projectRoot;
 
-    // Check PR status via gh -- use the item's resolved repo root for cross-repo items
-    const repoRoot = orchItem.resolvedRepoRoot ?? projectRoot;
-    const prResult = pollTrackedPrStatus(orchItem, repoRoot, checkPr);
+    const prResult = pollTrackedPrStatus(orchItem, projectRoot, checkPr);
     const statusLine = prResult.statusLine;
     if (prResult.failure && prPollStates.has(orchItem.state)) {
       apiErrorCount++;
@@ -604,9 +602,8 @@ export async function buildSnapshotAsync(
     if ((orchItem.state === "forward-fix-pending" || orchItem.state === "fix-forward-failed") && orchItem.mergeCommitSha) {
       const snap: ItemSnapshot = createBaseSnapshot(orchItem);
       if (checkCommitCI) {
-        const repoRoot = orchItem.resolvedRepoRoot ?? projectRoot;
         try {
-          snap.mergeCommitCIStatus = await checkCommitCI(repoRoot, orchItem.mergeCommitSha);
+          snap.mergeCommitCIStatus = await checkCommitCI(projectRoot, orchItem.mergeCommitSha);
         } catch {
           // Non-fatal
         }
@@ -617,10 +614,10 @@ export async function buildSnapshotAsync(
     }
 
     const snap: ItemSnapshot = createBaseSnapshot(orchItem);
+    const repoRoot = projectRoot;
 
     // Check PR status via async gh -- yields to event loop per call
-    const repoRoot = orchItem.resolvedRepoRoot ?? projectRoot;
-    const prResult = await pollTrackedPrStatusAsync(orchItem, repoRoot, checkPr);
+    const prResult = await pollTrackedPrStatusAsync(orchItem, projectRoot, checkPr);
     const statusLine = prResult.statusLine;
     if (prResult.failure && prPollStates.has(orchItem.state)) {
       apiErrorCount++;

@@ -107,19 +107,4 @@ export function cmdMergedIds(
     // ignore
   }
 
-  // Cross-repo worktrees
-  const indexPath = join(worktreeDir, ".cross-repo-index");
-  if (existsSync(indexPath)) {
-    const content = readFileSync(indexPath, "utf-8");
-    for (const line of content.split("\n")) {
-      if (!line || line.startsWith("#")) continue;
-      const parts = line.split("\t");
-      const idxId = parts[0];
-      const idxRepo = parts[1];
-      const idxPath = parts[2];
-      if (!idxId || !idxRepo || !idxPath) continue;
-      if (!existsSync(idxPath)) continue;
-      checkMerged(idxId, idxRepo);
-    }
-  }
 }

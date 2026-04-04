@@ -238,7 +238,6 @@ export type ItemState =
   | "fixing-forward"
   | "done"
   | "blocked"
-  | "bootstrapping"
   | "implementing"
   | "rebasing"
   | "ci-failed"
@@ -252,7 +251,6 @@ export type ItemState =
  * Used for the "X/Y active sessions" count in the queue header.
  */
 export const ACTIVE_DISPLAY_STATES: Set<ItemState> = new Set([
-  "bootstrapping",
   "implementing",
   "ci-pending",
   "ci-failed",
@@ -381,7 +379,6 @@ export function stateColor(state: ItemState): string {
       return RED;
     case "blocked":
       return YELLOW;
-    case "bootstrapping":
     case "implementing":
     case "rebasing":
     case "in-progress":
@@ -411,7 +408,6 @@ export function stateIcon(state: ItemState): string {
       return "⚡";
     case "blocked":
       return "⧗";
-    case "bootstrapping":
     case "implementing":
     case "in-progress":
       return "▸";
@@ -443,8 +439,6 @@ export function stateLabel(state: ItemState): string {
       return "Done";
     case "blocked":
       return "Blocked";
-    case "bootstrapping":
-      return "Bootstrapping";
     case "implementing":
       return "Implementing";
     case "rebasing":
@@ -676,7 +670,7 @@ export function stripAnsiForWidth(s: string): string {
 
 /**
  * Compute dynamic state column width based on current items.
- * Returns 14 when no items have PRs (enough for "Bootstrapping").
+ * Returns 14 when no items have PRs (enough for "Implementing").
  * Expands up to 24 when PR numbers are present.
  */
 export function computeStateColWidth(items: StatusItem[]): number {
@@ -885,7 +879,6 @@ export function formatBatchProgress(items: StatusItem[]): string {
     "review",
     "ci-pending",
     "rebasing",
-    "bootstrapping",
     "implementing",
     "in-progress",
     "blocked",
@@ -1405,8 +1398,6 @@ export function mapDaemonItemState(orchState: string, flags?: { rebaseRequested?
       return "done";
     case "blocked":
       return "blocked";
-    case "bootstrapping":
-      return "bootstrapping";
     case "implementing":
     case "launching":
       return "implementing";
@@ -1780,7 +1771,6 @@ export function formatUnifiedProgress(
     "review",
     "ci-pending",
     "rebasing",
-    "bootstrapping",
     "implementing",
     "in-progress",
     "blocked",

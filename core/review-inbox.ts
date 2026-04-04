@@ -6,7 +6,7 @@ import {
   rmSync as defaultRmSync,
 } from "fs";
 import { basename, dirname, join, relative } from "path";
-import { ensureWorktreeExcluded } from "./cross-repo.ts";
+import { ensureWorktreeExcluded } from "./worktree-utils.ts";
 import {
   ensureDomainLabels as defaultEnsureDomainLabels,
   findOpenPrByHeadBranch as defaultFindOpenPrByHeadBranch,

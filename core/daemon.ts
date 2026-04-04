@@ -97,8 +97,6 @@ export interface DaemonStateItem {
   progressTs?: string;
   /** Test partition number assigned to this worker. */
   partition?: number;
-  /** Absolute path to the repo where the PR lives (for cross-repo items). */
-  resolvedRepoRoot?: string;
   /** AI tool used for this item's implementation worker. */
   aiTool?: string;
   /** Broker-derived remote truth for this item, when another crew view overrides local state. */
@@ -713,7 +711,6 @@ export function serializeOrchestratorState(
             }
           : {}),
         ...(item.partition != null ? { partition: item.partition } : {}),
-        ...(item.resolvedRepoRoot ? { resolvedRepoRoot: item.resolvedRepoRoot } : {}),
         ...(item.aiTool ? { aiTool: item.aiTool } : {}),
         ...(remoteSnapshot
           ? {
