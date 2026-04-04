@@ -333,6 +333,9 @@ export interface OrchestratorDeps {
   ffMerge: (repoRoot: string, branch: string) => void;
   /** Get the current GitHub base branch for a PR. Returns null when unavailable. */
   getPrBaseBranch?: (repoRoot: string, prNumber: number) => string | null;
+  /** Get PR base branch and state in a single API call. Returns null on total API failure. */
+  getPrBaseAndState?: (repoRoot: string, prNumber: number) =>
+    { baseBranch: string | null; prState: "MERGED" | "OPEN" | "CLOSED" | null } | null;
   /** Retarget a PR to a new GitHub base branch. */
   retargetPrBase?: (repoRoot: string, prNumber: number, baseBranch: string) => boolean;
   /** Check if a PR is mergeable (no conflicts). Returns true if mergeable, false if conflicting. */

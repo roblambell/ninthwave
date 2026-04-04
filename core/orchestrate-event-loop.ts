@@ -121,10 +121,31 @@ export function syncWorkerDisplay(
 
 // ── Adaptive poll interval ─────────────────────────────────────────
 
-/** Flat 2s poll interval -- fast enough that users never need to think about refresh timing. */
-export function adaptivePollInterval(_orch: Orchestrator): number {
-  return 2_000;
+/** PR-polling states: items in these states trigger GitHub API calls each cycle. */
+const PR_POLL_STATES: ReadonlySet<string> = new Set([
+  "implementing", "ci-pending", "ci-passed", "ci-failed",
+  "review-pending", "reviewing", "rebasing", "merging", "launching",
+]);
+
+/**
+ * Adaptive poll interval that scales with the number of active items.
+ * Each active item requires ~3 GitHub API calls per cycle (prList, prView, prChecks).
+ * Targets 70% of GitHub's 5000/hr rate limit (3500 calls/hr) for polling budget.
+ * Floor 2s (matches legacy default), cap 30s. Override with --poll-interval.
+ */
+export function adaptivePollInterval(orch: Orchestrator): number {
+  const activeCount = orch.getAllItems().filter(i => PR_POLL_STATES.has(i.state)).length;
+  if (activeCount <= 1) return 2_000;
+  return Math.min(30_000, activeCount * 3_000);
 }
+
+/**
+ * Action types that make GitHub API calls. These are suppressed during
+ * rate-limit backoff to avoid extending the rate limit.
+ */
+export const GH_API_ACTIONS: ReadonlySet<string> = new Set([
+  "merge", "set-commit-status", "post-review", "sync-stack-comments",
+]);
 
 // ── Orphaned worktree cleanup ──────────────────────────────────────
 
@@ -1274,6 +1295,24 @@ export async function orchestrateLoop(
       if (deps.crewBroker) {
         actions = filterCrewRemoteWriteActions(actions, deps.crewBroker.getCrewStatus());
       }
+
+    // Suppress actions that make GitHub API calls during rate-limit backoff.
+    // The snapshot poll is already skipped; this prevents action execution from
+    // extending the rate limit with additional gh calls.
+    if (rateLimitBackoff.getState().active) {
+      const deferred = actions.filter(a => GH_API_ACTIONS.has(a.type));
+      if (deferred.length > 0) {
+        actions = actions.filter(a => !GH_API_ACTIONS.has(a.type));
+        log({
+          ts: new Date().toISOString(),
+          level: "info",
+          event: "rate_limit_actions_deferred",
+          deferredCount: deferred.length,
+          deferredTypes: deferred.map(a => a.type),
+          message: "Deferred GH API actions during rate-limit backoff",
+        });
+      }
+    }
 
       if (interactiveTiming) {
         interactiveTiming.actionCount = actions.length;

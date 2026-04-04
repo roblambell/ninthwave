@@ -3185,13 +3185,27 @@ describe("Orchestrator", () => {
         expect(orch.getItem("X-1-1")!.failureReason).toContain("closed without merging");
       });
 
-      it("stays merging when PR still open (merge in progress)", () => {
+      it("retries merge when PR still open and CI passing", () => {
         orch.addItem(makeWorkItem("X-1-1"));
         orch.getItem("X-1-1")!.reviewCompleted = true;
         orch.hydrateState("X-1-1", "merging");
         orch.getItem("X-1-1")!.prNumber = 42;
         const actions = orch.processTransitions(
           snapshotWith([{ id: "X-1-1", prState: "open", ciStatus: "pass" }]),
+        );
+        expect(orch.getItem("X-1-1")!.state).toBe("merging");
+        expect(actions).toHaveLength(1);
+        expect(actions[0]!.type).toBe("merge");
+        expect(actions[0]!.itemId).toBe("X-1-1");
+      });
+
+      it("stays merging with no actions during blind poll (no ciStatus)", () => {
+        orch.addItem(makeWorkItem("X-1-1"));
+        orch.getItem("X-1-1")!.reviewCompleted = true;
+        orch.hydrateState("X-1-1", "merging");
+        orch.getItem("X-1-1")!.prNumber = 42;
+        const actions = orch.processTransitions(
+          snapshotWith([{ id: "X-1-1", prState: "open" }]),
         );
         expect(orch.getItem("X-1-1")!.state).toBe("merging");
         expect(actions).toHaveLength(0);

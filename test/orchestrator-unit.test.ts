@@ -703,7 +703,7 @@ describe("setMergeStrategy", () => {
     expect(actions.some((a) => a.type === "merge")).toBe(false);
   });
 
-  it("does not re-queue items already in merging when strategy changes", () => {
+  it("retries merge with updated strategy for items already in merging", () => {
     const orch = new Orchestrator({ mergeStrategy: "auto", bypassEnabled: true });
     orch.addItem(makeWorkItem("H-1-1"));
     orch.getItem("H-1-1")!.reviewCompleted = true;
@@ -718,7 +718,10 @@ describe("setMergeStrategy", () => {
     );
 
     expect(orch.getItem("H-1-1")!.state).toBe("merging");
-    expect(actions.some((a) => a.type === "merge")).toBe(false);
+    // handleMerging retries with the current strategy (bypass → admin)
+    const mergeAction = actions.find((a) => a.type === "merge");
+    expect(mergeAction).toBeDefined();
+    expect(mergeAction!.admin).toBe(true);
   });
 });
 
@@ -2742,6 +2745,115 @@ describe("executeMerge conflict-aware rebase", () => {
 
     expect(item.state).toBe("ci-passed");
     expect(item.mergeFailCount).toBe(1);
+  });
+});
+
+describe("executeMerge getPrBaseAndState behavior", () => {
+  function makeMinimalDeps(overrides: Partial<OrchestratorDeps> = {}): OrchestratorDeps {
+    return {
+      launchSingleItem: () => ({ worktreePath: "/tmp/wt", workspaceRef: "workspace:1" }),
+      cleanSingleWorktree: () => true,
+      prMerge: () => true,
+      prComment: () => true,
+      sendMessage: () => true,
+      writeInbox: () => {},
+      closeWorkspace: () => true,
+      fetchOrigin: () => {},
+      ffMerge: () => {},
+      validatePickupCandidate: (item) => ({
+        status: "launch",
+        targetRepo: "/tmp/proj",
+        branchName: `ninthwave/${item.id}`,
+      }),
+      ...overrides,
+    };
+  }
+
+  const ctx: ExecutionContext = {
+    projectRoot: "/tmp/proj",
+    worktreeDir: "/tmp/proj/.ninthwave/.worktrees",
+    workDir: "/tmp/proj/.ninthwave/work",
+    aiTool: "claude",
+  };
+
+  it("stays in merging when getPrBaseAndState returns null (API failure)", () => {
+    const orch = new Orchestrator({ mergeStrategy: "auto" });
+    orch.addItem(makeWorkItem("H-1-1"));
+    orch.getItem("H-1-1")!.reviewCompleted = true;
+    orch.hydrateState("H-1-1", "merging");
+    const item = orch.getItem("H-1-1")!;
+    item.prNumber = 42;
+
+    const deps = makeMinimalDeps({
+      getPrBaseAndState: () => null, // API failure
+    });
+
+    const result = orch.executeAction({ type: "merge", itemId: "H-1-1", prNumber: 42 }, ctx, deps);
+
+    expect(result.success).toBe(false);
+    expect(result.error).toContain("holding in merging");
+    expect(item.state).toBe("merging"); // NOT ci-passed
+  });
+
+  it("transitions to merged when getPrBaseAndState returns MERGED", () => {
+    const orch = new Orchestrator({ mergeStrategy: "auto" });
+    orch.addItem(makeWorkItem("H-1-1"));
+    orch.getItem("H-1-1")!.reviewCompleted = true;
+    orch.hydrateState("H-1-1", "merging");
+    const item = orch.getItem("H-1-1")!;
+    item.prNumber = 42;
+
+    const prMerge = vi.fn(() => true);
+    const deps = makeMinimalDeps({
+      getPrBaseAndState: () => ({ baseBranch: "main", prState: "MERGED" }),
+      prMerge,
+    });
+
+    const result = orch.executeAction({ type: "merge", itemId: "H-1-1", prNumber: 42 }, ctx, deps);
+
+    expect(result.success).toBe(true);
+    expect(item.state).toBe("merged");
+    expect(prMerge).not.toHaveBeenCalled(); // Already merged, no merge call
+  });
+
+  it("proceeds with merge when getPrBaseAndState returns OPEN with valid base", () => {
+    const orch = new Orchestrator({ mergeStrategy: "auto" });
+    orch.addItem(makeWorkItem("H-1-1"));
+    orch.getItem("H-1-1")!.reviewCompleted = true;
+    orch.hydrateState("H-1-1", "merging");
+    const item = orch.getItem("H-1-1")!;
+    item.prNumber = 42;
+
+    const prMerge = vi.fn(() => true);
+    const deps = makeMinimalDeps({
+      getPrBaseAndState: () => ({ baseBranch: "main", prState: "OPEN" }),
+      prMerge,
+    });
+
+    const result = orch.executeAction({ type: "merge", itemId: "H-1-1", prNumber: 42 }, ctx, deps);
+
+    expect(result.success).toBe(true);
+    expect(item.state).toBe("merged");
+    expect(prMerge).toHaveBeenCalled();
+  });
+
+  it("stays in merging when getPrBaseBranch returns null (fallback path)", () => {
+    const orch = new Orchestrator({ mergeStrategy: "auto" });
+    orch.addItem(makeWorkItem("H-1-1"));
+    orch.getItem("H-1-1")!.reviewCompleted = true;
+    orch.hydrateState("H-1-1", "merging");
+    const item = orch.getItem("H-1-1")!;
+    item.prNumber = 42;
+
+    const deps = makeMinimalDeps({
+      getPrBaseBranch: () => null, // API failure, no getPrBaseAndState
+    });
+
+    const result = orch.executeAction({ type: "merge", itemId: "H-1-1", prNumber: 42 }, ctx, deps);
+
+    expect(result.success).toBe(false);
+    expect(result.error).toContain("holding in merging");
+    expect(item.state).toBe("merging"); // NOT ci-passed
   });
 });
 

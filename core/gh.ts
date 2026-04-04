@@ -411,6 +411,29 @@ export function getPrBaseBranch(repoRoot: string, prNumber: number): string | nu
     : null;
 }
 
+/** Result of fetching PR base branch and state together. */
+export type PrBaseAndState = {
+  baseBranch: string | null;
+  prState: "MERGED" | "OPEN" | "CLOSED" | null;
+};
+
+/** Get a PR's current base branch and state in a single API call. Returns null on total failure. */
+export function getPrBaseAndState(repoRoot: string, prNumber: number): PrBaseAndState | null {
+  const result = prView(repoRoot, prNumber, ["baseRefName", "state"]);
+  if (!result.ok) return null;
+  const baseRefName = result.data.baseRefName;
+  const state = result.data.state;
+  const validStates = ["MERGED", "OPEN", "CLOSED"];
+  return {
+    baseBranch: typeof baseRefName === "string" && (baseRefName as string).trim().length > 0
+      ? (baseRefName as string)
+      : null,
+    prState: typeof state === "string" && validStates.includes(state as string)
+      ? (state as "MERGED" | "OPEN" | "CLOSED")
+      : null,
+  };
+}
+
 /** Retarget a PR to a new base branch. Returns true on success, false on failure. */
 export function retargetPrBase(repoRoot: string, prNumber: number, baseBranch: string): boolean {
   const result = ghInRepo(repoRoot, [

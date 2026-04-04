@@ -61,7 +61,13 @@ function restoreTrackedPrSnapshot(
       snap.prNumber = orchItem.prNumber;
     }
     if (snap.prNumber === orchItem.prNumber && !snap.prState) {
-      snap.prState = "open";
+      // When the item is in "merging" state, don't assume "open" -- the PR
+      // may already be merged and the API is just temporarily unavailable.
+      // Setting "open" would prevent interceptExternalMerge from firing
+      // on the next successful poll.
+      if (orchItem.state !== "merging") {
+        snap.prState = "open";
+      }
     }
   }
 }

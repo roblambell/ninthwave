@@ -1230,6 +1230,19 @@ export class Orchestrator {
     if (snap?.prState === "closed") {
       this.transition(item, "stuck");
       item.failureReason = "merge-aborted: PR was closed without merging";
+      return [];
+    }
+    // Retry merge when poll succeeds and PR is still open + CI passing.
+    // Handles recovery after staying in "merging" due to API failure or
+    // rate-limit action deferral. Blind polls don't set ciStatus, so no
+    // retry during backoff.
+    if (snap?.prState === "open" && snap?.ciStatus === "pass") {
+      return [{
+        type: "merge",
+        itemId: item.id,
+        prNumber: item.prNumber,
+        ...(this.config.mergeStrategy === "bypass" ? { admin: true } : {}),
+      }];
     }
     return [];
   }

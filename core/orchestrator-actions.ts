@@ -284,12 +284,65 @@ export function executeMerge(
   const defaultBranch = resolveDefaultBranch(item, repoRoot, deps);
   const expectedBase = resolveExpectedPrBase(orch, item, defaultBranch);
 
-  if (deps.getPrBaseBranch) {
+  // Verify PR base branch before merge. Prefer getPrBaseAndState (single call
+  // that also returns PR state for merged-PR detection) over getPrBaseBranch.
+  if (deps.getPrBaseAndState) {
+    const info = deps.getPrBaseAndState(repoRoot, prNum);
+    if (!info) {
+      // Total API failure (rate-limited or network error). Stay in "merging"
+      // instead of regressing to "ci-passed" to prevent a tight retry loop.
+      // handleMerging will retry when the next successful poll arrives.
+      deps.warn?.(`Could not reach GitHub API for PR #${prNum} (${item.id}); holding in merging state`);
+      return { success: false, error: `GitHub API unavailable for PR #${prNum}; holding in merging` };
+    }
+
+    if (info.prState === "MERGED") {
+      // PR was already merged externally. Transition directly to merged.
+      orch.transition(item, "merged");
+      try {
+        deps.fetchOrigin(repoRoot, defaultBranch);
+        deps.ffMerge(repoRoot, defaultBranch);
+      } catch { /* non-fatal */ }
+      return { success: true, error: undefined };
+    }
+
+    const actualBase = info.baseBranch;
+    if (!actualBase) {
+      // Got state but not base branch -- unusual. Hold in merging.
+      deps.warn?.(`PR #${prNum} base branch unknown for ${item.id}; holding in merging state`);
+      return { success: false, error: `PR #${prNum} base branch unknown; holding in merging` };
+    }
+
+    if (actualBase !== expectedBase) {
+      if (deps.retargetPrBase?.(repoRoot, prNum, expectedBase)) {
+        item.baseBranch = expectedBase === defaultBranch ? undefined : expectedBase;
+        deps.warn?.(
+          `Retargeted PR #${prNum} for ${item.id} from ${actualBase} to ${expectedBase}; waiting for CI before merge`,
+        );
+        orch.transition(item, "ci-pending");
+        return {
+          success: false,
+          error: `Retargeted PR #${prNum} from ${actualBase} to ${expectedBase}; waiting for CI`,
+        };
+      }
+
+      deps.warn?.(
+        `PR #${prNum} for ${item.id} targets ${actualBase} but expected ${expectedBase}; blocking auto-merge`,
+      );
+      orch.transition(item, "ci-passed");
+      return {
+        success: false,
+        error: `PR #${prNum} targets ${actualBase} but expected ${expectedBase}; merge blocked`,
+      };
+    }
+
+    item.baseBranch = expectedBase === defaultBranch ? undefined : expectedBase;
+  } else if (deps.getPrBaseBranch) {
     const actualBase = deps.getPrBaseBranch(repoRoot, prNum);
     if (!actualBase) {
-      deps.warn?.(`Could not verify PR #${prNum} base branch for ${item.id}; blocking auto-merge`);
-      orch.transition(item, "ci-passed");
-      return { success: false, error: `Could not verify base branch for PR #${prNum}; merge blocked` };
+      // API failure. Stay in "merging" to prevent ci-passed → merging loop.
+      deps.warn?.(`Could not verify PR #${prNum} base branch for ${item.id}; holding in merging state`);
+      return { success: false, error: `Could not verify base branch for PR #${prNum}; holding in merging` };
     }
 
     if (actualBase !== expectedBase) {

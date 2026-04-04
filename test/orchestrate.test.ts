@@ -1632,21 +1632,59 @@ describe("TUI item selection helpers", () => {
 });
 
 describe("adaptivePollInterval", () => {
-  it("returns flat 2s regardless of item states", () => {
+  it("returns 2s for zero or one active item", () => {
     const orch = new Orchestrator();
+    expect(adaptivePollInterval(orch)).toBe(2_000);
+
     orch.addItem(makeWorkItem("A-1-1"));
     orch.getItem("A-1-1")!.reviewCompleted = true;
+    // "ready" is not a PR-polling state
     orch.hydrateState("A-1-1", "ready");
     expect(adaptivePollInterval(orch)).toBe(2_000);
 
+    // "implementing" is a PR-polling state -- 1 active, returns 2s
     orch.hydrateState("A-1-1", "implementing");
     expect(adaptivePollInterval(orch)).toBe(2_000);
 
-    orch.hydrateState("A-1-1", "ci-pending");
-    expect(adaptivePollInterval(orch)).toBe(2_000);
-
+    // "done" is terminal -- no polling
     orch.hydrateState("A-1-1", "done");
     expect(adaptivePollInterval(orch)).toBe(2_000);
+  });
+
+  it("scales linearly with active items, capped at 30s", () => {
+    const orch = new Orchestrator();
+    // Add 3 items in PR-polling states
+    for (const id of ["A-1-1", "A-1-2", "A-1-3"]) {
+      orch.addItem(makeWorkItem(id));
+      orch.getItem(id)!.reviewCompleted = true;
+      orch.hydrateState(id, "ci-pending");
+    }
+    expect(adaptivePollInterval(orch)).toBe(9_000); // 3 * 3000
+
+    // Add more to hit cap
+    for (const id of ["A-1-4", "A-1-5", "A-1-6", "A-1-7", "A-1-8", "A-1-9", "A-1-10", "A-1-11"]) {
+      orch.addItem(makeWorkItem(id));
+      orch.getItem(id)!.reviewCompleted = true;
+      orch.hydrateState(id, "implementing");
+    }
+    // 11 items * 3000 = 33000, capped at 30000
+    expect(adaptivePollInterval(orch)).toBe(30_000);
+  });
+
+  it("only counts PR-polling states, ignores queued/done", () => {
+    const orch = new Orchestrator();
+    orch.addItem(makeWorkItem("A-1-1"));
+    orch.addItem(makeWorkItem("A-1-2"));
+    orch.addItem(makeWorkItem("A-1-3"));
+    orch.getItem("A-1-1")!.reviewCompleted = true;
+    orch.getItem("A-1-2")!.reviewCompleted = true;
+    orch.getItem("A-1-3")!.reviewCompleted = true;
+
+    // One implementing, one done, one queued
+    orch.hydrateState("A-1-1", "implementing");
+    orch.hydrateState("A-1-2", "done");
+    // A-1-3 stays queued
+    expect(adaptivePollInterval(orch)).toBe(2_000); // only 1 active → 2s
   });
 });
 

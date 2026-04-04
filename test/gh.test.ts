@@ -13,6 +13,7 @@ import {
   prHeadSha,
   ensureDomainLabels,
   getPrBaseBranch,
+  getPrBaseAndState,
   retargetPrBase,
   findOpenPrByHeadBranch,
   updatePrBody,
@@ -175,6 +176,40 @@ describe("getPrBaseBranch", () => {
   it("returns null when gh pr view fails", () => {
     runSpy.mockReturnValue({ stdout: "", stderr: "boom", exitCode: 1 });
     expect(getPrBaseBranch("/repo", 42)).toBeNull();
+  });
+});
+
+describe("getPrBaseAndState", () => {
+  it("returns baseBranch and prState when gh pr view succeeds", () => {
+    runSpy.mockReturnValue({
+      stdout: JSON.stringify({ baseRefName: "main", state: "OPEN" }),
+      stderr: "",
+      exitCode: 0,
+    });
+
+    const result = getPrBaseAndState("/repo", 42);
+    expect(result).toEqual({ baseBranch: "main", prState: "OPEN" });
+    expect(runSpy).toHaveBeenCalledWith(
+      "gh",
+      ["pr", "view", "42", "--json", "baseRefName,state"],
+      { cwd: "/repo" },
+    );
+  });
+
+  it("returns MERGED state for merged PR", () => {
+    runSpy.mockReturnValue({
+      stdout: JSON.stringify({ baseRefName: "main", state: "MERGED" }),
+      stderr: "",
+      exitCode: 0,
+    });
+
+    const result = getPrBaseAndState("/repo", 86);
+    expect(result).toEqual({ baseBranch: "main", prState: "MERGED" });
+  });
+
+  it("returns null when gh pr view fails (rate limited)", () => {
+    runSpy.mockReturnValue({ stdout: "", stderr: "rate limit exceeded", exitCode: 1 });
+    expect(getPrBaseAndState("/repo", 42)).toBeNull();
   });
 });
 
