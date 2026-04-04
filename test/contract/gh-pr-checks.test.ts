@@ -6,7 +6,7 @@
 // spies on it). Instead, spies on gh-module sync functions per project
 // conventions (see async-snapshot.test.ts for the async equivalent).
 
-import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
+import { describe, it, expect, vi, beforeEach, afterEach, afterAll } from "vitest";
 import * as gh from "../../core/gh.ts";
 import { prChecks } from "../../core/gh.ts";
 import { CI_FAILURE_STATES, checkPrStatus } from "../../core/commands/pr-monitor.ts";
@@ -40,6 +40,14 @@ afterEach(() => {
   prViewSpy.mockReset();
   prChecksSpy.mockReset();
   detectWorkflowSpy.mockReset();
+});
+
+afterAll(() => {
+  isAvailableSpy.mockRestore();
+  prListSpy.mockRestore();
+  prViewSpy.mockRestore();
+  prChecksSpy.mockRestore();
+  detectWorkflowSpy.mockRestore();
 });
 
 // ── Helper: stub all gh calls for checkPrStatus ────────────────────
