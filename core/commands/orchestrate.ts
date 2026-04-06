@@ -120,6 +120,7 @@ import {
 import { listScheduledTasks as listScheduledTasksFromDir } from "../schedule-files.ts";
 import { loadDiscoveryStartupItems } from "../startup-items.ts";
 import { resolveCliRespawnCommand } from "../cli-spawn.ts";
+import { RequestQueue } from "../request-queue.ts";
 // ── Extracted subsystems ─────────────────────────────────────────────
 import {
   buildSnapshot as _buildSnapshot,
@@ -2354,8 +2355,10 @@ export async function cmdOrchestrate(
     });
   }
 
+  const requestQueue = new RequestQueue({ log });
+
   const loopDeps: OrchestrateLoopDeps = {
-    buildSnapshot: (o, pr, wd) => buildSnapshotAsync(o, pr, wd, mux, undefined, undefined, fetchTrustedPrCommentsAsync, ghCheckCommitCIAsync),
+    buildSnapshot: (o, pr, wd) => buildSnapshotAsync(o, pr, wd, mux, undefined, undefined, fetchTrustedPrCommentsAsync, ghCheckCommitCIAsync, undefined, undefined, requestQueue),
     sleep: (ms) => interruptibleSleep(ms, abortController.signal),
     log,
     actionDeps,
@@ -2377,6 +2380,7 @@ export async function cmdOrchestrate(
       scheduleDeps: scheduleLoopDeps,
       isScheduleExecutionEnabled: () => projectConfig.schedule_enabled && scheduleEnabled,
     } : {}),
+    requestQueue,
     // Completion prompt for TUI mode: render banner + wait for keypress
     ...(tuiMode ? {
       completionPrompt: async (allItems, runStartTime) => {

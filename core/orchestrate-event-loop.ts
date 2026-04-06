@@ -20,7 +20,7 @@ import type { WorkItem, LogEntry } from "./types.ts";
 import { ID_IN_FILENAME, PRIORITY_NUM } from "./types.ts";
 import type { CrewBroker, SyncItem, TokenUsage } from "./crew.ts";
 import { type Multiplexer, muxTypeForWorkspaceRef } from "./mux.ts";
-import { RateLimitBackoff } from "./rate-limit-backoff.ts";
+import { RequestQueue, type RequestQueueStats } from "./request-queue.ts";
 import { fetchOrigin, ffMerge } from "./git.ts";
 import { reconcile } from "./commands/reconcile.ts";
 import { cleanSingleWorktree } from "./commands/clean.ts";
@@ -141,8 +141,8 @@ export function adaptivePollInterval(orch: Orchestrator): number {
 }
 
 /**
- * Action types that make GitHub API calls. These are suppressed during
- * rate-limit backoff to avoid extending the rate limit.
+ * Action types that make GitHub API calls. Routed through the RequestQueue
+ * for proactive token-bucket rate limiting and priority-based concurrency.
  */
 export const GH_API_ACTIONS: ReadonlySet<string> = new Set([
   "merge", "set-commit-status", "post-review", "sync-stack-comments",
@@ -660,6 +660,8 @@ export interface OrchestrateLoopDeps {
    * Only called when tuiMode is true and watch mode is false.
    */
   completionPrompt?: (allItems: OrchestratorItem[], runStartTime: string) => Promise<CompletionAction>;
+  /** Centralized GitHub API request queue. When provided, GH API actions are routed through it. */
+  requestQueue?: RequestQueue;
 }
 
 export interface OrchestrateLoopConfig {
@@ -855,7 +857,9 @@ export async function orchestrateLoop(
   const watchIntervalMs = config.watchIntervalMs ?? 30_000;
   let lastWatchScanMs = Date.now();
   const loopStartMs = Date.now();
-  const rateLimitBackoff = new RateLimitBackoff(config.pollIntervalMs ?? 2_000);
+  const requestQueue = deps.requestQueue ?? new RequestQueue({
+    log,
+  });
 
   const scanForNewWatchItems = (): WorkItem[] => {
     if (!config.watch || !deps.scanWorkItems) return [];
@@ -1106,51 +1110,38 @@ export async function orchestrateLoop(
         }
       }
 
-      // Build snapshot from external state (skip during rate-limit backoff)
+      // Build snapshot from external state (queue handles per-request throttling)
       let snapshot: PollSnapshot;
-      if (rateLimitBackoff.shouldSkipSnapshot()) {
-        const backoffState = rateLimitBackoff.getState();
-        snapshot = { items: __lastSnapshot?.items ?? [], readyIds: __lastSnapshot?.readyIds ?? [] };
-        log({
-          ts: new Date().toISOString(),
-          level: "info",
-          event: "rate_limit_backoff",
-          consecutiveRateLimitCycles: backoffState.consecutiveRateLimitCycles,
-          resetAt: backoffState.resetAt ? new Date(backoffState.resetAt * 1000).toISOString() : undefined,
-          intervalMs: backoffState.intervalMs,
-          message: backoffState.description,
-        });
-      } else {
         const pollStartMs = interactiveTiming ? nowMs() : 0;
         snapshot = await deps.buildSnapshot(orch, ctx.projectRoot, ctx.worktreeDir);
         if (interactiveTiming) {
           interactiveTiming.timingsMs.poll = elapsedMs(nowMs, pollStartMs);
         }
-      }
       __lastSnapshot = snapshot;
 
-      // Record rate-limit state and query reset time on first detection
-      rateLimitBackoff.recordPollResult(snapshot);
-      if (rateLimitBackoff.getState().active && rateLimitBackoff.getState().consecutiveRateLimitCycles === 1) {
+      // Sync token bucket with GitHub rate limit when API errors appear
+      if (snapshot.apiErrorSummary?.primaryKind === "rate-limit" ||
+          (snapshot.apiErrorSummary?.byKind?.["rate-limit"] ?? 0) > 0) {
         try {
           const queryRateLimit = deps.queryRateLimit ?? ghQueryRateLimitAsync;
           const rateInfo = await queryRateLimit(ctx.projectRoot);
           if (rateInfo) {
-            rateLimitBackoff.setResetTimestamp(rateInfo.reset);
+            requestQueue.updateBudget(rateInfo.remaining, rateInfo.reset);
             log({
               ts: new Date().toISOString(),
               level: "info",
-              event: "rate_limit_reset_time",
+              event: "rate_limit_budget_update",
               resetAt: new Date(rateInfo.reset * 1000).toISOString(),
               remaining: rateInfo.remaining,
               limit: rateInfo.limit,
+              throttled: requestQueue.isThrottled(),
             });
           }
-        } catch { /* non-fatal -- fall back to exponential backoff */ }
+        } catch { /* non-fatal -- token bucket continues with natural refill */ }
       }
 
-    // Log warning when GitHub API is unreachable (suppress during active rate-limit backoff)
-    if (snapshot.apiErrorCount && snapshot.apiErrorCount > 0 && !rateLimitBackoff.getState().active) {
+    // Log warning when GitHub API is unreachable (suppress when queue is throttled)
+    if (snapshot.apiErrorCount && snapshot.apiErrorCount > 0 && !requestQueue.isThrottled()) {
       const primaryKind = snapshot.apiErrorSummary?.primaryKind;
       log({
         ts: new Date().toISOString(),
@@ -1297,33 +1288,35 @@ export async function orchestrateLoop(
         actions = filterCrewRemoteWriteActions(actions, deps.crewBroker.getCrewStatus());
       }
 
-    // Suppress actions that make GitHub API calls during rate-limit backoff.
-    // The snapshot poll is already skipped; this prevents action execution from
-    // extending the rate limit with additional gh calls.
-    if (rateLimitBackoff.getState().active) {
-      const deferred = actions.filter(a => GH_API_ACTIONS.has(a.type));
-      if (deferred.length > 0) {
-        actions = actions.filter(a => !GH_API_ACTIONS.has(a.type));
-        log({
-          ts: new Date().toISOString(),
-          level: "info",
-          event: "rate_limit_actions_deferred",
-          deferredCount: deferred.length,
-          deferredTypes: deferred.map(a => a.type),
-          message: "Deferred GH API actions during rate-limit backoff",
-        });
-      }
-    }
-
       if (interactiveTiming) {
         interactiveTiming.actionCount = actions.length;
         interactiveTiming.actionTypes = actions.map((action) => action.type);
       }
 
-      // Execute actions
+      // Execute actions -- route GH API actions through the request queue for
+      // proactive token-bucket rate limiting; non-API actions execute immediately.
       const actionExecutionStartMs = interactiveTiming ? nowMs() : 0;
+      const queuedActionPromises: Promise<void>[] = [];
       for (const action of actions) {
-        handleActionExecution(action, orch, ctx, deps, log);
+        if (GH_API_ACTIONS.has(action.type)) {
+          const priority = action.type === "merge" ? "critical" as const : "high" as const;
+          queuedActionPromises.push(
+            requestQueue.enqueue({
+              category: action.type,
+              priority,
+              itemId: action.itemId,
+              execute: async () => {
+                handleActionExecution(action, orch, ctx, deps, log);
+              },
+            }),
+          );
+        } else {
+          handleActionExecution(action, orch, ctx, deps, log);
+        }
+      }
+      // Await all queued GH API actions before proceeding
+      if (queuedActionPromises.length > 0) {
+        await Promise.all(queuedActionPromises);
       }
       if (interactiveTiming) {
         interactiveTiming.timingsMs.actionExecution = elapsedMs(nowMs, actionExecutionStartMs);
@@ -1357,9 +1350,8 @@ export async function orchestrateLoop(
       }
 
     // Sync cmux sidebar display for active workers
-      const backoffState = rateLimitBackoff.getState();
-      if (backoffState.active) {
-        snapshot.rateLimitBackoffDescription = backoffState.description;
+      if (requestQueue.isThrottled()) {
+        snapshot.rateLimitBackoffDescription = formatQueueThrottleDescription(requestQueue.getStats());
       }
       const displaySyncStartMs = interactiveTiming ? nowMs() : 0;
       try {
@@ -1400,10 +1392,8 @@ export async function orchestrateLoop(
       }
     }
 
-    // Sleep -- use backoff interval when rate-limited, otherwise adaptive or fixed override
-      const interval = rateLimitBackoff.getState().active
-        ? rateLimitBackoff.getNextIntervalMs()
-        : (config.pollIntervalMs ?? adaptivePollInterval(orch));
+    // Sleep -- use adaptive interval; queue handles per-request throttling
+      const interval = config.pollIntervalMs ?? adaptivePollInterval(orch);
 
       // Persist state for daemon mode (or any caller that wants snapshots)
       // Pass interval so TUI can set countdown target and capture render timing.
@@ -1430,4 +1420,19 @@ export async function orchestrateLoop(
  */
 export function computeDefaultSessionLimit(): number {
   return 1;
+}
+
+// ── Queue throttle display ──────────────────────────────────────────
+
+/** Format queue stats into a human-readable throttle description for TUI display. */
+export function formatQueueThrottleDescription(stats: RequestQueueStats): string {
+  const utilPct = Math.round(stats.budgetUtilization * 100);
+  const inFlight = stats.inFlight;
+  const queued = stats.queued;
+
+  const parts = [`Rate limited -- budget ${utilPct}% used`];
+  if (inFlight > 0 || queued > 0) {
+    parts.push(`(${inFlight} in-flight, ${queued} queued)`);
+  }
+  return parts.join(" ");
 }
