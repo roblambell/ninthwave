@@ -11,6 +11,9 @@ import { PRIORITY_NUM } from "./types.ts";
 // Re-export everything from orchestrator-types.ts so existing imports continue to work.
 export * from "./orchestrator-types.ts";
 
+// Re-export guard predicates for consumers that import from orchestrator.ts.
+export * from "./orchestrator-guards.ts";
+
 import {
   type OrchestratorItemState,
   type OrchestratorItem,
@@ -34,6 +37,18 @@ import {
   STACKABLE_STATES,
   getNextTool,
 } from "./orchestrator-types.ts";
+
+import {
+  isCiFailTrustworthy,
+  isHeartbeatActive,
+  isEventFresherThan,
+  shouldRenotifyCiFailure,
+  isActivityTimedOut,
+  isLaunchTimedOut,
+  isCiFixAckTimedOut,
+  isMergeCiGracePeriodExpired,
+  isRebaseStale,
+} from "./orchestrator-guards.ts";
 
 import {
   executeLaunch,
@@ -359,25 +374,23 @@ export class Orchestrator {
     now: Date,
     message: string,
   ): Action[] {
-    const lastNudgeMs = this.timestampMs(item.lastRebaseNudgeAt);
-    const isStale = lastNudgeMs == null
-      || (now.getTime() - lastNudgeMs) >= this.config.rebaseRetryStaleMs;
+    const stale = isRebaseStale(item.lastRebaseNudgeAt, now, this.config.rebaseRetryStaleMs);
 
-    if (item.rebaseRequested && lastNudgeMs == null) {
+    if (item.rebaseRequested && !item.lastRebaseNudgeAt) {
       item.lastRebaseNudgeAt = now.toISOString();
       item.rebaseNudgeCount = item.rebaseNudgeCount ?? 0;
       return [];
     }
 
     if (!item.rebaseRequested) {
-      if (!isStale) return [];
+      if (!stale) return [];
       item.rebaseRequested = true;
       item.lastRebaseNudgeAt = now.toISOString();
       item.rebaseNudgeCount = 0;
       return [{ type: "daemon-rebase", itemId: item.id, message }];
     }
 
-    if (!isStale) return [];
+    if (!stale) return [];
 
     const nudgeCount = item.rebaseNudgeCount ?? 0;
     item.lastRebaseNudgeAt = now.toISOString();
@@ -539,8 +552,7 @@ export class Orchestrator {
         } else if (liveness === "unknown") {
           // workerAlive is undefined -- session may not have registered yet.
           // Check for launching timeout to prevent indefinite stall.
-          const sinceTransition = now.getTime() - new Date(item.lastTransition).getTime();
-          if (sinceTransition > LAUNCHING_TIMEOUT_MS) {
+          if (isLaunchTimedOut(item.lastTransition, now, LAUNCHING_TIMEOUT_MS)) {
             if (this.shouldDeferTimeout(item, now)) {
               actions = [];
             } else {
@@ -703,8 +715,7 @@ export class Orchestrator {
     const nowMs = now.getTime();
     const heartbeat = snap?.lastHeartbeat;
     if (heartbeat?.ts) {
-      const heartbeatAge = nowMs - new Date(heartbeat.ts).getTime();
-      if (heartbeatAge < HEARTBEAT_TIMEOUT_MS) {
+      if (isHeartbeatActive(heartbeat.ts, now, HEARTBEAT_TIMEOUT_MS)) {
         // Worker is actively heartbeating -- healthy, skip timeout checks
         return [];
       }
@@ -725,36 +736,32 @@ export class Orchestrator {
     // or lastTransition). This prevents a single workerAlive blip from killing a
     // worker that was confirmed alive seconds earlier.
     const commitTime = snap?.lastCommitTime ?? item.lastCommitTime;
-    const lastPositiveSignal = item.lastAliveAt
-      ? new Date(item.lastAliveAt).getTime()
-      : new Date(item.lastTransition).getTime();
+    const lastPositiveSignalTime = item.lastAliveAt ?? item.lastTransition;
 
     if (!commitTime) {
       // No commits yet -- check launch timeout or activity timeout based on liveness
-      const sinceTransition = nowMs - new Date(item.lastTransition).getTime();
-      const sinceLastAlive = nowMs - lastPositiveSignal;
       if (workerAlive) {
         // Process alive: suppress launch timeout, use activity timeout as hard cap
-        if (sinceTransition > this.config.activityTimeoutMs) {
+        if (isActivityTimedOut(item.lastTransition, now, this.config.activityTimeoutMs)) {
           if (this.shouldDeferTimeout(item, now)) return [];
           return this.stuckOrRetry(item, "worker-stalled: process alive but no commits after activity timeout");
         }
         // Suppressed launch timeout -- log it if we would have timed out
-        if (sinceTransition > this.config.launchTimeoutMs) {
+        if (isLaunchTimedOut(item.lastTransition, now, this.config.launchTimeoutMs)) {
+          const sinceTransition = nowMs - new Date(item.lastTransition).getTime();
           this.config.onEvent?.(item.id, "timeout-suppressed-by-liveness", {
             sinceTransitionMs: sinceTransition,
             launchTimeoutMs: this.config.launchTimeoutMs,
             activityTimeoutMs: this.config.activityTimeoutMs,
           });
         }
-      } else if (sinceLastAlive > this.config.launchTimeoutMs) {
+      } else if (isLaunchTimedOut(lastPositiveSignalTime, now, this.config.launchTimeoutMs)) {
         if (this.shouldDeferTimeout(item, now)) return [];
         return this.stuckOrRetry(item, "worker-stalled: no commits after launch timeout");
       }
     } else {
       // Has commits -- check against activity timeout (same for alive or dead)
-      const sinceCommit = nowMs - new Date(commitTime).getTime();
-      if (sinceCommit > this.config.activityTimeoutMs) {
+      if (isActivityTimedOut(commitTime, now, this.config.activityTimeoutMs)) {
         if (this.shouldDeferTimeout(item, now)) return [];
         return this.stuckOrRetry(item, "worker-stalled: no new commits after activity timeout");
       }
@@ -891,7 +898,7 @@ export class Orchestrator {
     }
 
     // Reset notification flag if the worker pushed a new commit (fix attempt)
-    if (item.ciFailureNotified && item.lastCommitTime !== item.ciFailureNotifiedAt) {
+    if (item.ciFailureNotified && shouldRenotifyCiFailure(item.lastCommitTime, item.ciFailureNotifiedAt)) {
       item.ciFailureNotified = false;
     }
 
@@ -912,13 +919,8 @@ export class Orchestrator {
 
     // Layer 2: no ack after notification (process alive but AI exited)
     if (item.ciFailureNotified && item.ciNotifyWallAt) {
-      const notifyMs = new Date(item.ciNotifyWallAt).getTime();
-      const heartbeatTs = snap?.lastHeartbeat?.ts
-        ? new Date(snap.lastHeartbeat.ts).getTime() : 0;
-      if (heartbeatTs <= notifyMs) {
-        if (now.getTime() - notifyMs > CI_FIX_ACK_TIMEOUT_MS) {
-          return this.respawnCiFixWorker(item);
-        }
+      if (isCiFixAckTimedOut(item.ciNotifyWallAt, snap?.lastHeartbeat?.ts, now, CI_FIX_ACK_TIMEOUT_MS)) {
+        return this.respawnCiFixWorker(item);
       }
     }
 
@@ -937,8 +939,7 @@ export class Orchestrator {
     // implementing/launching. CI may not have processed the latest commit yet
     // (stale status from a previous run). "pass" and "pending" are honored immediately.
     if (ciStatus === "fail" && item.ciPendingSince) {
-      const sinceEntry = now.getTime() - new Date(item.ciPendingSince).getTime();
-      if (sinceEntry < this.config.ciPendingFailGraceMs) {
+      if (!isCiFailTrustworthy(item.ciPendingSince, now, this.config.ciPendingFailGraceMs)) {
         return [];
       }
     }
@@ -1234,16 +1235,11 @@ export class Orchestrator {
     // Don't react to CI status while the rebaser is actively working.
     // The pre-rebase PR still has its old CI status; transitioning on it
     // immediately kills the rebaser before it can push.
-    const heartbeatTs = snap?.lastHeartbeat?.ts;
-    const hasActiveHeartbeat = heartbeatTs != null
-      && (Date.now() - new Date(heartbeatTs).getTime()) < HEARTBEAT_TIMEOUT_MS;
+    const hasActiveHeartbeat = isHeartbeatActive(snap?.lastHeartbeat?.ts, new Date(), HEARTBEAT_TIMEOUT_MS);
 
     if (!hasActiveHeartbeat) {
       // Rebaser is no longer sending heartbeats. Check if CI is from a post-rebase push.
-      const rebaseStartMs = new Date(item.lastTransition).getTime();
-      const eventMs = snap?.eventTime ? new Date(snap.eventTime).getTime() : 0;
-      const isFreshCi = Number.isFinite(rebaseStartMs) && Number.isFinite(eventMs)
-        && eventMs > rebaseStartMs;
+      const isFreshCi = isEventFresherThan(snap?.eventTime, item.lastTransition);
 
       if (isFreshCi && (snap?.ciStatus === "pending" || snap?.ciStatus === "pass" || snap?.ciStatus === "fail")) {
         this.transition(item, "ci-pending");
@@ -1312,8 +1308,7 @@ export class Orchestrator {
         // If no checks have appeared after grace period, treat as no CI configured.
         const hasPushWorkflows = snap.hasPushWorkflows ?? true; // assume yes if unknown
         const gracePeriod = hasPushWorkflows ? MERGE_CI_GRACE_MS : NO_CI_MERGE_GRACE_MS;
-        const elapsed = now.getTime() - new Date(item.lastTransition).getTime();
-        if (elapsed > gracePeriod) {
+        if (isMergeCiGracePeriodExpired(item.lastTransition, now, gracePeriod)) {
           this.transition(item, "done");
         }
         return [];
