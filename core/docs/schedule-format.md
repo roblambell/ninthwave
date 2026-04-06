@@ -207,9 +207,9 @@ It also enables the project schedule capability in `.ninthwave/config.json`
 with `"schedule_enabled": true`.
 
 Actual execution still requires the local per-project preference to be on
-(`schedule_enabled_projects` in user config, or the runtime toggle in `nw watch`).
+(`schedule_enabled_projects` in user config, or the runtime toggle in `nw`).
 
-The ninthwave daemon (`nw watch`) checks all enabled schedules every loop iteration:
+The ninthwave daemon (`nw`) checks all enabled schedules every loop iteration:
 
 1. **Due check:** Compares the task's cron expression against the current time with a 2-minute tolerance window. This prevents missed fires if the daemon loop runs slightly late.
 2. **Double-fire prevention:** If a task already ran in the current minute, it is skipped.

@@ -343,7 +343,7 @@ export function readLogs(
     // Check if any rotated files exist
     const hasRotated = io.existsSync(`${logPath}.1`);
     if (!hasRotated) {
-      return ["No orchestration logs found. Run `nw watch` to generate logs."];
+      return ["No orchestration logs found. Run `nw` to generate logs."];
     }
   }
 

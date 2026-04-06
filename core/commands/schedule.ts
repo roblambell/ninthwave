@@ -252,7 +252,7 @@ function cmdScheduleRun(id: string, projectRoot: string): void {
   // Check if daemon is running
   const daemonPid = isDaemonRunning(projectRoot);
   if (daemonPid === null) {
-    die("No daemon running. Start one with `nw watch`.");
+    die("No daemon running. Start one with `nw`.");
   }
 
   // Write trigger file

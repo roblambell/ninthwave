@@ -2811,7 +2811,7 @@ export function renderHelpOverlay(
       `${BOLD}Session${RESET}`,
       `  ${BRAND}${sessionCode}${RESET}`,
       `  ${DIM}Dashboard: ${BRAND}ninthwave.sh${RESET}${DIM}/stats/${sessionCode}${RESET}`,
-      `  ${DIM}Join:      nw watch --crew ${sessionCode}${RESET}`,
+      `  ${DIM}Join:      nw --crew ${sessionCode}${RESET}`,
     ]);
   }
 
@@ -3106,7 +3106,7 @@ export function renderControlsOverlay(
     ?? (collaborationIntent ? collaborationIntentToMode(collaborationIntent) : collaborationMode);
   const joinInputActive = _collaborationJoinInputActive || collaborationIntent === "join";
   const collaborationDetailLines: string[] = [];
-  const joinCommand = sessionCode ? `nw watch --crew ${sessionCode}` : undefined;
+  const joinCommand = sessionCode ? `nw --crew ${sessionCode}` : undefined;
 
   if (sessionCode) {
     collaborationDetailLines.push(

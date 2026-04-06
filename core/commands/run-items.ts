@@ -197,7 +197,7 @@ export async function cmdRunItems(
       console.log(`  ${DIM}- ${id}: ${item.title}${RESET}`);
     }
     console.log();
-    info(`Use 'nw watch' to process all items with automatic queue management.`);
+    info(`Use 'nw' to process all items with automatic queue management.`);
   }
 }
 
@@ -335,7 +335,7 @@ export async function cmdStart(
       console.log(`  ${DIM}- ${id}: ${item.title}${RESET}`);
     }
     console.log();
-    info(`Use 'nw watch' to process all items with automatic queue management.`);
+    info(`Use 'nw' to process all items with automatic queue management.`);
   }
 }
 

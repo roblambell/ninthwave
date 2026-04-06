@@ -1,4 +1,4 @@
-// Arg parsing for `nw watch` / `nw orchestrate`. Pure function, injectable for testability.
+// Arg parsing for `nw` / `nw orchestrate`. Pure function, injectable for testability.
 // Extracted from core/commands/orchestrate.ts for modularity.
 
 import type { MergeStrategy } from "../orchestrator.ts";

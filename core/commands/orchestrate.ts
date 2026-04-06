@@ -1157,7 +1157,7 @@ export function initializeWatchRuntimeFiles(
 /**
  * Release the active-session lock while preserving the last restart snapshot.
  *
- * Keeping the state file around lets a later `nw watch` session restore inflight
+ * Keeping the state file around lets a later `nw` session restore inflight
  * work instead of reconstructing from scratch.
  */
 export function cleanupWatchRuntimeFiles(
@@ -1401,7 +1401,7 @@ async function runInteractiveOperatorParentSession(
 
 // ── CLI command ─────────────────────────────────────────────────────
 
-/** Renamed entry point: `nw watch` dispatches here. */
+/** Renamed entry point: `nw` dispatches here. */
 export const cmdWatch = cmdOrchestrate;
 
 export async function cmdOrchestrate(
@@ -1975,7 +1975,7 @@ export async function cmdOrchestrate(
     }
     syncCollaborationLocals();
     info(`Session created: ${crewCode}`);
-    info(`  Join: nw watch --crew ${crewCode}`);
+    info(`  Join: nw --crew ${crewCode}`);
   }
 
   if (crewCode) {
@@ -2581,7 +2581,7 @@ export async function cmdOrchestrate(
     lines.push("");
     const dashboardUrl = `ninthwave.sh/stats/${crewCode}`;
     lines.push(centerLine(`\x1B[2m${dashboardUrl}\x1B[0m`, dashboardUrl.length));
-    const inviteCmd = `Join: nw watch --crew ${crewCode}`;
+    const inviteCmd = `Join: nw --crew ${crewCode}`;
     lines.push(centerLine(`\x1B[2m${inviteCmd}\x1B[0m`, inviteCmd.length));
     lines.push("");
     lines.push(centerLine("\x1B[2mPress ? for help\x1B[0m", 16));
