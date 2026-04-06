@@ -35,6 +35,7 @@ import {
   TERMINAL_STATES,
   ACTIVE_SESSION_STATES,
   STACKABLE_STATES,
+  STATE_TRANSITIONS,
   getNextTool,
 } from "./orchestrator-types.ts";
 
@@ -302,10 +303,19 @@ export class Orchestrator {
 
   // ── Private helpers ────────────────────────────────────────────
 
-  /** Set state and update timestamp. Records detection latency when eventTime is provided. */
+  /** Set state and update timestamp. Records detection latency when eventTime is provided.
+   *  Enforces STATE_TRANSITIONS -- throws on illegal transitions. */
   private transition(item: OrchestratorItem, state: OrchestratorItemState, eventTime?: string): void {
     if (item.state === state) return;
     const prevState = item.state;
+
+    const allowed = STATE_TRANSITIONS[prevState];
+    if (!allowed.includes(state)) {
+      this.config.onEvent?.(item.id, "illegal-transition", { from: prevState, to: state });
+      throw new Error(
+        `Illegal state transition for ${item.id}: ${prevState} -> ${state}`,
+      );
+    }
     const detectedTime = new Date().toISOString();
     item.state = state;
     item.lastTransition = detectedTime;

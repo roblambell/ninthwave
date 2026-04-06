@@ -147,6 +147,75 @@ describe("STATE_TRANSITIONS table", () => {
   });
 });
 
+// ── Runtime transition enforcement ──────────────────────────────────
+
+describe("runtime transition enforcement", () => {
+  it("throws on illegal transition via executeAction", () => {
+    const events: { itemId: string; event: string; data?: Record<string, unknown> }[] = [];
+    const orch = new Orchestrator({
+      onEvent: (itemId, event, data) => events.push({ itemId, event, data }),
+    });
+    orch.addItem(makeWorkItem("H-1-1"));
+    orch.hydrateState("H-1-1", "done");
+
+    const ctx: ExecutionContext = {
+      workDir: "/tmp/test",
+      worktreeDir: "/tmp/test/.ninthwave/.worktrees",
+      projectRoot: "/tmp/test",
+      aiTool: "copilot",
+    };
+    const deps: OrchestratorDeps = {
+      launchSingleItem: () => null,
+      validatePickupCandidate: () => ({ status: "blocked" as const, failureReason: "test-blocked" }),
+    };
+
+    expect(() => {
+      orch.executeAction({ type: "launch", itemId: "H-1-1" }, ctx, deps);
+    }).toThrow("Illegal state transition for H-1-1: done -> blocked");
+
+    expect(events).toContainEqual(
+      expect.objectContaining({
+        itemId: "H-1-1",
+        event: "illegal-transition",
+        data: { from: "done", to: "blocked" },
+      }),
+    );
+  });
+
+  it("hydrateState does NOT throw for any state (reconstruction bypass)", () => {
+    const orch = new Orchestrator();
+    orch.addItem(makeWorkItem("H-1-1"));
+
+    const allStates: OrchestratorItemState[] = [
+      "queued", "ready", "launching", "implementing",
+      "ci-pending", "ci-passed", "ci-failed", "rebasing",
+      "review-pending", "reviewing", "merging", "merged",
+      "forward-fix-pending", "fix-forward-failed", "fixing-forward",
+      "done", "blocked", "stuck",
+    ];
+    for (const state of allStates) {
+      expect(() => orch.hydrateState("H-1-1", state)).not.toThrow();
+    }
+  });
+
+  it("allows declared transitions without throwing", () => {
+    const orch = new Orchestrator({ maxRetries: 1 });
+    orch.addItem(makeWorkItem("H-1-1"));
+    orch.getItem("H-1-1")!.reviewCompleted = true;
+
+    // queued -> ready -> launching (all in one cycle: promote then launch)
+    orch.processTransitions(emptySnapshot(["H-1-1"]), NOW);
+    expect(orch.getItem("H-1-1")!.state).toBe("launching");
+
+    // launching -> implementing (via workerAlive)
+    orch.processTransitions(
+      snapshotWith([{ id: "H-1-1", workerAlive: true }]),
+      NOW,
+    );
+    expect(orch.getItem("H-1-1")!.state).toBe("implementing");
+  });
+});
+
 // ── reconstructState ─────────────────────────────────────────────────
 
 describe("reconstructState", () => {
