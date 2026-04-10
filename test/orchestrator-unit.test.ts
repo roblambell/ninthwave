@@ -248,13 +248,13 @@ describe("reconstructState", () => {
     expect(orch.getItem("H-1-1")!.state).toBe("queued");
   });
 
-  it("restores ciFailCount and retryCount from daemon state", () => {
+  it("restores ciFailCountTotal and retryCount from daemon state while resetting ciFailCount", () => {
     const orch = new Orchestrator();
     orch.addItem(makeWorkItem("H-1-1"));
     orch.getItem("H-1-1")!.reviewCompleted = true;
 
     const daemonState = {
-      items: [{ id: "H-1-1", ciFailCount: 3, retryCount: 2 }],
+      items: [{ id: "H-1-1", ciFailCount: 3, ciFailCountTotal: 8, retryCount: 2 }],
     };
 
     reconstructState(
@@ -262,7 +262,8 @@ describe("reconstructState", () => {
       () => "", daemonState,
     );
 
-    expect(orch.getItem("H-1-1")!.ciFailCount).toBe(3);
+    expect(orch.getItem("H-1-1")!.ciFailCount).toBe(0);
+    expect(orch.getItem("H-1-1")!.ciFailCountTotal).toBe(8);
     expect(orch.getItem("H-1-1")!.retryCount).toBe(2);
   });
 
@@ -273,7 +274,7 @@ describe("reconstructState", () => {
 
     const daemonState = {
       items: [
-        { id: "H-1-1", ciFailCount: 0, retryCount: 0, reviewCompleted: true, reviewWorkspaceRef: "workspace:5" },
+        { id: "H-1-1", ciFailCount: 0, ciFailCountTotal: 0, retryCount: 0, reviewCompleted: true, reviewWorkspaceRef: "workspace:5" },
       ],
     };
 

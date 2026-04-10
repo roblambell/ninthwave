@@ -172,6 +172,7 @@ export function reconstructState(
   const savedItems = new Map<string, {
     state: string;
     ciFailCount: number;
+    ciFailCountTotal: number;
     retryCount: number;
     timeoutDeadline?: string;
     timeoutExtensionCount?: number;
@@ -207,6 +208,7 @@ export function reconstructState(
       savedItems.set(si.id, {
         state: si.state,
         ciFailCount: si.ciFailCount,
+        ciFailCountTotal: si.ciFailCountTotal ?? si.ciFailCount,
         retryCount: si.retryCount,
         timeoutDeadline: si.timeoutDeadline,
         timeoutExtensionCount: si.timeoutExtensionCount,
@@ -242,7 +244,7 @@ export function reconstructState(
     // Restore persisted counters and review fields from daemon state (before any state transitions)
     const saved = savedItems.get(item.id);
     if (saved) {
-      item.ciFailCount = saved.ciFailCount;
+      item.ciFailCountTotal = saved.ciFailCountTotal;
       item.retryCount = saved.retryCount;
       if (saved.timeoutDeadline) item.timeoutDeadline = saved.timeoutDeadline;
       if (saved.timeoutExtensionCount != null) item.timeoutExtensionCount = saved.timeoutExtensionCount;

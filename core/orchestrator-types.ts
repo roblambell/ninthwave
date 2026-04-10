@@ -48,8 +48,10 @@ export interface OrchestratorItem {
   workspaceRef?: string;
   /** Timestamp of last state change (ISO string). */
   lastTransition: string;
-  /** Number of times CI has failed for this item. */
+  /** Number of times CI has failed for this item in the current daemon session. */
   ciFailCount: number;
+  /** Number of times CI has failed for this item across its full lifetime. */
+  ciFailCountTotal: number;
   /** Number of times this item has been retried after worker crash/OOM. */
   retryCount: number;
   /** ISO timestamp of the most recent commit on the worktree branch, or null if none. */

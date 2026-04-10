@@ -39,6 +39,7 @@ export interface DaemonStateItem {
   descriptionBody?: string;
   lastTransition: string;
   ciFailCount: number;
+  ciFailCountTotal: number;
   retryCount: number;
   /** Active timeout grace deadline for a stalled worker, when set. */
   timeoutDeadline?: string;
@@ -689,6 +690,7 @@ export function serializeOrchestratorState(
         ...(item.workItem.rawText ? { descriptionBody: item.workItem.rawText } : {}),
         lastTransition: item.lastTransition,
         ciFailCount: item.ciFailCount,
+        ciFailCountTotal: item.ciFailCountTotal,
         retryCount: item.retryCount,
         ...(item.timeoutDeadline ? { timeoutDeadline: item.timeoutDeadline } : {}),
         ...(item.timeoutExtensionCount != null ? { timeoutExtensionCount: item.timeoutExtensionCount } : {}),

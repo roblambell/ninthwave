@@ -204,6 +204,7 @@ export class Orchestrator {
       partition,
       lastTransition: new Date().toISOString(),
       ciFailCount: 0,
+      ciFailCountTotal: 0,
       retryCount: 0,
     });
   }
@@ -465,6 +466,7 @@ export class Orchestrator {
   private emitCiFailureEvent(item: OrchestratorItem): void {
     this.config.onEvent?.(item.id, "ci-failure", {
       ciFailCount: item.ciFailCount,
+      ciFailCountTotal: item.ciFailCountTotal,
       failureReason: item.failureReason,
     });
   }
@@ -472,6 +474,7 @@ export class Orchestrator {
   private emitCiRetryLimitEvent(item: OrchestratorItem, parked: boolean): void {
     this.config.onEvent?.(item.id, "ci-retry-limit", {
       ciFailCount: item.ciFailCount,
+      ciFailCountTotal: item.ciFailCountTotal,
       maxCiRetries: this.config.maxCiRetries,
       parked,
     });
@@ -484,6 +487,7 @@ export class Orchestrator {
     this.config.onEvent?.(item.id, "worker-respawn", {
       trigger,
       ciFailCount: item.ciFailCount,
+      ciFailCountTotal: item.ciFailCountTotal,
     });
   }
 
@@ -1015,6 +1019,7 @@ export class Orchestrator {
       if (isCiFixAckTimedOut(sd.ciNotifyWallAt, snap?.lastHeartbeat?.ts, now, TIMEOUTS.ciFixAck)) {
         this.config.onEvent?.(item.id, "ci-fix-ack-timeout", {
           ciFailCount: item.ciFailCount,
+          ciFailCountTotal: item.ciFailCountTotal,
         });
         return this.respawnCiFixWorker(item, "ci-fix-ack-timeout");
       }
@@ -1044,6 +1049,7 @@ export class Orchestrator {
     if (ciStatus === "fail") {
       this.transition(item, "ci-failed", snap?.eventTime);
       item.ciFailCount++;
+      item.ciFailCountTotal++;
       item.failureReason = snap?.isMergeable === false
         ? "ci-failed: merge conflicts with main"
         : "ci-failed: CI checks failed";
@@ -1088,6 +1094,7 @@ export class Orchestrator {
     if (ciStatus === "fail") {
       this.transition(item, "ci-failed", snap?.eventTime);
       item.ciFailCount++;
+      item.ciFailCountTotal++;
       item.failureReason = snap?.isMergeable === false
         ? "ci-failed: merge conflicts with main"
         : "ci-failed: CI checks failed";
@@ -1176,6 +1183,7 @@ export class Orchestrator {
 
       this.transition(item, "ci-failed", snap?.eventTime);
       item.ciFailCount++;
+      item.ciFailCountTotal++;
 
       const isMergeConflict = snap?.isMergeable === false;
       item.failureReason = isMergeConflict
@@ -1255,6 +1263,7 @@ export class Orchestrator {
     if (snap?.ciStatus === "fail") {
       this.transition(item, "ci-failed", snap?.eventTime);
       item.ciFailCount++;
+      item.ciFailCountTotal++;
       const isMergeConflict = snap?.isMergeable === false;
       item.failureReason = isMergeConflict
         ? "ci-failed: merge conflicts with main"

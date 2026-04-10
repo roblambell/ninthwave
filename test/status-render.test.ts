@@ -172,6 +172,7 @@ function makeOrchestratorItem(id: string, state: OrchestratorItem["state"] = "im
     state,
     lastTransition: new Date(Date.now() - 10_000).toISOString(),
     ciFailCount: 0,
+    ciFailCountTotal: 0,
     retryCount: 0,
     prNumber: undefined,
   };
@@ -3855,6 +3856,9 @@ describe("renderTuiFrame with showHelp", () => {
       endedAt: undefined,
       exitCode: null,
       stderrTail: undefined,
+      ciFailCount: 0,
+      ciFailCountTotal: 0,
+      retryCount: 0,
       reviewCycleStartedAt: undefined,
       ciRetries: 0,
       lastReviewPollCursor: undefined,
@@ -4495,17 +4499,21 @@ describe("renderDetailOverlay", () => {
     expect(text).toContain("#42");
   });
 
-  it("shows extra fields: priority, dependencies, CI fails, retries", () => {
+  it("shows extra fields: priority, dependencies, CI fails, CI total, retries", () => {
     const item = makeStatusItem({ id: "H-EX-1", state: "ci-failed", failureReason: "test timeout" });
     const { lines } = renderDetailOverlay(item, 100, 40, {
       priority: "high",
       dependencies: ["H-EX-0", "H-EX-2"],
-      ciFailCount: 3,
+      ciFailCount: 1,
+      ciFailCountTotal: 3,
       retryCount: 1,
     });
     const text = lines.map(stripAnsi).join("\n");
     expect(text).toContain("high");
     expect(text).toContain("H-EX-0, H-EX-2");
+    expect(text).toContain("CI fails:");
+    expect(text).toContain("CI total:");
+    expect(text).toContain("1");
     expect(text).toContain("3");
     expect(text).toContain("1");
   });

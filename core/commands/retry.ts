@@ -138,6 +138,7 @@ export function cmdRetry(
     item.state = "queued";
     item.retryCount = 0;
     item.ciFailCount = 0;
+    item.ciFailCountTotal = 0;
     item.prNumber = null;
     item.failureReason = undefined;
     item.exitCode = undefined;

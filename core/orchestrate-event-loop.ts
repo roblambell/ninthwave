@@ -908,6 +908,7 @@ export async function orchestrateLoop(
             lastTransition: i.lastTransition,
             prNumber: i.prNumber,
             ciFailCount: i.ciFailCount,
+            ciFailCountTotal: i.ciFailCountTotal,
             retryCount: i.retryCount,
             workspaceRef: i.workspaceRef,
           })),

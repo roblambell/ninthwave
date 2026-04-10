@@ -3413,6 +3413,7 @@ export function renderDetailOverlay(
     priority?: string;
     dependencies?: string[];
     ciFailCount?: number;
+    ciFailCountTotal?: number;
     retryCount?: number;
     /** Scroll offset within the detail content region (0 = top). */
     scrollOffset?: number;
@@ -3482,8 +3483,11 @@ export function renderDetailOverlay(
     }
   }
 
-  if (opts?.ciFailCount != null && opts.ciFailCount > 0) {
-    contentLines.push(`  ${DIM}CI fails:${RESET}  ${opts.ciFailCount}`);
+  const ciFailCount = opts?.ciFailCount ?? 0;
+  const ciFailCountTotal = opts?.ciFailCountTotal ?? ciFailCount;
+  if (ciFailCount > 0 || ciFailCountTotal > 0) {
+    contentLines.push(`  ${DIM}CI fails:${RESET}  ${ciFailCount}`);
+    contentLines.push(`  ${DIM}CI total:${RESET}  ${ciFailCountTotal}`);
   }
 
   if (opts?.retryCount != null && opts.retryCount > 0) {

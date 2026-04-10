@@ -54,6 +54,7 @@ function makeItem(
     title: `Test item ${id}`,
     lastTransition: "2026-03-25T00:00:00Z",
     ciFailCount: 0,
+    ciFailCountTotal: 0,
     retryCount: 0,
     ...overrides,
   };
@@ -128,7 +129,7 @@ describe("cmdRetry", () => {
 
   it("resets a stuck item to queued", () => {
     const state = makeState([
-      makeItem("H-PRX-4", "stuck", { retryCount: 3, ciFailCount: 2, prNumber: 42 }),
+      makeItem("H-PRX-4", "stuck", { retryCount: 3, ciFailCount: 2, ciFailCountTotal: 5, prNumber: 42 }),
     ]);
     seedState(io, state);
     const deps = createDeps(io);
@@ -146,6 +147,7 @@ describe("cmdRetry", () => {
     expect(item.state).toBe("queued");
     expect(item.retryCount).toBe(0);
     expect(item.ciFailCount).toBe(0);
+    expect(item.ciFailCountTotal).toBe(0);
     expect(item.prNumber).toBeNull();
   });
 

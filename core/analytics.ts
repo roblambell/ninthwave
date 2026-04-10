@@ -12,6 +12,7 @@ export interface ItemMetric {
   id: string;
   state: string;
   ciRetryCount: number;
+  ciRetryCountTotal: number;
   /** Number of worker crash retries for this item. */
   retryCount: number;
   tool: string;
@@ -171,6 +172,7 @@ export function collectRunMetrics(
     id: item.id,
     state: item.state,
     ciRetryCount: item.ciFailCount,
+    ciRetryCountTotal: item.ciFailCountTotal,
     retryCount: item.retryCount,
     tool: aiTool,
     ...(item.prNumber != null ? { prNumber: item.prNumber } : {}),

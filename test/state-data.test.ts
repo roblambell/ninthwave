@@ -24,6 +24,7 @@ function makeItem(overrides: Partial<OrchestratorItem> = {}): OrchestratorItem {
     state: "queued",
     lastTransition: new Date().toISOString(),
     ciFailCount: 0,
+    ciFailCountTotal: 0,
     retryCount: 0,
     ...overrides,
   };

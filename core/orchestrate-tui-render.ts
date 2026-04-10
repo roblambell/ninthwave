@@ -89,6 +89,7 @@ export interface TuiDetailSnapshot {
   priority?: string;
   dependencies?: string[];
   ciFailCount?: number;
+  ciFailCountTotal?: number;
   retryCount?: number;
   descriptionBody?: string;
 }
@@ -440,6 +441,7 @@ export function renderTuiPanelFrameFromStatusItems(
           priority: detailSnapshot?.priority,
           dependencies: detailSnapshot?.dependencies,
           ciFailCount: detailSnapshot?.ciFailCount,
+          ciFailCountTotal: detailSnapshot?.ciFailCountTotal,
           retryCount: detailSnapshot?.retryCount,
           scrollOffset: tuiState.detailScrollOffset ?? 0,
           descriptionBody: detailSnapshot?.descriptionBody,
@@ -538,6 +540,7 @@ export function renderTuiPanelFrame(
       priority: item.workItem.priority,
       dependencies: item.workItem.dependencies,
       ciFailCount: item.ciFailCount,
+      ciFailCountTotal: item.ciFailCountTotal,
       retryCount: item.retryCount,
       descriptionBody: item.workItem.rawText,
     }]),
@@ -551,6 +554,7 @@ export function daemonStateToDetailSnapshots(state: DaemonState): Map<string, Tu
       priority: item.priority,
       dependencies: item.dependencies,
       ciFailCount: item.ciFailCount,
+      ciFailCountTotal: item.ciFailCountTotal ?? item.ciFailCount,
       retryCount: item.retryCount,
       descriptionBody: item.descriptionBody,
     }]),

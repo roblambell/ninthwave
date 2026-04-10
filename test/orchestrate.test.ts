@@ -2027,7 +2027,7 @@ describe("reconstructState", () => {
     }));
   });
 
-  it("restores ciFailCount from daemon state file", () => {
+  it("restores ciFailCountTotal from daemon state file while resetting ciFailCount", () => {
     const orch = new Orchestrator();
     orch.addItem(makeWorkItem("REC-1"));
     orch.getItem("REC-1")!.reviewCompleted = true;
@@ -2050,6 +2050,7 @@ describe("reconstructState", () => {
           title: "Test item",
           lastTransition: "2026-01-01T00:30:00Z",
           ciFailCount: 2,
+          ciFailCountTotal: 6,
           retryCount: 1,
         },
       ],
@@ -2058,7 +2059,8 @@ describe("reconstructState", () => {
     reconstructState(orch, tmpDir, wtDir, undefined, noopCheckPr, daemonState);
 
     const item = orch.getItem("REC-1")!;
-    expect(item.ciFailCount).toBe(2);
+    expect(item.ciFailCount).toBe(0);
+    expect(item.ciFailCountTotal).toBe(6);
     expect(item.retryCount).toBe(1);
 
     require("fs").rmSync(tmpDir, { recursive: true, force: true });
@@ -2081,6 +2083,7 @@ describe("reconstructState", () => {
 
     const item = orch.getItem("REC-2")!;
     expect(item.ciFailCount).toBe(0);
+    expect(item.ciFailCountTotal).toBe(0);
     expect(item.retryCount).toBe(0);
 
     require("fs").rmSync(tmpDir, { recursive: true, force: true });
@@ -2096,11 +2099,11 @@ describe("reconstructState", () => {
 
     const item = orch.getItem("REC-3")!;
     expect(item.ciFailCount).toBe(0);
+    expect(item.ciFailCountTotal).toBe(0);
     expect(item.retryCount).toBe(0);
   });
 
-  it("item with ciFailCount exceeding maxCiRetries goes stuck after recovery", () => {
-    // maxCiRetries defaults to 2; set ciFailCount to 3 so it exceeds the threshold
+  it("reconstructs old ciFailCount into ciFailCountTotal and keeps ciFailCount at 0", () => {
     const orch = new Orchestrator();
     orch.addItem(makeWorkItem("REC-4"));
     orch.getItem("REC-4")!.reviewCompleted = true;
@@ -2132,11 +2135,10 @@ describe("reconstructState", () => {
     reconstructState(orch, tmpDir, wtDir, undefined, failingCheckPr, daemonState);
 
     const item = orch.getItem("REC-4")!;
-    // ciFailCount restored to 6 which exceeds maxCiRetries (default 5)
-    expect(item.ciFailCount).toBe(6);
+    expect(item.ciFailCount).toBe(0);
+    expect(item.ciFailCountTotal).toBe(6);
     expect(item.state).toBe("ci-failed");
-    // Verify the restored count exceeds the threshold
-    expect(item.ciFailCount).toBeGreaterThan(orch.config.maxCiRetries);
+    expect(item.ciFailCount).toBeLessThanOrEqual(orch.config.maxCiRetries);
 
     // Run processTransitions with a snapshot where the item has CI failing
     // The orchestrator should transition it to stuck because ciFailCount > maxCiRetries
@@ -2153,7 +2155,9 @@ describe("reconstructState", () => {
       readyIds: [],
     };
     orch.processTransitions(snapshot);
-    expect(orch.getItem("REC-4")!.state).toBe("stuck");
+    expect(orch.getItem("REC-4")!.state).toBe("ci-failed");
+    expect(orch.getItem("REC-4")!.ciFailCount).toBe(0);
+    expect(orch.getItem("REC-4")!.ciFailCountTotal).toBe(6);
 
     require("fs").rmSync(tmpDir, { recursive: true, force: true });
   });
@@ -2525,8 +2529,8 @@ describe("reconstructState sessionParked persistence", () => {
   });
 });
 
-describe("serializeOrchestratorState includes ciFailCount", () => {
-  it("serializes ciFailCount in daemon state items", () => {
+describe("serializeOrchestratorState includes CI fail counters", () => {
+  it("serializes ciFailCount and ciFailCountTotal in daemon state items", () => {
     const { serializeOrchestratorState } = require("../core/daemon.ts");
     const item: OrchestratorItem = {
       id: "SER-1",
@@ -2535,12 +2539,14 @@ describe("serializeOrchestratorState includes ciFailCount", () => {
       prNumber: 10,
       lastTransition: "2026-01-01T00:00:00Z",
       ciFailCount: 5,
+      ciFailCountTotal: 9,
       retryCount: 2,
     };
 
     const state = serializeOrchestratorState([item], 9999, "2026-01-01T00:00:00Z");
     expect(state.items).toHaveLength(1);
     expect(state.items[0].ciFailCount).toBe(5);
+    expect(state.items[0].ciFailCountTotal).toBe(9);
     expect(state.items[0].retryCount).toBe(2);
   });
 });
@@ -2555,6 +2561,7 @@ describe("serializeOrchestratorState includes rebaseRequested", () => {
       prNumber: 20,
       lastTransition: "2026-01-01T00:00:00Z",
       ciFailCount: 0,
+      ciFailCountTotal: 0,
       retryCount: 0,
       rebaseRequested: true,
     };
@@ -2573,6 +2580,7 @@ describe("serializeOrchestratorState includes rebaseRequested", () => {
       prNumber: 21,
       lastTransition: "2026-01-01T00:00:00Z",
       ciFailCount: 0,
+      ciFailCountTotal: 0,
       retryCount: 0,
       rebaseRequested: false,
     };
@@ -2591,6 +2599,7 @@ describe("serializeOrchestratorState persists crew remote truth", () => {
       prNumber: undefined,
       lastTransition: "2026-04-01T10:00:00Z",
       ciFailCount: 0,
+      ciFailCountTotal: 0,
       retryCount: 0,
     };
     const remoteSnapshots = new Map<string, CrewRemoteItemSnapshot>([
@@ -2642,6 +2651,7 @@ describe("serializeOrchestratorState persists crew remote truth", () => {
       prNumber: undefined,
       lastTransition: "2026-04-01T10:00:00Z",
       ciFailCount: 0,
+      ciFailCountTotal: 0,
       retryCount: 0,
     };
 
@@ -9438,6 +9448,7 @@ function makeOrchestratorItem(id: string): OrchestratorItem {
     state: "queued",
     lastTransition: new Date().toISOString(),
     ciFailCount: 0,
+    ciFailCountTotal: 0,
     retryCount: 0,
     reviewCompleted: false,
     reviewCount: 0,

@@ -110,6 +110,7 @@ describe("collectRunMetrics", () => {
         workItem: makeWorkItem("T-1-1"),
         state: "done",
         ciFailCount: 0,
+        ciFailCountTotal: 0,
         lastTransition: new Date().toISOString(),
       },
       {
@@ -117,6 +118,7 @@ describe("collectRunMetrics", () => {
         workItem: makeWorkItem("T-1-2"),
         state: "stuck",
         ciFailCount: 2,
+        ciFailCountTotal: 2,
         lastTransition: new Date().toISOString(),
       },
     ];
@@ -147,6 +149,7 @@ describe("collectRunMetrics", () => {
         workItem: makeWorkItem("T-1-1"),
         state: "done",
         ciFailCount: 0,
+        ciFailCountTotal: 0,
         lastTransition: new Date().toISOString(),
       },
       {
@@ -154,6 +157,7 @@ describe("collectRunMetrics", () => {
         workItem: makeWorkItem("T-1-2"),
         state: "done",
         ciFailCount: 3,
+        ciFailCountTotal: 7,
         prNumber: 42,
         lastTransition: new Date().toISOString(),
       },
@@ -178,6 +182,7 @@ describe("collectRunMetrics", () => {
       id: "T-1-1",
       state: "done",
       ciRetryCount: 0,
+      ciRetryCountTotal: 0,
       retryCount: undefined,
       tool: "cursor",
     });
@@ -185,6 +190,7 @@ describe("collectRunMetrics", () => {
       id: "T-1-2",
       state: "done",
       ciRetryCount: 3,
+      ciRetryCountTotal: 7,
       retryCount: undefined,
       tool: "cursor",
       prNumber: 42,

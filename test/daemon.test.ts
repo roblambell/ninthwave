@@ -58,6 +58,7 @@ function makeOrchestratorItem(
     prNumber,
     lastTransition: "2026-03-24T10:00:00.000Z",
     ciFailCount: 0,
+    ciFailCountTotal: 0,
     retryCount: 0,
   };
 }
@@ -302,6 +303,7 @@ describe("state file management", () => {
           title: "Test",
           lastTransition: "2026-03-24T10:00:00.000Z",
           ciFailCount: 0,
+          ciFailCountTotal: 0,
           retryCount: 0,
         },
       ],
@@ -392,6 +394,7 @@ describe("serializeOrchestratorState", () => {
       descriptionBody: "## A-1-1\nTest item",
       lastTransition: "2026-03-24T10:00:00.000Z",
       ciFailCount: 0,
+      ciFailCountTotal: 0,
       retryCount: 0,
     });
     expect(state.items[1]).toEqual({
@@ -403,6 +406,7 @@ describe("serializeOrchestratorState", () => {
       descriptionBody: "## A-1-2\nTest item",
       lastTransition: "2026-03-24T10:00:00.000Z",
       ciFailCount: 0,
+      ciFailCountTotal: 0,
       retryCount: 0,
     });
   });
@@ -1249,7 +1253,7 @@ describe("readStateFile validation", () => {
       pid: 1,
       startedAt: "now",
       updatedAt: "now",
-      items: [{ id: "T-1", state: "implementing", prNumber: null, title: "Test", lastTransition: "now", ciFailCount: 0, retryCount: 0 }],
+      items: [{ id: "T-1", state: "implementing", prNumber: null, title: "Test", lastTransition: "now", ciFailCount: 0, ciFailCountTotal: 0, retryCount: 0 }],
     };
     io.files.set(stateFilePath("/project"), JSON.stringify(state));
     const result = readStateFile("/project", io);
