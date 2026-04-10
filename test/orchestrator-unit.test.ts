@@ -5774,7 +5774,7 @@ describe("session parking (H-SP-2)", () => {
     expect(actions.some((a) => a.type === "workspace-close")).toBe(false);
   });
 
-  it("parked item resumes on CHANGES_REQUESTED: respawnCiFixWorker called", () => {
+  it("parked item resumes on CHANGES_REQUESTED with queued feedback", () => {
     const orch = new Orchestrator({ mergeStrategy: "manual" });
     orch.addItem(makeWorkItem("H-1-1"));
     orch.hydrateState("H-1-1", "review-pending");
@@ -5793,8 +5793,39 @@ describe("session parking (H-SP-2)", () => {
     expect(orch.getItem("H-1-1")!.state).toBe("launching");
     expect(orch.getItem("H-1-1")!.reviewCompleted).toBe(false);
     expect(orch.getItem("H-1-1")!.sessionParked).toBe(false);
+    expect(orch.getItem("H-1-1")!.needsFeedbackResponse).toBe(true);
+    expect(orch.getItem("H-1-1")!.pendingFeedbackMessage).toContain("GitHub review requested changes on PR #42.");
     expect(actions.some((a) => a.type === "retry")).toBe(true);
     expect(actions.some((a) => a.type === "launch" && a.itemId === "H-1-1")).toBe(true);
+  });
+
+  it("parked CHANGES_REQUESTED review with comments queues the review comment text", () => {
+    const orch = new Orchestrator({ mergeStrategy: "manual" });
+    orch.addItem(makeWorkItem("H-1-1"));
+    orch.hydrateState("H-1-1", "review-pending");
+    const item = orch.getItem("H-1-1")!;
+    item.prNumber = 42;
+    item.reviewCompleted = true;
+    item.sessionParked = true;
+
+    const actions = orch.processTransitions(
+      snapshotWith([{
+        id: "H-1-1", ciStatus: "pass", prState: "open",
+        reviewDecision: "CHANGES_REQUESTED",
+        newComments: [
+          { body: "Please cover the failed relaunch path.", author: "reviewer", createdAt: "2026-01-15T12:01:00Z" },
+        ],
+      }]),
+      NOW,
+    );
+
+    expect(actions.some((a) => a.type === "retry" && a.itemId === "H-1-1")).toBe(true);
+    expect(actions.some((a) => a.type === "launch" && a.itemId === "H-1-1")).toBe(true);
+    expect(item.state).toBe("launching");
+    expect(item.reviewCompleted).toBe(false);
+    expect(item.needsFeedbackResponse).toBe(true);
+    expect(item.pendingFeedbackMessage).toContain("Please cover the failed relaunch path.");
+    expect(item.lastCommentCheck).toBe("2026-01-15T12:01:00Z");
   });
 
   it("strategy change to auto while parked: evaluateMerge transitions to merging", () => {

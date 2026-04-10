@@ -886,6 +886,31 @@ export class Orchestrator {
     return [{ type: "retry", itemId: item.id }];
   }
 
+  /** Collect human PR feedback for parked-item relaunches and advance the comment cursor. */
+  private collectParkedFeedback(item: OrchestratorItem, snap: ItemSnapshot | undefined): string | undefined {
+    if (!snap?.newComments?.length) return undefined;
+
+    const humanComments = snap.newComments.filter((comment) => {
+      if (AGENT_PR_COMMENT_RE.test(comment.body)) return false;
+      if (comment.body.includes(ORCHESTRATOR_STATUS_MARKER)) return false;
+      return true;
+    });
+
+    if (humanComments.length === 0) return undefined;
+
+    const latestCreatedAt = humanComments
+      .map((comment) => comment.createdAt)
+      .sort()
+      .pop();
+    if (latestCreatedAt) {
+      item.lastCommentCheck = latestCreatedAt;
+    }
+
+    return humanComments
+      .map((comment) => `@${comment.author} commented on PR #${item.prNumber}:\n\n${comment.body}`)
+      .join("\n\n");
+  }
+
   /** Handle ci-failed state: retry circuit breaker, recovery, notification, unresponsive detection. */
   private handleCiFailed(
     item: OrchestratorItem,
@@ -1080,29 +1105,14 @@ export class Orchestrator {
     // Resume parked session: human requested changes on a parked item.
     // Reset reviewCompleted so the worker can address the feedback, and respawn.
     if (item.sessionParked && snap?.reviewDecision === "CHANGES_REQUESTED") {
-      item.reviewCompleted = false;
-      return this.respawnCiFixWorker(item);
+      const feedbackMessage = this.collectParkedFeedback(item, snap)
+        ?? `GitHub review requested changes on PR #${item.prNumber}.`;
+      return this.respawnForFeedback(item, feedbackMessage);
     }
 
-    if (item.sessionParked && snap?.newComments?.length) {
-      const humanComments = snap.newComments.filter((comment) => {
-        if (AGENT_PR_COMMENT_RE.test(comment.body)) return false;
-        if (comment.body.includes(ORCHESTRATOR_STATUS_MARKER)) return false;
-        return true;
-      });
-
-      if (humanComments.length > 0) {
-        const latestCreatedAt = humanComments
-          .map((comment) => comment.createdAt)
-          .sort()
-          .pop();
-        if (latestCreatedAt) {
-          item.lastCommentCheck = latestCreatedAt;
-        }
-
-        const feedbackMessage = humanComments
-          .map((comment) => `@${comment.author} commented on PR #${item.prNumber}:\n\n${comment.body}`)
-          .join("\n\n");
+    if (item.sessionParked) {
+      const feedbackMessage = this.collectParkedFeedback(item, snap);
+      if (feedbackMessage) {
         return this.respawnForFeedback(item, feedbackMessage);
       }
     }
