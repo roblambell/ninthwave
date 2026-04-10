@@ -108,6 +108,10 @@ export interface OrchestratorItem {
   rebaseNudgeCount?: number;
   /** Set when a CI failure notification failed because no worker was running. Signals executeLaunch to force-launch a worker even when an existing PR is found. Cleared after launch. */
   needsCiFix?: boolean;
+  /** Set when parked PR feedback requires a worker relaunch. Cleared after launch. */
+  needsFeedbackResponse?: boolean;
+  /** Pending human PR feedback delivered to the next relaunched worker. Cleared after launch. */
+  pendingFeedbackMessage?: string;
   /** Absolute path to the worktree directory. Preserved for stuck items so users can inspect partial work. */
   worktreePath?: string;
   /** SHA of the merge commit on the repo default branch after PR is merged. */

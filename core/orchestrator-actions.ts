@@ -221,9 +221,13 @@ export function executeLaunch(
     return { success: false, error: validation.failureReason };
   }
 
-  // Skip the "existing PR detected" shortcut when needsCiFix is set --
-  // we need to launch a live worker to fix CI, not just track in ci-pending.
-  if (validation.status === "skip-with-pr" && !item.needsCiFix) {
+  const hasCiFix = item.needsCiFix === true;
+  const hasFeedback = item.needsFeedbackResponse === true;
+  const feedbackMessage = item.pendingFeedbackMessage;
+
+  // Skip the "existing PR detected" shortcut only when no relaunch reason is set.
+  // CI fixes and parked-review feedback both need a live worker even when a PR exists.
+  if (validation.status === "skip-with-pr" && !hasCiFix && !hasFeedback) {
     item.prNumber = validation.existingPrNumber;
     orch.transition(item, "ci-pending");
     return { success: true };
@@ -264,8 +268,10 @@ export function executeLaunch(
   // When needsCiFix is set, force worker launch even if an existing PR is
   // found. This ensures CI failures on restart are addressed by a live worker
   // rather than silently tracked in ci-pending with no one to fix them (H-WR-1).
-  const forceWorker = item.needsCiFix === true;
+  const forceWorker = hasCiFix || hasFeedback;
   item.needsCiFix = false;
+  item.needsFeedbackResponse = false;
+  item.pendingFeedbackMessage = undefined;
 
   const selectedTool = getNextTool(ctx);
   try {
@@ -313,6 +319,17 @@ export function executeLaunch(
         item,
         "launch",
         "[ORCHESTRATOR] CI Fix Request: CI failed on your PR -- please investigate the failure, fix the issue, and push a candidate fix.",
+        ctx,
+        deps,
+      );
+    }
+
+    if (hasFeedback && feedbackMessage) {
+      deliverToImplementerInbox(
+        orch,
+        item,
+        "launch",
+        `[ORCHESTRATOR] Review Feedback:\n\n${feedbackMessage}`,
         ctx,
         deps,
       );

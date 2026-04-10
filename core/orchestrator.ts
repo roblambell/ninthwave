@@ -112,6 +112,9 @@ const FAILURE_REASON_STATES: Set<OrchestratorItemState> = new Set([
   "ci-failed", "stuck", "fix-forward-failed",
 ]);
 
+const AGENT_PR_COMMENT_RE = /\*\*\[(Orchestrator|Implementer|Reviewer|Forward-Fixer|Rebaser)\]/;
+const ORCHESTRATOR_STATUS_MARKER = "<!-- ninthwave-orchestrator-status -->";
+
 // ── Orchestrator class ───────────────────────────────────────────────
 
 export class Orchestrator {
@@ -872,6 +875,16 @@ export class Orchestrator {
     return [{ type: "retry", itemId: item.id }];
   }
 
+  /** Respawn a worker to address human PR feedback on a parked item. */
+  private respawnForFeedback(item: OrchestratorItem, message: string): Action[] {
+    item.needsFeedbackResponse = true;
+    item.pendingFeedbackMessage = message;
+    item.notAliveCount = 0;
+    item.lastAliveAt = undefined;
+    this.transition(item, "ready");
+    return [{ type: "retry", itemId: item.id }];
+  }
+
   /** Handle ci-failed state: retry circuit breaker, recovery, notification, unresponsive detection. */
   private handleCiFailed(
     item: OrchestratorItem,
@@ -1068,6 +1081,29 @@ export class Orchestrator {
     if (item.sessionParked && snap?.reviewDecision === "CHANGES_REQUESTED") {
       item.reviewCompleted = false;
       return this.respawnCiFixWorker(item);
+    }
+
+    if (item.sessionParked && snap?.newComments?.length) {
+      const humanComments = snap.newComments.filter((comment) => {
+        if (AGENT_PR_COMMENT_RE.test(comment.body)) return false;
+        if (comment.body.includes(ORCHESTRATOR_STATUS_MARKER)) return false;
+        return true;
+      });
+
+      if (humanComments.length > 0) {
+        const latestCreatedAt = humanComments
+          .map((comment) => comment.createdAt)
+          .sort()
+          .pop();
+        if (latestCreatedAt) {
+          item.lastCommentCheck = latestCreatedAt;
+        }
+
+        const feedbackMessage = humanComments
+          .map((comment) => `@${comment.author} commented on PR #${item.prNumber}:\n\n${comment.body}`)
+          .join("\n\n");
+        return this.respawnForFeedback(item, feedbackMessage);
+      }
     }
 
     // CI status changes -- worker pushed fixes after review feedback.
@@ -1495,9 +1531,9 @@ export class Orchestrator {
 
     for (const comment of snap.newComments) {
       // Skip comments from any ninthwave agent (Orchestrator, Implementer, Reviewer, Forward-Fixer, Rebaser)
-      if (/\*\*\[(Orchestrator|Implementer|Reviewer|Forward-Fixer|Rebaser)\]/.test(comment.body)) continue;
+      if (AGENT_PR_COMMENT_RE.test(comment.body)) continue;
       // Skip orchestrator HTML status markers
-      if (comment.body.includes("<!-- ninthwave-orchestrator-status -->")) continue;
+      if (comment.body.includes(ORCHESTRATOR_STATUS_MARKER)) continue;
 
       actions.push({
         type: "react-to-comment",
