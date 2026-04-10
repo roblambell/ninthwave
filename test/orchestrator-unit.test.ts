@@ -2252,6 +2252,182 @@ describe("handleReviewPending", () => {
   });
 });
 
+describe("CI lifecycle observability events (H-CF-7)", () => {
+  it("emits ci-failure at each ciFailCount increment site", () => {
+    const cases = [
+      {
+        name: "ci-pending",
+        setup: (orch: Orchestrator) => {
+          orch.addItem(makeWorkItem("H-1-1"));
+          orch.getItem("H-1-1")!.reviewCompleted = true;
+          orch.hydrateState("H-1-1", "ci-pending");
+          orch.getItem("H-1-1")!.prNumber = 42;
+        },
+        snapshot: { id: "H-1-1", ciStatus: "fail" as const, prState: "open" as const, isMergeable: true },
+        failureReason: "ci-failed: CI checks failed",
+      },
+      {
+        name: "ci-passed",
+        setup: (orch: Orchestrator) => {
+          orch.addItem(makeWorkItem("H-1-1"));
+          orch.getItem("H-1-1")!.reviewCompleted = true;
+          orch.hydrateState("H-1-1", "ci-passed");
+          orch.getItem("H-1-1")!.prNumber = 42;
+        },
+        snapshot: { id: "H-1-1", ciStatus: "fail" as const, prState: "open" as const, isMergeable: true },
+        failureReason: "ci-failed: CI checks failed",
+      },
+      {
+        name: "review-pending",
+        setup: (orch: Orchestrator) => {
+          orch.addItem(makeWorkItem("H-1-1"));
+          orch.getItem("H-1-1")!.reviewCompleted = false;
+          orch.hydrateState("H-1-1", "review-pending");
+          orch.getItem("H-1-1")!.prNumber = 42;
+        },
+        snapshot: { id: "H-1-1", ciStatus: "fail" as const, prState: "open" as const, isMergeable: true },
+        failureReason: "ci-failed: CI checks failed",
+      },
+      {
+        name: "reviewing",
+        setup: (orch: Orchestrator) => {
+          orch.addItem(makeWorkItem("H-1-1"));
+          orch.getItem("H-1-1")!.reviewCompleted = false;
+          orch.hydrateState("H-1-1", "reviewing");
+          orch.getItem("H-1-1")!.prNumber = 42;
+        },
+        snapshot: { id: "H-1-1", ciStatus: "fail" as const, prState: "open" as const, isMergeable: true },
+        failureReason: "ci-failed: CI regression during review",
+      },
+    ];
+
+    for (const testCase of cases) {
+      const events: Array<{ itemId: string; event: string; data?: Record<string, unknown> }> = [];
+      const orch = new Orchestrator({
+        mergeStrategy: "auto",
+        onEvent: (itemId, event, data) => events.push({ itemId, event, data }),
+      });
+      testCase.setup(orch);
+
+      orch.processTransitions(snapshotWith([testCase.snapshot]));
+
+      expect(
+        events.find((event) => event.event === "ci-failure"),
+        `missing ci-failure event for ${testCase.name}`,
+      ).toEqual(expect.objectContaining({
+        itemId: "H-1-1",
+        event: "ci-failure",
+        data: expect.objectContaining({
+          ciFailCount: 1,
+          failureReason: testCase.failureReason,
+        }),
+      }));
+    }
+  });
+
+  it("emits ci-retry-limit with the parked flag", () => {
+    for (const parked of [false, true]) {
+      const events: Array<{ itemId: string; event: string; data?: Record<string, unknown> }> = [];
+      const orch = new Orchestrator({
+        maxCiRetries: 1,
+        onEvent: (itemId, event, data) => events.push({ itemId, event, data }),
+      });
+      orch.addItem(makeWorkItem("H-1-1"));
+      orch.getItem("H-1-1")!.reviewCompleted = true;
+      orch.hydrateState("H-1-1", "ci-failed");
+      orch.getItem("H-1-1")!.prNumber = 42;
+      orch.getItem("H-1-1")!.ciFailCount = 2;
+
+      orch.processTransitions(
+        snapshotWith([{ id: "H-1-1", ciStatus: "fail", prState: "open", workerAlive: parked }]),
+      );
+
+      expect(events.find((event) => event.event === "ci-retry-limit")).toEqual(expect.objectContaining({
+        itemId: "H-1-1",
+        event: "ci-retry-limit",
+        data: expect.objectContaining({
+          ciFailCount: 2,
+          maxCiRetries: 1,
+          parked,
+        }),
+      }));
+    }
+  });
+
+  it("emits ci-fix-ack-timeout before respawning the worker", () => {
+    const events: Array<{ itemId: string; event: string; data?: Record<string, unknown> }> = [];
+    const orch = new Orchestrator({
+      onEvent: (itemId, event, data) => events.push({ itemId, event, data }),
+    });
+    orch.addItem(makeWorkItem("H-1-1"));
+    orch.getItem("H-1-1")!.reviewCompleted = true;
+    orch.hydrateState("H-1-1", "ci-failed");
+    orch.getItem("H-1-1")!.prNumber = 42;
+    orch.getItem("H-1-1")!.ciFailCount = 1;
+    orch.getItem("H-1-1")!.ciFailureNotified = true;
+    orch.getItem("H-1-1")!.ciNotifyWallAt = "2026-01-15T10:00:00Z";
+
+    const actions = orch.processTransitions(
+      snapshotWith([{
+        id: "H-1-1",
+        ciStatus: "fail",
+        prState: "open",
+        workerAlive: true,
+        lastHeartbeat: {
+          id: "H-1-1",
+          progress: 10,
+          label: "Old heartbeat",
+          ts: "2026-01-15T09:59:00Z",
+        },
+      }]),
+      NOW,
+    );
+
+    expect(events.find((event) => event.event === "ci-fix-ack-timeout")).toEqual(expect.objectContaining({
+      itemId: "H-1-1",
+      event: "ci-fix-ack-timeout",
+      data: expect.objectContaining({
+        ciFailCount: 1,
+      }),
+    }));
+    expect(events.find((event) => event.event === "worker-respawn")).toEqual(expect.objectContaining({
+      itemId: "H-1-1",
+      event: "worker-respawn",
+      data: expect.objectContaining({
+        trigger: "ci-fix-ack-timeout",
+        ciFailCount: 1,
+      }),
+    }));
+    expect(actions.some((action) => action.type === "retry")).toBe(true);
+  });
+
+  it("emits worker-respawn with the parked-ci-failure trigger", () => {
+    const events: Array<{ itemId: string; event: string; data?: Record<string, unknown> }> = [];
+    const orch = new Orchestrator({
+      mergeStrategy: "manual",
+      onEvent: (itemId, event, data) => events.push({ itemId, event, data }),
+    });
+    orch.addItem(makeWorkItem("H-1-1"));
+    orch.hydrateState("H-1-1", "review-pending");
+    orch.getItem("H-1-1")!.prNumber = 42;
+    orch.getItem("H-1-1")!.reviewCompleted = true;
+    orch.getItem("H-1-1")!.sessionParked = true;
+
+    orch.processTransitions(
+      snapshotWith([{ id: "H-1-1", ciStatus: "fail", prState: "open" }]),
+    );
+
+    expect(events.find((event) => event.event === "worker-respawn")).toEqual(expect.objectContaining({
+      itemId: "H-1-1",
+      event: "worker-respawn",
+      data: expect.objectContaining({
+        trigger: "parked-ci-failure",
+        ciFailCount: 1,
+      }),
+    }));
+  });
+});
+
 // ── Full multi-round review cycle (H-RX-1) ────────────────────────────
 
 describe("multi-round review cycle", () => {

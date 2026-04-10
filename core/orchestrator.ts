@@ -462,6 +462,31 @@ export class Orchestrator {
     };
   }
 
+  private emitCiFailureEvent(item: OrchestratorItem): void {
+    this.config.onEvent?.(item.id, "ci-failure", {
+      ciFailCount: item.ciFailCount,
+      failureReason: item.failureReason,
+    });
+  }
+
+  private emitCiRetryLimitEvent(item: OrchestratorItem, parked: boolean): void {
+    this.config.onEvent?.(item.id, "ci-retry-limit", {
+      ciFailCount: item.ciFailCount,
+      maxCiRetries: this.config.maxCiRetries,
+      parked,
+    });
+  }
+
+  private emitWorkerRespawnEvent(
+    item: OrchestratorItem,
+    trigger: "ci-fix-ack-timeout" | "parked-ci-failure" | "worker-dead",
+  ): void {
+    this.config.onEvent?.(item.id, "worker-respawn", {
+      trigger,
+      ciFailCount: item.ciFailCount,
+    });
+  }
+
   // ── Cross-cutting interceptors ─────────────────────────────────────
   // Run before state-specific handlers. Order matters:
   // 1. External merge takes priority over everything
@@ -868,7 +893,11 @@ export class Orchestrator {
    * ci-failed handler) and stuckOrRetry in the implementing handler (catches
    * workers that die immediately after relaunch).
    */
-  private respawnCiFixWorker(item: OrchestratorItem): Action[] {
+  private respawnCiFixWorker(
+    item: OrchestratorItem,
+    trigger: "ci-fix-ack-timeout" | "parked-ci-failure" | "worker-dead",
+  ): Action[] {
+    this.emitWorkerRespawnEvent(item, trigger);
     item.needsCiFix = true;
     item.notAliveCount = 0;
     item.lastAliveAt = undefined;
@@ -926,10 +955,12 @@ export class Orchestrator {
     if (item.ciFailCount > this.config.maxCiRetries) {
       this.transition(item, "stuck");
       item.failureReason = `ci-failed: exceeded max CI retries (${this.config.maxCiRetries})`;
-      if (snap?.workerAlive) {
+      const parked = snap?.workerAlive === true;
+      if (parked) {
         item.sessionParked = true;
-        return [];
       }
+      this.emitCiRetryLimitEvent(item, parked);
+      if (parked) return [];
       return [{ type: "workspace-close", itemId: item.id }];
     }
 
@@ -976,13 +1007,16 @@ export class Orchestrator {
     const liveness = this.checkWorkerLiveness(item, snap);
     if (liveness === "dead") {
       item.failureReason = `worker not responding (${item.notAliveCount}/${NOT_ALIVE_THRESHOLD})`;
-      return this.respawnCiFixWorker(item);
+      return this.respawnCiFixWorker(item, "worker-dead");
     }
 
     // Layer 2: no ack after notification (process alive but AI exited)
     if (sd?.ciFailureNotified && sd.ciNotifyWallAt) {
       if (isCiFixAckTimedOut(sd.ciNotifyWallAt, snap?.lastHeartbeat?.ts, now, TIMEOUTS.ciFixAck)) {
-        return this.respawnCiFixWorker(item);
+        this.config.onEvent?.(item.id, "ci-fix-ack-timeout", {
+          ciFailCount: item.ciFailCount,
+        });
+        return this.respawnCiFixWorker(item, "ci-fix-ack-timeout");
       }
     }
 
@@ -1013,6 +1047,7 @@ export class Orchestrator {
       item.failureReason = snap?.isMergeable === false
         ? "ci-failed: merge conflicts with main"
         : "ci-failed: CI checks failed";
+      this.emitCiFailureEvent(item);
 
       const isMergeConflict = snap?.isMergeable === false;
       if (isMergeConflict) {
@@ -1056,6 +1091,7 @@ export class Orchestrator {
       item.failureReason = snap?.isMergeable === false
         ? "ci-failed: merge conflicts with main"
         : "ci-failed: CI checks failed";
+      this.emitCiFailureEvent(item);
 
       const isMergeConflict = snap?.isMergeable === false;
       if (isMergeConflict) {
@@ -1145,11 +1181,12 @@ export class Orchestrator {
       item.failureReason = isMergeConflict
         ? "ci-failed: merge conflicts with main"
         : "ci-failed: CI checks failed";
+      this.emitCiFailureEvent(item);
 
       // Fast-path: parked items have no live workspace, so skip the
       // notification/ack-timeout cycle and respawn a CI-fix worker directly.
       if (wasParked) {
-        return this.respawnCiFixWorker(item);
+        return this.respawnCiFixWorker(item, "parked-ci-failure");
       }
 
       if (isMergeConflict) {
@@ -1222,6 +1259,7 @@ export class Orchestrator {
       item.failureReason = isMergeConflict
         ? "ci-failed: merge conflicts with main"
         : "ci-failed: CI regression during review";
+      this.emitCiFailureEvent(item);
       actions.push({ type: "clean-review", itemId: item.id });
       if (isMergeConflict) {
         actions.push(...this.planRebaseConflictAction(
