@@ -184,7 +184,7 @@ export function launchAiSession(
   const stateDir = userStateDir(projectRoot);
   const buildCmd = mux.type === "headless" ? profile.buildHeadlessCmd : profile.buildLaunchCmd;
   const launchOverride = options.launchOverride ?? resolveTestLaunchOverride();
-  const { cmd } = buildCmd({ wsName, projectRoot, agentName, promptFile, id, stateDir, launchOverride }, deps);
+  const { cmd } = buildCmd({ wsName, projectRoot, worktreePath, agentName, promptFile, id, stateDir, launchOverride }, deps);
 
   const wsRef = mux.launchWorkspace(worktreePath, cmd, id);
   if (!wsRef) {

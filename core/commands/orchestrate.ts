@@ -29,7 +29,7 @@ import { parseWorkItems } from "../parser.ts";
 import { scanExternalPRs } from "./pr-monitor.ts";
 import { launchSingleItem, launchReviewWorker, launchRebaserWorker, launchForwardFixerWorker, validatePickupCandidate } from "./launch.ts";
 import { cleanStaleBranchForReuse } from "../branch-cleanup.ts";
-import { selectAiTools, detectInstalledAITools } from "../tool-select.ts";
+import { selectAiTools, detectInstalledAITools, validateAgentFiles } from "../tool-select.ts";
 import { cleanSingleWorktree } from "./clean.ts";
 import { writeInbox, type InboxSnapshot } from "./inbox.ts";
 import { prMerge, prComment, checkPrMergeable, isPrBlocked, getRepoOwner, applyGithubToken, fetchTrustedPrCommentsAsync, upsertOrchestratorComment, setCommitStatus as ghSetCommitStatus, prHeadSha, getMergeCommitSha as ghGetMergeCommitSha, checkCommitCI as ghCheckCommitCI, checkCommitCIAsync as ghCheckCommitCIAsync, getDefaultBranch as ghGetDefaultBranch, ensureDomainLabels, listPrComments, updatePrComment, ghFailureKindLabel, getPrBaseBranch as ghGetPrBaseBranch, getPrBaseAndState as ghGetPrBaseAndState, retargetPrBase as ghRetargetPrBase, queryRateLimitAsync as ghQueryRateLimitAsync } from "../gh.ts";
@@ -1581,6 +1581,7 @@ export async function cmdOrchestrate(
       installedTools,
       savedToolIds: interactiveStartupConfig.savedToolIds,
       skipToolStep: interactiveStartupConfig.skipToolStep,
+      projectRoot,
     });
     if (!result) {
       process.exit(0);
@@ -1804,6 +1805,7 @@ export async function cmdOrchestrate(
 
   // Select AI tool(s) (interactive prompt when multiple tools installed)
   const aiTools = await selectAiTools({ toolOverride, projectRoot, isInteractive });
+  validateAgentFiles(aiTools, projectRoot);
   const aiTool = aiTools[0]!;
 
   // Compute hub repo NWO once at startup for absolute agent-link URLs in PR comments

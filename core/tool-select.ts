@@ -3,7 +3,7 @@
 // prompt-based flow that remembers the last used tool.
 
 import { createInterface } from "readline";
-import { AI_TOOL_PROFILES, isAiToolId } from "./ai-tools.ts";
+import { AI_TOOL_PROFILES, isAiToolId, getToolProfile, hasAgentFiles } from "./ai-tools.ts";
 import type { AiToolProfile } from "./ai-tools.ts";
 import { loadUserConfig, saveUserConfig } from "./config.ts";
 import type { UserConfig } from "./config.ts";
@@ -184,6 +184,26 @@ export async function selectAiTools(
   const names = result.map(id => AI_TOOL_PROFILES.find(p => p.id === id)?.displayName ?? id);
   info(`Using ${names.join(", ")}${result.length > 1 ? " (round-robin)" : ""}`);
   return result;
+}
+
+// ── Validation ──────────────────────────────────────────────────────
+
+/**
+ * Warn when selected tools are missing agent files in the project.
+ * Non-fatal: workers still attempt to launch (native --agent discovery
+ * may still work), but the user knows to run `nw init` if needed.
+ */
+export function validateAgentFiles(toolIds: string[], projectRoot: string): void {
+  for (const toolId of toolIds) {
+    if (!isAiToolId(toolId)) continue;
+    if (!hasAgentFiles(toolId, projectRoot)) {
+      const profile = getToolProfile(toolId);
+      warn(
+        `No agent files found for ${profile.displayName} at ${profile.targetDir}/. ` +
+        `Run "nw init" to generate agent artifacts.`,
+      );
+    }
+  }
 }
 
 /**

@@ -12,6 +12,7 @@ import { PRIORITY_NUM } from "./types.ts";
 import type { MergeStrategy } from "./orchestrator.ts";
 import type { ConnectionAction } from "./commands/crew.ts";
 import { formatInvalidCrewCodeMessage, parseCrewCode } from "./commands/crew.ts";
+import { hasAgentFiles, isAiToolId } from "./ai-tools.ts";
 import type { AiToolProfile } from "./ai-tools.ts";
 import type { StartupItemsRefreshResult } from "./startup-items.ts";
 import {
@@ -69,6 +70,8 @@ export interface InteractiveDeps {
   savedToolIds?: string[];
   /** When true, skip the AI tool step (tool already determined by --tool or user config). */
   skipToolStep?: boolean;
+  /** Project root for agent file validation on the tool selection screen. */
+  projectRoot?: string;
 }
 
 export interface StartupPersistenceOptions {
@@ -521,9 +524,10 @@ export async function runTuiSelectionFlow(
       defaultReviewMode: deps.defaultReviewMode,
       defaultSettings: deps.defaultSettings,
       showConnectionStep: deps.showConnectionStep,
-      installedTools: deps.skipToolStep ? undefined : deps.installedTools,
+      installedTools: deps.installedTools,
       refreshItems: deps.refreshStartupItems,
       savedToolIds: deps.savedToolIds,
+      projectRoot: deps.projectRoot,
     });
     if (!result || result.cancelled) return null;
 
@@ -598,7 +602,7 @@ async function runReadlineFlow(
   // Step 2: AI tool (conditional, multi-select)
   let aiTool: string | undefined;
   let aiTools: string[] | undefined;
-  const tools = deps.skipToolStep ? [] : (deps.installedTools ?? []);
+  const tools = deps.installedTools ?? [];
   if (tools.length >= 2) {
     const savedIds = deps.savedToolIds ?? [];
     const selected = new Set<number>();
@@ -618,7 +622,13 @@ async function runReadlineFlow(
         const t = tools[i]!;
         const check = selected.has(i) ? `[x]` : `[ ]`;
         console.log(`  ${BOLD}${i + 1}${RESET}. ${check} ${t.displayName}`);
-        console.log(`     ${DIM}Model defined in ${t.targetDir}/ agent files${RESET}`);
+        const seeded = deps.projectRoot && isAiToolId(t.id) ? hasAgentFiles(t.id, deps.projectRoot) : true;
+        if (seeded) {
+          console.log(`     ${DIM}Model defined in ${t.targetDir}/ agent files${RESET}`);
+        } else {
+          console.log(`     ${YELLOW}No agent files at ${t.targetDir}/${RESET} ${DIM}-- run "nw init"${RESET}`);
+        }
+
       }
     };
 
