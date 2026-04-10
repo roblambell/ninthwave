@@ -1,0 +1,9 @@
+#!/bin/sh
+
+# Deterministic high-memory fixture for system tests that exercise
+# the memory-aware WIP limiter on macOS.
+cat <<'EOF'
+Mach Virtual Memory Statistics: (page size of 16384 bytes)
+Pages free:                               400000.
+Pages inactive:                           400000.
+EOF

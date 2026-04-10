@@ -3126,7 +3126,7 @@ describe("processComments (via processTransitions)", () => {
         ciStatus: "pending",
         prState: "open",
         newComments: [
-          { body: "Please fix the error handling", author: "reviewer", createdAt: "2026-01-15T12:01:00Z" },
+          { id: 101, body: "Please fix the error handling", author: "reviewer", createdAt: "2026-01-15T12:01:00Z", commentType: "issue" },
         ],
       }]),
     );
@@ -3135,6 +3135,32 @@ describe("processComments (via processTransitions)", () => {
     expect(sendMsg).toBeDefined();
     expect(sendMsg!.message).toContain("@reviewer");
     expect(sendMsg!.message).toContain("Please fix the error handling");
+  });
+
+  it("processComments emits react-to-comment for each human comment", () => {
+    const orch = new Orchestrator();
+    orch.addItem(makeWorkItem("H-1-1"));
+    orch.getItem("H-1-1")!.reviewCompleted = true;
+    orch.hydrateState("H-1-1", "ci-pending");
+    orch.getItem("H-1-1")!.prNumber = 42;
+    orch.getItem("H-1-1")!.workspaceRef = "workspace:1";
+
+    const actions = orch.processTransitions(
+      snapshotWith([{
+        id: "H-1-1",
+        ciStatus: "pending",
+        prState: "open",
+        newComments: [
+          { id: 201, body: "First comment", author: "alice", createdAt: "2026-01-15T12:01:00Z", commentType: "issue" },
+          { id: 202, body: "Second comment", author: "bob", createdAt: "2026-01-15T12:02:00Z", commentType: "review" },
+        ],
+      }]),
+    );
+
+    expect(actions.filter((a) => a.type === "react-to-comment" && a.itemId === "H-1-1")).toEqual([
+      { type: "react-to-comment", itemId: "H-1-1", commentId: 201, commentType: "issue" },
+      { type: "react-to-comment", itemId: "H-1-1", commentId: 202, commentType: "review" },
+    ]);
   });
 
   it("does not generate action for untrusted comments (not in snapshot)", () => {
@@ -3175,7 +3201,7 @@ describe("processComments (via processTransitions)", () => {
         ciStatus: "pending",
         prState: "open",
         newComments: [
-          { body: "Looks good overall", author: "reviewer", createdAt: "2026-01-15T12:01:00Z" },
+          { id: 301, body: "Looks good overall", author: "reviewer", createdAt: "2026-01-15T12:01:00Z", commentType: "issue" },
         ],
       }]),
     );
@@ -3209,7 +3235,7 @@ describe("processComments (via processTransitions)", () => {
         ciStatus: "pending",
         prState: "open",
         newComments: [
-          { body: "Please rebase onto main", author: "reviewer", createdAt: "2026-01-15T12:01:00Z" },
+          { id: 401, body: "Please rebase onto main", author: "reviewer", createdAt: "2026-01-15T12:01:00Z", commentType: "issue" },
         ],
       }]),
     );
@@ -3235,7 +3261,7 @@ describe("processComments (via processTransitions)", () => {
         id: "H-1-1",
         workerAlive: true,
         newComments: [
-          { body: "Some comment", author: "reviewer", createdAt: "2026-01-15T12:01:00Z" },
+          { id: 501, body: "Some comment", author: "reviewer", createdAt: "2026-01-15T12:01:00Z", commentType: "issue" },
         ],
       }]),
       NOW,
@@ -3259,7 +3285,7 @@ describe("processComments (via processTransitions)", () => {
         ciStatus: "pending",
         prState: "open",
         newComments: [
-          { body: "Fix this", author: "reviewer", createdAt: "2026-01-15T12:01:00Z" },
+          { id: 601, body: "Fix this", author: "reviewer", createdAt: "2026-01-15T12:01:00Z", commentType: "issue" },
         ],
       }]),
     );
@@ -3281,13 +3307,14 @@ describe("processComments (via processTransitions)", () => {
         ciStatus: "pending",
         prState: "open",
         newComments: [
-          { body: "**[Orchestrator]** Auto-merged PR #42 for H-1-1.", author: "bot", createdAt: "2026-01-15T12:01:00Z" },
+          { id: 701, body: "**[Orchestrator]** Auto-merged PR #42 for H-1-1.", author: "bot", createdAt: "2026-01-15T12:01:00Z", commentType: "issue" },
         ],
       }]),
     );
 
     expect(actions.filter((a) => a.type === "send-message")).toHaveLength(0);
     expect(actions.filter((a) => a.type === "daemon-rebase")).toHaveLength(0);
+    expect(actions.filter((a) => a.type === "react-to-comment")).toHaveLength(0);
   });
 
   it("processes comments in all active PR states", () => {
@@ -3314,7 +3341,7 @@ describe("processComments (via processTransitions)", () => {
           prState: "open",
           isMergeable: true,
           newComments: [
-            { body: "Please address this", author: "reviewer", createdAt: "2026-01-15T12:01:00Z" },
+            { id: 801, body: "Please address this", author: "reviewer", createdAt: "2026-01-15T12:01:00Z", commentType: "issue" },
           ],
         }]),
       );
@@ -3341,7 +3368,7 @@ describe("processComments (via processTransitions)", () => {
         prState: "open",
         isMergeable: false, // triggers daemon-rebase from CI failure logic
         newComments: [
-          { body: "Please rebase", author: "reviewer", createdAt: "2026-01-15T12:01:00Z" },
+          { id: 901, body: "Please rebase", author: "reviewer", createdAt: "2026-01-15T12:01:00Z", commentType: "issue" },
         ],
       }]),
     );
@@ -3365,8 +3392,8 @@ describe("processComments (via processTransitions)", () => {
         ciStatus: "pending",
         prState: "open",
         newComments: [
-          { body: "First comment", author: "alice", createdAt: "2026-01-15T12:01:00Z" },
-          { body: "Second comment", author: "bob", createdAt: "2026-01-15T12:02:00Z" },
+          { id: 1001, body: "First comment", author: "alice", createdAt: "2026-01-15T12:01:00Z", commentType: "issue" },
+          { id: 1002, body: "Second comment", author: "bob", createdAt: "2026-01-15T12:02:00Z", commentType: "review" },
         ],
       }]),
     );
@@ -3393,13 +3420,14 @@ describe("processComments (via processTransitions)", () => {
         ciStatus: "pending",
         prState: "open",
         newComments: [
-          { body: "<!-- ninthwave-orchestrator-status -->\n| Event | Time |\n|---|---|\n| CI pending | 12:00 |", author: "bot", createdAt: "2026-01-15T12:01:00Z" },
+          { id: 1101, body: "<!-- ninthwave-orchestrator-status -->\n| Event | Time |\n|---|---|\n| CI pending | 12:00 |", author: "bot", createdAt: "2026-01-15T12:01:00Z", commentType: "issue" },
         ],
       }]),
     );
 
     expect(actions.filter((a) => a.type === "send-message")).toHaveLength(0);
     expect(actions.filter((a) => a.type === "daemon-rebase")).toHaveLength(0);
+    expect(actions.filter((a) => a.type === "react-to-comment")).toHaveLength(0);
   });
 
   it("skips implementer self-comments", () => {
@@ -3416,16 +3444,17 @@ describe("processComments (via processTransitions)", () => {
         ciStatus: "pending",
         prState: "open",
         newComments: [
-          { body: "**[Implementer](https://github.com/org/repo/blob/main/agents/implementer.md)** Addressed feedback: fixed error handling.", author: "bot", createdAt: "2026-01-15T12:01:00Z" },
+          { id: 1201, body: "**[Implementer](https://github.com/org/repo/blob/main/agents/implementer.md)** Addressed feedback: fixed error handling.", author: "bot", createdAt: "2026-01-15T12:01:00Z", commentType: "issue" },
         ],
       }]),
     );
 
     expect(actions.filter((a) => a.type === "send-message")).toHaveLength(0);
     expect(actions.filter((a) => a.type === "daemon-rebase")).toHaveLength(0);
+    expect(actions.filter((a) => a.type === "react-to-comment")).toHaveLength(0);
   });
 
-  it("skips comments from other agents (reviewer, forward-fixer, rebaser)", () => {
+  it("bot comments do not get reactions", () => {
     const orch = new Orchestrator();
     orch.addItem(makeWorkItem("H-1-1"));
     orch.getItem("H-1-1")!.reviewCompleted = true;
@@ -3439,13 +3468,14 @@ describe("processComments (via processTransitions)", () => {
         ciStatus: "pending",
         prState: "open",
         newComments: [
-          { body: "**[Reviewer](https://github.com/org/repo/blob/main/agents/reviewer.md)** Review complete.", author: "bot", createdAt: "2026-01-15T12:01:00Z" },
+          { id: 1301, body: "**[Reviewer](https://github.com/org/repo/blob/main/agents/reviewer.md)** Review complete.", author: "bot", createdAt: "2026-01-15T12:01:00Z", commentType: "issue" },
         ],
       }]),
     );
 
     expect(actions.filter((a) => a.type === "send-message")).toHaveLength(0);
     expect(actions.filter((a) => a.type === "daemon-rebase")).toHaveLength(0);
+    expect(actions.filter((a) => a.type === "react-to-comment")).toHaveLength(0);
   });
 
   it("relays human reviewer comments while filtering agent comments", () => {
@@ -3462,10 +3492,10 @@ describe("processComments (via processTransitions)", () => {
         ciStatus: "pending",
         prState: "open",
         newComments: [
-          { body: "**[Orchestrator](https://github.com/org/repo/blob/main/agents/orchestrator.md)** Status for H-1-1: CI pending", author: "bot", createdAt: "2026-01-15T12:01:00Z" },
-          { body: "<!-- ninthwave-orchestrator-status -->\n| Status |", author: "bot", createdAt: "2026-01-15T12:02:00Z" },
-          { body: "**[Implementer](https://github.com/org/repo/blob/main/agents/implementer.md)** Fixed the issue.", author: "bot", createdAt: "2026-01-15T12:03:00Z" },
-          { body: "Great work, but please add error handling for the edge case.", author: "reviewer", createdAt: "2026-01-15T12:04:00Z" },
+          { id: 1401, body: "**[Orchestrator](https://github.com/org/repo/blob/main/agents/orchestrator.md)** Status for H-1-1: CI pending", author: "bot", createdAt: "2026-01-15T12:01:00Z", commentType: "issue" },
+          { id: 1402, body: "<!-- ninthwave-orchestrator-status -->\n| Status |", author: "bot", createdAt: "2026-01-15T12:02:00Z", commentType: "issue" },
+          { id: 1403, body: "**[Implementer](https://github.com/org/repo/blob/main/agents/implementer.md)** Fixed the issue.", author: "bot", createdAt: "2026-01-15T12:03:00Z", commentType: "issue" },
+          { id: 1404, body: "Great work, but please add error handling for the edge case.", author: "reviewer", createdAt: "2026-01-15T12:04:00Z", commentType: "review" },
         ],
       }]),
     );
@@ -3475,6 +3505,9 @@ describe("processComments (via processTransitions)", () => {
     expect(sendMsgs).toHaveLength(1);
     expect(sendMsgs[0]!.message).toContain("@reviewer");
     expect(sendMsgs[0]!.message).toContain("error handling for the edge case");
+    expect(actions.filter((a) => a.type === "react-to-comment" && a.itemId === "H-1-1")).toEqual([
+      { type: "react-to-comment", itemId: "H-1-1", commentId: 1404, commentType: "review" },
+    ]);
   });
 
   it("relays GitHub review body comments", () => {
@@ -3491,7 +3524,7 @@ describe("processComments (via processTransitions)", () => {
         ciStatus: "pending",
         prState: "open",
         newComments: [
-          { body: "LGTM! Approved with minor nit: consider renaming the variable.", author: "senior-dev", createdAt: "2026-01-15T12:01:00Z" },
+          { id: 1501, body: "LGTM! Approved with minor nit: consider renaming the variable.", author: "senior-dev", createdAt: "2026-01-15T12:01:00Z", commentType: "review" },
         ],
       }]),
     );
@@ -3500,6 +3533,55 @@ describe("processComments (via processTransitions)", () => {
     expect(sendMsgs).toHaveLength(1);
     expect(sendMsgs[0]!.message).toContain("@senior-dev");
     expect(sendMsgs[0]!.message).toContain("renaming the variable");
+  });
+});
+
+describe("react-to-comment action execution", () => {
+  it("react-to-comment action executes addCommentReaction", () => {
+    const orch = new Orchestrator();
+    orch.addItem(makeWorkItem("H-1-1"));
+    orch.getItem("H-1-1")!.reviewCompleted = true;
+
+    const addCommentReactionMock = vi.fn();
+    const deps: OrchestratorDeps = {
+      git: {
+        fetchOrigin: () => {},
+        ffMerge: () => {},
+      },
+      gh: {
+        prMerge: () => true,
+        prComment: () => true,
+        addCommentReaction: addCommentReactionMock,
+      },
+      mux: {
+        closeWorkspace: () => true,
+      },
+      workers: {
+        launchSingleItem: () => null,
+      },
+      cleanup: {
+        cleanSingleWorktree: () => true,
+      },
+      io: {
+        writeInbox: () => {},
+      },
+    };
+
+    const ctx: ExecutionContext = {
+      projectRoot: "/tmp/project",
+      worktreeDir: "/tmp/project/.ninthwave/.worktrees",
+      workDir: "/tmp/project/.ninthwave/work",
+      aiTool: "claude",
+    };
+
+    const result = orch.executeAction(
+      { type: "react-to-comment", itemId: "H-1-1", commentId: 42, commentType: "review" },
+      ctx,
+      deps,
+    );
+
+    expect(result).toEqual({ success: true });
+    expect(addCommentReactionMock).toHaveBeenCalledWith("/tmp/project", 42, "review", "eyes");
   });
 });
 

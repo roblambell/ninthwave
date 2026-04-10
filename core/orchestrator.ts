@@ -70,6 +70,7 @@ import {
   executePostReview,
   executeLaunchForwardFixer,
   executeCleanForwardFixer,
+  executeReactToComment,
 } from "./orchestrator-actions.ts";
 
 // ── Merge commit CI grace periods ────────────────────────────────────
@@ -1498,6 +1499,13 @@ export class Orchestrator {
       // Skip orchestrator HTML status markers
       if (comment.body.includes("<!-- ninthwave-orchestrator-status -->")) continue;
 
+      actions.push({
+        type: "react-to-comment",
+        itemId: item.id,
+        commentId: comment.id,
+        commentType: comment.commentType,
+      });
+
       if (/\brebase\b/i.test(comment.body)) {
         // "rebase" keyword → trigger daemon-rebase directly (only if not already queued)
         if (!hasDaemonRebase) {
@@ -1681,6 +1689,8 @@ export class Orchestrator {
         return executeCleanForwardFixer(item, deps);
       case "send-message":
         return executeSendMessage(handle, item, action, ctx, deps);
+      case "react-to-comment":
+        return executeReactToComment(item, action, ctx, deps);
       case "set-commit-status":
         return executeSetCommitStatus(item, action, ctx, deps);
       case "post-review":

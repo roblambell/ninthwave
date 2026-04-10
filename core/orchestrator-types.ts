@@ -294,7 +294,13 @@ export interface ItemSnapshot {
    *  e.g., GitHub's completedAt for CI checks, mergedAt for merges, updatedAt for PR changes. */
   eventTime?: string;
   /** New trusted PR comments since last check. */
-  newComments?: Array<{ body: string; author: string; createdAt: string }>;
+  newComments?: Array<{
+    id: number;
+    body: string;
+    author: string;
+    createdAt: string;
+    commentType: "issue" | "review";
+  }>;
   /** Worker heartbeat data read from the heartbeat file. Null if no heartbeat file exists. */
   lastHeartbeat?: import("./daemon.ts").WorkerProgress | null;
   /** Best-effort merge commit SHA for merged PRs, backfilled by polling. */
@@ -349,6 +355,7 @@ export type ActionType =
   | "launch-forward-fixer"
   | "clean-forward-fixer"
   | "send-message"
+  | "react-to-comment"
   | "set-commit-status"
   | "post-review";
 
@@ -359,6 +366,10 @@ export interface Action {
   prNumber?: number;
   /** For notify actions, the message to send. */
   message?: string;
+  /** For comment-reaction actions, the comment ID. */
+  commentId?: number;
+  /** For comment-reaction actions, the GitHub comment endpoint type. */
+  commentType?: "issue" | "review";
   /** When true, skip the normal worker-nudge fallback and escalate directly to the rebaser path. */
   escalateToRebaser?: boolean;
   /** For launch actions, the base branch to stack on (e.g., "ninthwave/H-1-1"). */
@@ -434,6 +445,12 @@ export interface GitDeps {
 export interface GhDeps {
   prMerge: (repoRoot: string, prNumber: number, options?: { admin?: boolean }) => boolean;
   prComment: (repoRoot: string, prNumber: number, body: string) => boolean;
+  addCommentReaction?: (
+    repoRoot: string,
+    commentId: number,
+    commentType: "issue" | "review",
+    reaction: string,
+  ) => void;
   /**
    * Set a commit status on a PR's head SHA.
    * Used to post review results as GitHub commit statuses for branch protection integration.

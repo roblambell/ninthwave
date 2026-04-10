@@ -883,6 +883,31 @@ export function executeSendMessage(
   return { success: true };
 }
 
+/** Add an acknowledgement reaction to a human PR comment. */
+export function executeReactToComment(
+  item: OrchestratorItem,
+  action: Action,
+  ctx: ExecutionContext,
+  deps: OrchestratorDeps,
+): ActionResult {
+  if (!deps.gh.addCommentReaction) {
+    return { success: true };
+  }
+
+  const commentId = action.commentId;
+  const commentType = action.commentType;
+  if (commentId == null || !commentType) {
+    return { success: false, error: `Missing comment metadata for reaction on ${item.id}` };
+  }
+
+  try {
+    deps.gh.addCommentReaction(ctx.projectRoot, commentId, commentType, "eyes");
+    return { success: true };
+  } catch {
+    return { success: true };
+  }
+}
+
 /** Set a commit status on the PR's head SHA. */
 export function executeSetCommitStatus(
   item: OrchestratorItem,

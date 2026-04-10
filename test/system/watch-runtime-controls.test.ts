@@ -125,15 +125,16 @@ describe("system: watch runtime controls", () => {
         timeoutMs: 10_000,
       });
 
+      const secondWorktreePath = join(harness.worktreeDir, "ninthwave-H-WRC-2");
       const concurrentState = await harness.waitForOrchestratorState((state) => {
         const first = state.items.find((entry) => entry.id === "H-WRC-1");
         const second = state.items.find((entry) => entry.id === "H-WRC-2");
-        const firstActive = first && ["implementing", "merged", "forward-fix-pending"].includes(first.state);
+        const firstActive = first && ["implementing", "ci-pending", "merged", "forward-fix-pending"].includes(first.state);
         const secondActive = second && ["launching", "implementing"].includes(second.state);
-        return firstActive && secondActive ? state : false;
+        return firstActive && secondActive && existsSync(secondWorktreePath) ? state : false;
       }, 15_000);
       expect(concurrentState.sessionLimit).toBe(2);
-      expect(existsSync(join(harness.worktreeDir, "ninthwave-H-WRC-2"))).toBe(true);
+      expect(existsSync(secondWorktreePath)).toBe(true);
 
       const settledState = await harness.waitForOrchestratorState((state) => {
         const first = state.items.find((entry) => entry.id === "H-WRC-1");

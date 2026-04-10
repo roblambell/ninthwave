@@ -772,10 +772,12 @@ export const TRUSTED_ASSOCIATIONS = new Set(["OWNER", "MEMBER", "COLLABORATOR"])
 
 /** A PR comment from a trusted collaborator. */
 export interface PrComment {
+  id: number;
   body: string;
   author: string;
   authorAssociation: string;
   createdAt: string;
+  commentType: "issue" | "review";
 }
 
 /**
@@ -797,11 +799,12 @@ export function fetchTrustedPrComments(
 
   const comments: PrComment[] = [];
   const trustedFilter = '(.author_association == "OWNER" or .author_association == "MEMBER" or .author_association == "COLLABORATOR")';
-  const jq = `[.[] | select(.created_at > "${since}" and ${trustedFilter}) | {body: .body, author: .user.login, authorAssociation: .author_association, createdAt: .created_at}]`;
+  const issueJq = `[.[] | select(.created_at > "${since}" and ${trustedFilter}) | {id: .id, body: .body, author: .user.login, authorAssociation: .author_association, createdAt: .created_at, commentType: "issue"}]`;
+  const reviewJq = `[.[] | select(.created_at > "${since}" and ${trustedFilter}) | {id: .id, body: .body, author: .user.login, authorAssociation: .author_association, createdAt: .created_at, commentType: "review"}]`;
 
   // Issue comments (general PR comments)
   try {
-    const raw = apiGet(repoRoot, `repos/${ownerRepo}/issues/${prNumber}/comments`, jq);
+    const raw = apiGet(repoRoot, `repos/${ownerRepo}/issues/${prNumber}/comments`, issueJq);
     if (raw.trim()) {
       const parsed = JSON.parse(raw) as PrComment[];
       comments.push(...parsed);
@@ -810,7 +813,7 @@ export function fetchTrustedPrComments(
 
   // Review comments (inline code comments)
   try {
-    const raw = apiGet(repoRoot, `repos/${ownerRepo}/pulls/${prNumber}/comments`, jq);
+    const raw = apiGet(repoRoot, `repos/${ownerRepo}/pulls/${prNumber}/comments`, reviewJq);
     if (raw.trim()) {
       const parsed = JSON.parse(raw) as PrComment[];
       comments.push(...parsed);
@@ -839,7 +842,8 @@ export async function fetchTrustedPrCommentsAsync(
 
   const comments: PrComment[] = [];
   const trustedFilter = '(.author_association == "OWNER" or .author_association == "MEMBER" or .author_association == "COLLABORATOR")';
-  const jq = `[.[] | select(.created_at > "${since}" and ${trustedFilter}) | {body: .body, author: .user.login, authorAssociation: .author_association, createdAt: .created_at}]`;
+  const issueJq = `[.[] | select(.created_at > "${since}" and ${trustedFilter}) | {id: .id, body: .body, author: .user.login, authorAssociation: .author_association, createdAt: .created_at, commentType: "issue"}]`;
+  const reviewJq = `[.[] | select(.created_at > "${since}" and ${trustedFilter}) | {id: .id, body: .body, author: .user.login, authorAssociation: .author_association, createdAt: .created_at, commentType: "review"}]`;
 
   // Issue comments (general PR comments)
   try {
@@ -847,7 +851,7 @@ export async function fetchTrustedPrCommentsAsync(
       "api",
       `repos/${ownerRepo}/issues/${prNumber}/comments`,
       "--jq",
-      jq,
+      issueJq,
     ]);
     if (result.exitCode === 0 && result.stdout?.trim()) {
       const parsed = JSON.parse(result.stdout) as PrComment[];
@@ -861,7 +865,7 @@ export async function fetchTrustedPrCommentsAsync(
       "api",
       `repos/${ownerRepo}/pulls/${prNumber}/comments`,
       "--jq",
-      jq,
+      reviewJq,
     ]);
     if (result.exitCode === 0 && result.stdout?.trim()) {
       const parsed = JSON.parse(result.stdout) as PrComment[];
@@ -952,6 +956,38 @@ export function listPrReviewComments(
     return JSON.parse(result.stdout) as Array<{ id: number; body: string; path: string }>;
   } catch {
     return [];
+  }
+}
+
+/** Add a reaction to a PR comment. Best-effort: failures are ignored. */
+export function addCommentReaction(
+  repoRoot: string,
+  commentId: number,
+  commentType: "issue" | "review",
+  reaction: string,
+): void {
+  let ownerRepo: string;
+  try {
+    ownerRepo = getRepoOwner(repoRoot);
+  } catch {
+    return;
+  }
+
+  const endpoint = commentType === "issue"
+    ? `repos/${ownerRepo}/issues/comments/${commentId}/reactions`
+    : `repos/${ownerRepo}/pulls/comments/${commentId}/reactions`;
+
+  try {
+    ghInRepo(repoRoot, [
+      "api",
+      "--method",
+      "POST",
+      endpoint,
+      "-f",
+      `content=${reaction}`,
+    ]);
+  } catch {
+    // Best-effort acknowledgement only.
   }
 }
 

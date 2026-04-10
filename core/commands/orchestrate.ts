@@ -32,7 +32,7 @@ import { cleanStaleBranchForReuse } from "../branch-cleanup.ts";
 import { selectAiTools, detectInstalledAITools, validateAgentFiles } from "../tool-select.ts";
 import { cleanSingleWorktree } from "./clean.ts";
 import { writeInbox, type InboxSnapshot } from "./inbox.ts";
-import { prMerge, prComment, checkPrMergeable, isPrBlocked, getRepoOwner, applyGithubToken, fetchTrustedPrCommentsAsync, upsertOrchestratorComment, setCommitStatus as ghSetCommitStatus, prHeadSha, getMergeCommitSha as ghGetMergeCommitSha, checkCommitCI as ghCheckCommitCI, checkCommitCIAsync as ghCheckCommitCIAsync, getDefaultBranch as ghGetDefaultBranch, ensureDomainLabels, listPrComments, updatePrComment, ghFailureKindLabel, getPrBaseBranch as ghGetPrBaseBranch, getPrBaseAndState as ghGetPrBaseAndState, retargetPrBase as ghRetargetPrBase, queryRateLimitAsync as ghQueryRateLimitAsync } from "../gh.ts";
+import { prMerge, prComment, addCommentReaction, checkPrMergeable, isPrBlocked, getRepoOwner, applyGithubToken, fetchTrustedPrCommentsAsync, upsertOrchestratorComment, setCommitStatus as ghSetCommitStatus, prHeadSha, getMergeCommitSha as ghGetMergeCommitSha, checkCommitCI as ghCheckCommitCI, checkCommitCIAsync as ghCheckCommitCIAsync, getDefaultBranch as ghGetDefaultBranch, ensureDomainLabels, listPrComments, updatePrComment, ghFailureKindLabel, getPrBaseBranch as ghGetPrBaseBranch, getPrBaseAndState as ghGetPrBaseAndState, retargetPrBase as ghRetargetPrBase, queryRateLimitAsync as ghQueryRateLimitAsync } from "../gh.ts";
 import { fetchOrigin, ffMerge, gitAdd, gitCommit, gitPush, daemonRebase, rebaseOnto, forcePush, resolveRef } from "../git.ts";
 import { run } from "../shell.ts";
 import { type Multiplexer, createMux, muxTypeForWorkspaceRef, resolveBackend } from "../mux.ts";
@@ -1826,6 +1826,8 @@ export async function cmdOrchestrate(
     gh: {
       prMerge: (repoRoot, prNumber, options) => prMerge(repoRoot, prNumber, options),
       prComment: (repoRoot, prNumber, body) => prComment(repoRoot, prNumber, body),
+      addCommentReaction: (repoRoot, commentId, commentType, reaction) =>
+        addCommentReaction(repoRoot, commentId, commentType, reaction),
       setCommitStatus: (repoRoot, prNumber, state, context, description) => {
         const sha = prHeadSha(repoRoot, prNumber);
         if (!sha) return false;
