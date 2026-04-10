@@ -270,14 +270,15 @@ The `summary` field should include:
 
 ### Verdict Decision
 
-- **0 blocking findings**: `"verdict": "approve"`, event = `APPROVE`
-- **>=1 blocking finding**: `"verdict": "request-changes"`, event = `REQUEST_CHANGES`
+- **0 blocking findings**: `"verdict": "approve"`
+- **>=1 blocking finding**: `"verdict": "request-changes"`
+
+The verdict file drives the orchestrator's commit status check (`Ninthwave / Review`), which is the merge gate. The GitHub review event is always `COMMENT` -- never `APPROVE` or `REQUEST_CHANGES`. Approving or requesting changes on a PR is a human action; the reviewer's role is to post findings and write the verdict, not to gatekeep via GitHub's approval mechanism.
 
 ### Post GitHub Review
 
-Post your review using GitHub's Pull Request Review API. This is a single API call that atomically submits:
+Post your review using GitHub's Pull Request Review API with event `COMMENT`. This is a single API call that atomically submits:
 - **Inline comments** on specific lines (the primary feedback mechanism for the human PR author)
-- **Verdict** as the review event (`APPROVE` or `REQUEST_CHANGES`)
 - **Body** as a brief summary -- do NOT repeat individual findings here since they appear as inline comments on specific lines
 
 Inline comments are the primary feedback mechanism for the GitHub UI. Each finding should be an inline comment on the relevant line. The review `body` is only a brief summary (e.g., "LGTM -- 2 non-blocking comments" or "2 blocking findings -- see inline comments"). This is separate from the verdict file `summary`, which must remain detailed.
@@ -297,7 +298,7 @@ gh api repos/{owner}/{repo}/pulls/{PR_NUMBER}/reviews \
 {
   "commit_id": "$COMMIT_SHA",
   "body": "Brief verdict summary here",
-  "event": "APPROVE",
+  "event": "COMMENT",
   "comments": [
     {
       "path": "path/to/file.ts",
@@ -329,7 +330,7 @@ gh api repos/{owner}/{repo}/pulls/{PR_NUMBER}/reviews \
 {
   "commit_id": "$COMMIT_SHA",
   "body": "No issues found. Clean PR.",
-  "event": "APPROVE"
+  "event": "COMMENT"
 }
 REVIEW_EOF
 ```
