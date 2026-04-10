@@ -428,6 +428,7 @@ export async function cmdNoArgs(
       ? () => doRefreshStartupItems(workDir, worktreeDir, projectRoot, todos)
       : undefined,
     savedToolIds: userConfig.ai_tools,
+    projectRoot,
   });
   if (!result) return; // User cancelled
 

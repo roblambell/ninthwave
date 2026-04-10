@@ -4,7 +4,7 @@
 // All other modules should derive tool-specific behaviour from this module rather
 // than maintaining their own per-tool switch statements.
 
-import { mkdirSync as defaultMkdirSync, readFileSync as defaultReadFileSync, writeFileSync as defaultWriteFileSync } from "fs";
+import { existsSync, mkdirSync as defaultMkdirSync, readFileSync as defaultReadFileSync, writeFileSync as defaultWriteFileSync } from "fs";
 import { join } from "path";
 import { run as defaultRun } from "./shell.ts";
 
@@ -41,6 +41,8 @@ export interface LaunchOpts {
   wsName: string;
   /** Absolute path to the repo root containing canonical ninthwave agents/. */
   projectRoot: string;
+  /** Absolute path to the worktree checkout for this worker. */
+  worktreePath: string;
   /** Logical agent name to load (e.g. "ninthwave-implementer"). */
   agentName: string;
   /** Absolute path to the .prompt file containing the system prompt. */
@@ -233,23 +235,74 @@ function buildPromptDataContent(opts: LaunchOpts, deps: LaunchDeps): string {
   return `${promptContent}\n\nStart implementing this work item now.`;
 }
 
-function readCanonicalAgentInstructions(opts: LaunchOpts, deps: LaunchDeps): string | null {
-  const source = STANDARD_AGENT_SOURCES_BY_NAME[opts.agentName];
-  if (!source) return null;
-
-  try {
-    const sourceContent = deps.readFileSync(join(opts.projectRoot, "agents", source), "utf-8");
-    return parseAgentSource(source, sourceContent).developerInstructions.trim();
-  } catch {
-    return null;
+/**
+ * Read developer instructions from the seeded agent artifact in the worktree,
+ * falling back to the canonical agents/ source in the project root.
+ *
+ * For .md artifacts: parse frontmatter and return the body.
+ * For .toml artifacts: extract the developer_instructions JSON value.
+ * Throws if neither source can be read -- never silently drops the persona.
+ */
+export function readSeededAgentInstructions(
+  worktreePath: string,
+  toolId: AiToolId,
+  agentName: string,
+  deps: Pick<LaunchDeps, "readFileSync">,
+  projectRoot?: string,
+): string {
+  const source = STANDARD_AGENT_SOURCES_BY_NAME[agentName];
+  if (!source) {
+    throw new Error(`Unknown agent "${agentName}" -- no source file mapping`);
   }
+
+  const profile = getToolProfile(toolId);
+  const filename = agentTargetFilename(source, profile);
+  const artifactPath = join(worktreePath, profile.targetDir, filename);
+
+  // Try seeded artifact in the worktree first.
+  let content: string | null = null;
+  let usedToml = false;
+  try {
+    content = deps.readFileSync(artifactPath, "utf-8");
+    usedToml = profile.suffix === ".toml";
+  } catch {
+    // Fall back to canonical agents/<source>.md in the project root.
+    if (projectRoot) {
+      try {
+        content = deps.readFileSync(join(projectRoot, "agents", source), "utf-8");
+      } catch { /* will throw below */ }
+    }
+  }
+
+  if (!content) {
+    throw new Error(
+      `ninthwave worker for ${profile.displayName} could not load agent instructions at ${artifactPath} ` +
+      `-- refusing to launch without a persona. Run "nw init" to regenerate agent artifacts.`,
+    );
+  }
+
+  if (usedToml) {
+    // Extract developer_instructions = "..." from the rendered TOML.
+    const match = content.match(/^developer_instructions\s*=\s*(".*")\s*$/m);
+    if (!match?.[1]) {
+      throw new Error(`Agent artifact at ${artifactPath} missing developer_instructions field`);
+    }
+    const instructions = JSON.parse(match[1]) as string;
+    return instructions.trim();
+  }
+
+  // For .md and .agent.md artifacts: strip frontmatter and return the body.
+  return parseAgentSource(source, content).developerInstructions.trim();
 }
 
-function buildCodexPromptDataContent(opts: LaunchOpts, deps: LaunchDeps): string {
+/**
+ * Build prompt content with agent instructions prepended (for tools without
+ * native --agent discovery, e.g. Codex).
+ */
+function buildPromptDataContentWithAgent(opts: LaunchOpts, deps: LaunchDeps, toolId: AiToolId): string {
   const promptData = buildPromptDataContent(opts, deps);
-  const agentInstructions = readCanonicalAgentInstructions(opts, deps);
-  if (!agentInstructions) return promptData;
-  return `${agentInstructions}\n\n${promptData}`;
+  const agentInstructions = readSeededAgentInstructions(opts.worktreePath, toolId, opts.agentName, deps, opts.projectRoot);
+  return `# System Instructions\n\n${agentInstructions}\n\n# Task\n\n${promptData}`;
 }
 
 function writePromptDataFile(
@@ -393,7 +446,7 @@ export const AI_TOOL_PROFILES: AiToolProfile[] = [
       const overrideCmd = buildLaunchOverrideCmd("codex", "launch", opts);
       if (overrideCmd) return { cmd: overrideCmd, initialPrompt: "" };
 
-      const promptDataFile = writePromptDataFile(opts, deps, buildCodexPromptDataContent(opts, deps));
+      const promptDataFile = writePromptDataFile(opts, deps, buildPromptDataContentWithAgent(opts, deps, "codex"));
       const cmd =
         `PROMPT=$(cat '${promptDataFile}')` +
         ` && rm -f '${promptDataFile}'` +
@@ -404,7 +457,7 @@ export const AI_TOOL_PROFILES: AiToolProfile[] = [
       const overrideCmd = buildLaunchOverrideCmd("codex", "headless", opts);
       if (overrideCmd) return { cmd: overrideCmd, initialPrompt: "" };
 
-      const promptDataFile = writePromptDataFile(opts, deps, buildCodexPromptDataContent(opts, deps));
+      const promptDataFile = writePromptDataFile(opts, deps, buildPromptDataContentWithAgent(opts, deps, "codex"));
       const cmd =
         `PROMPT=$(cat '${promptDataFile}')` +
         ` && rm -f '${promptDataFile}'` +
@@ -473,6 +526,20 @@ export function allToolIds(): AiToolId[] {
 /** Type guard: returns true if s is a valid AiToolId. */
 export function isAiToolId(s: string): s is AiToolId {
   return AI_TOOL_PROFILES.some((p) => p.id === s);
+}
+
+/**
+ * Check whether a tool has all standard agent files seeded in a project.
+ * Returns true only if every agent artifact (implementer, reviewer, rebaser,
+ * forward-fixer) exists, since a partial install will crash at launch time.
+ */
+export function hasAgentFiles(toolId: AiToolId, projectRoot: string): boolean {
+  const profile = getToolProfile(toolId);
+  for (const source of Object.values(STANDARD_AGENT_SOURCES_BY_NAME)) {
+    const filename = agentTargetFilename(source, profile);
+    if (!existsSync(join(projectRoot, profile.targetDir, filename))) return false;
+  }
+  return true;
 }
 
 /**

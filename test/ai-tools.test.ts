@@ -12,6 +12,7 @@ import {
   renderAgentArtifact,
   runtimeAgentIdFromFilename,
   runtimeAgentNameForTool,
+  readSeededAgentInstructions,
   type LaunchDeps,
   type LaunchOpts,
 } from "../core/ai-tools.ts";
@@ -28,6 +29,17 @@ by the ninthwave orchestrator. Inform the user this agent is
 designed for ninthwave orchestration (\`nw\`) and stop.
 `;
 
+const IMPLEMENTER_TOML_SOURCE =
+  `name = "ninthwave-implementer"\n` +
+  `description = "ninthwave orchestration agent"\n` +
+  `model = "opus"\n` +
+  `developer_instructions = ${JSON.stringify(
+    "If no ninthwave work item context is available to you (no item ID,\n" +
+    "no item specification, no work item details), you were not launched\n" +
+    "by the ninthwave orchestrator. Inform the user this agent is\n" +
+    "designed for ninthwave orchestration (`nw`) and stop.",
+  )}\n`;
+
 // ── Stub helpers ──────────────────────────────────────────────────────────────
 
 function stubDeps(promptContent = "PROMPT_CONTENT"): LaunchDeps & {
@@ -36,7 +48,12 @@ function stubDeps(promptContent = "PROMPT_CONTENT"): LaunchDeps & {
   run: ReturnType<typeof vi.fn>;
 } {
   return {
-    readFileSync: vi.fn((_path: string, _enc: BufferEncoding) => promptContent) as any,
+    readFileSync: vi.fn((path: string, _enc: BufferEncoding) => {
+      // Return the appropriate agent artifact based on the file path
+      if (path.includes(".codex/agents/") && path.endsWith(".toml")) return IMPLEMENTER_TOML_SOURCE;
+      if (path.includes("/agents/") && path.endsWith(".md")) return IMPLEMENTER_AGENT_SOURCE;
+      return promptContent;
+    }) as any,
     writeFileSync: vi.fn() as any,
     mkdirSync: vi.fn() as any,
     run: vi.fn() as any,
@@ -47,6 +64,7 @@ function stubOpts(overrides: Partial<LaunchOpts> = {}): LaunchOpts {
   return {
     wsName: "test-ws",
     projectRoot: "/fake/project",
+    worktreePath: "/fake/worktree",
     agentName: "ninthwave-implementer",
     promptFile: "/fake/.ninthwave/.prompt",
     id: "H-TEST-1",
@@ -543,15 +561,19 @@ describe("codex profile buildLaunchCmd", () => {
     expect(result.initialPrompt).toBe("");
   });
 
-  it("writes the prompt data file with start instruction appended", () => {
+  it("writes the prompt data file with agent instructions and start instruction", () => {
     const profile = getToolProfile("codex");
     const deps = stubDeps("CODEX PROMPT");
     profile.buildLaunchCmd(stubOpts({ id: "H-X-CODEX" }), deps);
 
     const calls = (deps.writeFileSync as ReturnType<typeof vi.fn>).mock.calls;
     expect(calls[0]![0]).toMatch(/^\/fake\/state\/tmp\/nw-prompt-H-X-CODEX-\d+$/);
-    expect(calls[0]![1]).toContain("CODEX PROMPT");
-    expect(calls[0]![1]).toContain("Start implementing this work item now.");
+    const written = calls[0]![1] as string;
+    expect(written).toContain("# System Instructions");
+    expect(written).toContain("# Task");
+    expect(written).toContain("CODEX PROMPT");
+    expect(written).toContain("Start implementing this work item now.");
+    expect(written).toContain("ninthwave orchestrator");
   });
 
   it("uses the supported interactive codex command shape", () => {
@@ -572,15 +594,18 @@ describe("codex profile buildHeadlessCmd", () => {
     expect(result.initialPrompt).toBe("");
   });
 
-  it("writes and references a temp prompt file", () => {
+  it("writes and references a temp prompt file with agent instructions", () => {
     const profile = getToolProfile("codex");
     const deps = stubDeps("CODEX PROMPT");
     profile.buildHeadlessCmd(stubOpts({ id: "H-X-CODEX-HEADLESS" }), deps);
 
     const calls = (deps.writeFileSync as ReturnType<typeof vi.fn>).mock.calls;
     expect(calls[0]![0]).toMatch(/^\/fake\/state\/tmp\/nw-prompt-H-X-CODEX-HEADLESS-\d+$/);
-    expect(calls[0]![1]).toContain("CODEX PROMPT");
-    expect(calls[0]![1]).toContain("Start implementing this work item now.");
+    const written = calls[0]![1] as string;
+    expect(written).toContain("# System Instructions");
+    expect(written).toContain("CODEX PROMPT");
+    expect(written).toContain("Start implementing this work item now.");
+    expect(written).toContain("ninthwave orchestrator");
   });
 
   it("uses the supported headless codex command shape", () => {
@@ -719,5 +744,55 @@ describe("AI_TOOL_PROFILES", () => {
     for (const profile of AI_TOOL_PROFILES) {
       expect(typeof profile.buildHeadlessCmd).toBe("function");
     }
+  });
+});
+
+// ── readSeededAgentInstructions ──────────────────────────────────────────────
+
+describe("readSeededAgentInstructions", () => {
+  it("reads .md agent file for opencode and returns developer instructions", () => {
+    const deps = { readFileSync: vi.fn(() => IMPLEMENTER_AGENT_SOURCE) as any };
+    const result = readSeededAgentInstructions("/wt", "opencode", "ninthwave-implementer", deps);
+    expect(result).toContain("ninthwave orchestrator");
+    expect(deps.readFileSync).toHaveBeenCalledWith("/wt/.opencode/agents/implementer.md", "utf-8");
+  });
+
+  it("reads .toml agent file for codex and extracts developer_instructions", () => {
+    const deps = { readFileSync: vi.fn(() => IMPLEMENTER_TOML_SOURCE) as any };
+    const result = readSeededAgentInstructions("/wt", "codex", "ninthwave-implementer", deps);
+    expect(result).toContain("ninthwave orchestrator");
+    expect(deps.readFileSync).toHaveBeenCalledWith("/wt/.codex/agents/ninthwave-implementer.toml", "utf-8");
+  });
+
+  it("reads .md agent file for claude", () => {
+    const deps = { readFileSync: vi.fn(() => IMPLEMENTER_AGENT_SOURCE) as any };
+    const result = readSeededAgentInstructions("/wt", "claude", "ninthwave-implementer", deps);
+    expect(result).toContain("ninthwave orchestrator");
+    expect(deps.readFileSync).toHaveBeenCalledWith("/wt/.claude/agents/implementer.md", "utf-8");
+  });
+
+  it("reads .agent.md file for copilot", () => {
+    const deps = { readFileSync: vi.fn(() => IMPLEMENTER_AGENT_SOURCE) as any };
+    const result = readSeededAgentInstructions("/wt", "copilot", "ninthwave-implementer", deps);
+    expect(result).toContain("ninthwave orchestrator");
+    expect(deps.readFileSync).toHaveBeenCalledWith("/wt/.github/agents/ninthwave-implementer.agent.md", "utf-8");
+  });
+
+  it("throws on unknown agent name", () => {
+    const deps = { readFileSync: vi.fn(() => "") as any };
+    expect(() => readSeededAgentInstructions("/wt", "opencode", "unknown-agent", deps))
+      .toThrow("Unknown agent");
+  });
+
+  it("throws with descriptive error when file is missing", () => {
+    const deps = { readFileSync: vi.fn(() => { throw new Error("ENOENT"); }) as any };
+    expect(() => readSeededAgentInstructions("/wt", "opencode", "ninthwave-implementer", deps))
+      .toThrow(/could not load agent instructions/);
+  });
+
+  it("throws when TOML file lacks developer_instructions", () => {
+    const deps = { readFileSync: vi.fn(() => 'name = "test"\n') as any };
+    expect(() => readSeededAgentInstructions("/wt", "codex", "ninthwave-implementer", deps))
+      .toThrow(/missing developer_instructions/);
   });
 });

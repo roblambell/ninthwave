@@ -1,8 +1,10 @@
 // Tests for selectAiTool/selectAiTools -- explicit, user-driven AI tool selection.
 
+import { mkdirSync, writeFileSync } from "fs";
+import { join } from "path";
 import { describe, it, expect, vi, afterEach } from "vitest";
-import { cleanupTempRepos } from "./helpers.ts";
-import { selectAiTool, selectAiTools, detectInstalledAITools } from "../core/tool-select.ts";
+import { cleanupTempRepos, setupTempRepo } from "./helpers.ts";
+import { selectAiTool, selectAiTools, detectInstalledAITools, validateAgentFiles } from "../core/tool-select.ts";
 import type { SelectAiToolDeps } from "../core/tool-select.ts";
 
 afterEach(() => {
@@ -350,6 +352,55 @@ describe("selectAiTools", () => {
     );
     expect(result).toEqual(["opencode"]);
     expect(save).toHaveBeenCalledWith({ ai_tools: ["opencode"] });
+  });
+});
+
+describe("validateAgentFiles", () => {
+  it("warns when agent directory is missing for a selected tool", () => {
+    const warnSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+    validateAgentFiles(["opencode"], "/nonexistent/path");
+    expect(warnSpy).toHaveBeenCalledWith(expect.stringContaining("No agent files found for OpenCode"));
+    warnSpy.mockRestore();
+  });
+
+  it("does not warn when all agent files exist", () => {
+    const warnSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+    const repo = setupTempRepo();
+    const agentDir = join(repo, ".opencode", "agents");
+    mkdirSync(agentDir, { recursive: true });
+    for (const name of ["implementer", "reviewer", "rebaser", "forward-fixer"]) {
+      writeFileSync(join(agentDir, `${name}.md`), `---\nname: ninthwave-${name}\n---\nAgent instructions`);
+    }
+    validateAgentFiles(["opencode"], repo);
+    expect(warnSpy).not.toHaveBeenCalled();
+    warnSpy.mockRestore();
+  });
+
+  it("warns when only some agent files exist (partial install)", () => {
+    const warnSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+    const repo = setupTempRepo();
+    const agentDir = join(repo, ".opencode", "agents");
+    mkdirSync(agentDir, { recursive: true });
+    writeFileSync(join(agentDir, "implementer.md"), "---\nname: ninthwave-implementer\n---\nAgent instructions");
+    validateAgentFiles(["opencode"], repo);
+    expect(warnSpy).toHaveBeenCalledWith(expect.stringContaining("No agent files found for OpenCode"));
+    warnSpy.mockRestore();
+  });
+
+  it("skips unknown tool IDs without error", () => {
+    const warnSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+    validateAgentFiles(["my-custom-tool"], "/nonexistent/path");
+    expect(warnSpy).not.toHaveBeenCalled();
+    warnSpy.mockRestore();
+  });
+
+  it("warns for each tool missing agent files", () => {
+    const warnSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+    validateAgentFiles(["opencode", "codex"], "/nonexistent/path");
+    expect(warnSpy).toHaveBeenCalledTimes(2);
+    expect(warnSpy).toHaveBeenCalledWith(expect.stringContaining("OpenCode"));
+    expect(warnSpy).toHaveBeenCalledWith(expect.stringContaining("Codex"));
+    warnSpy.mockRestore();
   });
 });
 

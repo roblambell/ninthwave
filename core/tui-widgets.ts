@@ -13,6 +13,7 @@ import {
   parseCrewCode,
   type ConnectionAction,
 } from "./commands/crew.ts";
+import { hasAgentFiles, isAiToolId } from "./ai-tools.ts";
 import type { AiToolProfile } from "./ai-tools.ts";
 import {
   COLLABORATION_MODE_OPTIONS,
@@ -1272,6 +1273,8 @@ export async function runSelectionScreen(
     refreshItems?: () => Promise<StartupItemsRefreshResult>;
     /** Pre-selected tool IDs for multi-select (from saved config). */
     savedToolIds?: string[];
+    /** Project root for agent file validation. */
+    projectRoot?: string;
   } = {},
 ): Promise<SelectionScreenResult | null> {
   const resolvedDefaults: TuiSettingsDefaults = {
@@ -1346,12 +1349,17 @@ export async function runSelectionScreen(
   if (tools.length >= 2) {
     // Multi-select: pre-check saved tools or all if none saved
     const savedIds = opts.savedToolIds ?? [];
-    const toolCheckboxItems: CheckboxItem[] = tools.map((t) => ({
-      id: t.id,
-      label: t.displayName,
-      detail: `Model defined in ${t.targetDir}/ agent files`,
-      checked: savedIds.length > 0 ? savedIds.includes(t.id) : true,
-    }));
+    const toolCheckboxItems: CheckboxItem[] = tools.map((t) => {
+      const seeded = opts.projectRoot && isAiToolId(t.id) ? hasAgentFiles(t.id, opts.projectRoot) : true;
+      return {
+        id: t.id,
+        label: t.displayName,
+        detail: seeded
+          ? `Model defined in ${t.targetDir}/ agent files`
+          : `${YELLOW}No agent files at ${t.targetDir}/${RESET}${DIM} -- run "nw init"${RESET}`,
+        checked: savedIds.length > 0 ? savedIds.includes(t.id) : true,
+      };
+    });
 
     io.write(CLEAR_SCREEN);
     const toolResult = await runCheckboxList(

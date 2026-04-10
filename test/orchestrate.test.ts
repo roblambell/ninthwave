@@ -5961,7 +5961,6 @@ describe("resolveInteractiveStartupConfig", () => {
       scheduleEnabled: false,
     });
     expect(result.savedToolIds).toEqual(["opencode", "copilot"]);
-    expect(result.skipToolStep).toBe(true);
   });
 
   it("falls back to manual/off/local when persisted defaults are absent", () => {
@@ -5978,7 +5977,6 @@ describe("resolveInteractiveStartupConfig", () => {
       scheduleEnabled: false,
     });
     expect(result.savedToolIds).toBeUndefined();
-    expect(result.skipToolStep).toBe(false);
   });
 
   it("honors explicit tool override while keeping resolved startup defaults", () => {
@@ -5990,7 +5988,6 @@ describe("resolveInteractiveStartupConfig", () => {
     );
 
     expect(result.defaults.reviewMode).toBe("mine");
-    expect(result.skipToolStep).toBe(true);
   });
 
   it("restores the project-local scheduled-task preference on re-entry", () => {
