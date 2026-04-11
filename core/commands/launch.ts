@@ -1,8 +1,9 @@
 // Launch functions: create worktrees and start AI coding sessions for work items.
 
-import { existsSync, mkdirSync, writeFileSync } from "fs";
+import { existsSync, mkdirSync, writeFileSync, readdirSync, unlinkSync, statSync, accessSync, constants as fsConstants } from "fs";
 import { join, basename } from "path";
 import { warn, info } from "../output.ts";
+import { run } from "../shell.ts";
 import { userStateDir } from "../daemon.ts";
 import {
   fetchOrigin as defaultFetchOrigin,
@@ -57,6 +58,101 @@ const defaultLaunchGitDeps: LaunchGitDeps = {
 import { seedAgentFiles } from "../agent-files.ts";
 import { cleanStaleBranchForReuse } from "../branch-cleanup.ts";
 import type { WorkItem } from "../types.ts";
+
+/** Timeout for the post-worktree-create bootstrap hook (5 minutes). */
+export const BOOTSTRAP_HOOK_TIMEOUT_MS = 5 * 60 * 1000;
+
+/**
+ * Remove stale `.git/worktrees/<name>/index.lock` files left by crashed sessions.
+ * These locks prevent `git worktree add` and `git worktree remove` from succeeding.
+ * Only removes locks where no git process is actively using them (heuristic: file
+ * is older than 60 seconds).
+ */
+export function cleanStaleIndexLocks(projectRoot: string): void {
+  const gitDir = join(projectRoot, ".git");
+  const worktreesDir = join(gitDir, "worktrees");
+  if (!existsSync(worktreesDir)) return;
+
+  let entries: string[];
+  try {
+    entries = readdirSync(worktreesDir);
+  } catch {
+    return;
+  }
+
+  const now = Date.now();
+  const staleThresholdMs = 60_000; // 60 seconds
+
+  for (const entry of entries) {
+    const lockPath = join(worktreesDir, entry, "index.lock");
+    if (!existsSync(lockPath)) continue;
+
+    try {
+      const stat = statSync(lockPath);
+      const ageMs = now - stat.mtimeMs;
+      if (ageMs > staleThresholdMs) {
+        unlinkSync(lockPath);
+        info(`Removed stale index.lock: ${lockPath} (age: ${Math.round(ageMs / 1000)}s)`);
+      }
+    } catch (e) {
+      warn(`Failed to remove stale index.lock ${lockPath}: ${e instanceof Error ? e.message : e}`);
+    }
+  }
+}
+
+/**
+ * Run the post-worktree-create bootstrap hook if it exists.
+ *
+ * Convention: `.ninthwave/hooks/post-worktree-create` (executable script).
+ * Called with args: $1=worktreePath, $2=hubRoot, $3=workItemId.
+ * Exit non-zero aborts launch. 5-minute timeout. Stdout/stderr captured.
+ * Missing hook is a silent no-op.
+ *
+ * @returns true if hook succeeded or was missing; false if hook failed or timed out.
+ */
+export function runBootstrapHook(
+  projectRoot: string,
+  worktreePath: string,
+  workItemId: string,
+): { ok: boolean; output?: string } {
+  const hookPath = join(projectRoot, ".ninthwave", "hooks", "post-worktree-create");
+
+  if (!existsSync(hookPath)) {
+    return { ok: true };
+  }
+
+  // Check that the hook is executable
+  try {
+    accessSync(hookPath, fsConstants.X_OK);
+  } catch {
+    warn(`Bootstrap hook exists but is not executable: ${hookPath}`);
+    return { ok: false, output: `Hook is not executable: ${hookPath}` };
+  }
+
+  info(`Running bootstrap hook for ${workItemId}: ${hookPath}`);
+  const result = run(hookPath, [worktreePath, projectRoot, workItemId], {
+    cwd: projectRoot,
+    timeout: BOOTSTRAP_HOOK_TIMEOUT_MS,
+  });
+
+  const combined = [result.stdout, result.stderr].filter(Boolean).join("\n");
+
+  if (result.timedOut) {
+    warn(`Bootstrap hook timed out for ${workItemId} after ${BOOTSTRAP_HOOK_TIMEOUT_MS / 1000}s`);
+    return { ok: false, output: combined || "Hook timed out" };
+  }
+
+  if (result.exitCode !== 0) {
+    warn(`Bootstrap hook failed for ${workItemId} (exit ${result.exitCode}): ${combined}`);
+    return { ok: false, output: combined };
+  }
+
+  info(`Bootstrap hook completed for ${workItemId}`);
+  if (combined) {
+    info(`Bootstrap hook output: ${combined}`);
+  }
+  return { ok: true, output: combined };
+}
 
 export const TEST_LAUNCH_OVERRIDE_COMMAND_ENV = "NINTHWAVE_TEST_LAUNCH_COMMAND";
 export const TEST_LAUNCH_OVERRIDE_ARGS_ENV = "NINTHWAVE_TEST_LAUNCH_ARGS";
@@ -317,6 +413,9 @@ export function ensureWorktreeAndBranch(
   forceWorkerLaunch?: boolean,
   deps: LaunchGitDeps = defaultLaunchGitDeps,
 ): EnsureWorktreeResult {
+  // Clean stale index.lock files before worktree operations
+  cleanStaleIndexLocks(projectRoot);
+
   // Worktree already exists on disk -- reuse it
   if (existsSync(worktreePath)) {
     warn(`Worktree already exists for ${item.id} at ${worktreePath}, reusing`);
@@ -452,6 +551,12 @@ export function launchSingleItem(
   const partitionDir = join(worktreeDir, ".partitions");
 
   try {
+    // Run the bootstrap hook before seeding/launching (installs deps, copies gitignored files)
+    const hookResult = runBootstrapHook(projectRoot, worktreePath, item.id);
+    if (!hookResult.ok) {
+      throw new Error(`Bootstrap hook failed for ${item.id}: ${hookResult.output ?? "unknown error"}`);
+    }
+
     const launchMux = resolveRuntimeLaunchMux(mux, options.resolveMux);
 
     // Seed agent files into worktree if missing

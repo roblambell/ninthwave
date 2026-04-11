@@ -316,13 +316,53 @@ Each work item gets an isolated AI coding session managed as follows:
 
 `launchSingleItem()` in [`core/commands/launch.ts`](core/commands/launch.ts):
 
-1. Create an isolated git worktree and item branch for the worker.
-2. `allocatePartition(id)` -- assigns a unique port range and DB prefix for test isolation.
-3. `seedAgentFiles(worktreePath, hubRoot)` -- copies `implementer.md` to `.claude/agents/`, `.opencode/agents/`, `.github/agents/` inside the worktree.
-4. `mux.launchWorkspace(worktreePath, command, workItemId)` -- spawns the session; returns a workspace ref (e.g., `"workspace:1"` for cmux, `"{session}:nw_<ID>"` for tmux).
-5. `sendWithReadyWait(mux, ref, prompt, ...)` -- waits for the AI prompt, sends the implementer instructions, verifies the worker starts processing.
+1. Clean stale `.git/worktrees/*/index.lock` files left by crashed sessions.
+2. Create an isolated git worktree and item branch for the worker.
+3. Run the **bootstrap hook** (see below) to install dependencies and copy gitignored files.
+4. `allocatePartition(id)` -- assigns a unique port range and DB prefix for test isolation.
+5. `seedAgentFiles(worktreePath, hubRoot)` -- copies `implementer.md` to `.claude/agents/`, `.opencode/agents/`, `.github/agents/` inside the worktree.
+6. `mux.launchWorkspace(worktreePath, command, workItemId)` -- spawns the session; returns a workspace ref (e.g., `"workspace:1"` for cmux, `"{session}:nw_<ID>"` for tmux).
+7. `sendWithReadyWait(mux, ref, prompt, ...)` -- waits for the AI prompt, sends the implementer instructions, verifies the worker starts processing.
 
 The workspace ref is stored in `OrchestratorItem.workspaceRef` for later messaging and cleanup.
+
+### Bootstrap Hook
+
+After creating a worktree and before launching the AI session, Ninthwave runs the **post-worktree-create** bootstrap hook if it exists. This lets projects install dependencies, copy gitignored config files, or perform any other setup that new worktrees need.
+
+**Convention:**
+
+- **Path:** `.ninthwave/hooks/post-worktree-create`
+- **Must be executable** (`chmod +x`).
+- **Arguments:** `$1` = worktree path, `$2` = hub/project root, `$3` = work item ID.
+- **Timeout:** 5 minutes. Hook is killed if it exceeds this.
+- **Exit non-zero** aborts the launch (the work item transitions to stuck).
+- **Missing hook** is a silent no-op -- fully backwards compatible.
+- **Stdout/stderr** are captured and logged for diagnostics.
+
+Example `.ninthwave/hooks/post-worktree-create`:
+
+```bash
+#!/usr/bin/env bash
+set -euo pipefail
+
+WORKTREE="$1"
+HUB_ROOT="$2"
+
+cd "$WORKTREE"
+
+# Install Node dependencies
+if [ -f package.json ]; then
+  npm ci --prefer-offline 2>&1
+fi
+
+# Copy gitignored test secrets from the hub repo
+if [ -f "$HUB_ROOT/config/test.secret.exs" ]; then
+  cp "$HUB_ROOT/config/test.secret.exs" config/test.secret.exs
+fi
+```
+
+`nw init` scaffolds the `.ninthwave/hooks/` directory automatically.
 
 ### Heartbeat and Health
 

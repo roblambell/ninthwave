@@ -705,6 +705,11 @@ function scaffold(
   mkdirSync(decisionsDir, { recursive: true });
   writeFileSync(join(decisionsDir, ".gitkeep"), "");
 
+  // --- .ninthwave/hooks/ (convention-based bootstrap hooks) ---
+  const hooksDir = join(projectDir, ".ninthwave", "hooks");
+  mkdirSync(hooksDir, { recursive: true });
+  writeFileSync(join(hooksDir, ".gitkeep"), "");
+
   // --- .ninthwave/work-item-format.md (managed copy of the canonical format guide) ---
   //
   // The /decompose skill reads this file during Phase 6 to ground its output against
@@ -766,6 +771,8 @@ function scaffold(
 !friction/**
 !decisions/
 !decisions/**
+!hooks/
+!hooks/**
 `,
     );
   }
@@ -833,6 +840,7 @@ export function initProject(
   console.log(`  .ninthwave/work/ ${DIM}(work items)${RESET}`);
   console.log(`  .ninthwave/friction/ ${DIM}(friction log)${RESET}`);
   console.log(`  .ninthwave/decisions/ ${DIM}(decision inbox)${RESET}`);
+  console.log(`  .ninthwave/hooks/ ${DIM}(bootstrap hooks)${RESET}`);
   console.log(`  .ninthwave/schedules/ ${DIM}(scheduled tasks)${RESET}`);
   console.log(`  .claude/skills/ ${DIM}(managed copies)${RESET}`);
   console.log(`  .gitignore`);

@@ -102,6 +102,8 @@ nw heartbeat --progress 0.0 --label "Starting"
 
 ## 4. Implement the Change
 
+> **Note:** Dependency installation (npm/pnpm install, mix deps.get, etc.) and gitignored config file setup are handled automatically by the project's bootstrap hook (`.ninthwave/hooks/post-worktree-create`) before your session starts. You do not need to run install commands unless the work item specifically changes dependencies.
+
 - Implement the fix, feature, test, refactor, or documentation change described in the work item
 - Follow all project conventions from the project instruction file
 - Keep changes tightly scoped to files mentioned in the work item
