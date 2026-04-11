@@ -1132,7 +1132,7 @@ describe("Daemon lifecycle: multi-item orchestration", () => {
     expect(remainingMerges).toHaveLength(1);
   });
 
-  it("WIP limit prevents launching more items than allowed", () => {
+  it("session limit prevents launching more items than allowed", () => {
     const orch = new Orchestrator({ sessionLimit: 2 });
 
     orch.addItem(makeWorkItem("W-1"));
@@ -1243,7 +1243,7 @@ describe("Daemon lifecycle: crash recovery round-trip", () => {
     const PID = 42000;
     const STARTED_AT = "2026-03-25T08:00:00.000Z";
 
-    // ── Step 1: Build orchestrator with 5 items in different WIP states ──
+    // ── Step 1: Build orchestrator with 5 items in different active states ──
     const orch = new Orchestrator({ sessionLimit: 5 });
 
     // Item 1: launching state

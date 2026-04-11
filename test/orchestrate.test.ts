@@ -796,7 +796,7 @@ describe("orchestrateLoop", () => {
     expect(items.map((i) => i.id).sort()).toEqual(["A-1-1", "A-1-2"]);
   });
 
-  it("respects WIP limit during batch processing", async () => {
+  it("respects session limit during batch processing", async () => {
     const orch = new Orchestrator({ fixForward: false, sessionLimit: 1, mergeStrategy: "auto" });
     orch.addItem(makeWorkItem("W-1-1"));
     orch.getItem("W-1-1")!.reviewCompleted = true;
@@ -3368,7 +3368,7 @@ describe("setupKeyboardShortcuts", () => {
     vi.useRealTimers();
   });
 
-  // ── +/- WIP limit adjustment ──────────────────────────────────────
+  // ── +/- session limit adjustment ──────────────────────────────────────
 
   it("'+' calls onSessionLimitChange with +1", () => {
     const ac = new AbortController();
@@ -4942,7 +4942,7 @@ describe("orchestrateLoop watch mode", () => {
     expect(logs.some((l) => l.event === "watch_new_items")).toBe(false);
   });
 
-  it("watch mode respects WIP limits for newly discovered items", async () => {
+  it("watch mode respects session limits for newly discovered items", async () => {
     const orch = new Orchestrator({ fixForward: false, sessionLimit: 1, mergeStrategy: "auto" });
     orch.addItem(makeWorkItem("L-1-1"));
     orch.getItem("L-1-1")!.reviewCompleted = true;
@@ -5000,7 +5000,7 @@ describe("orchestrateLoop watch mode", () => {
       actionDeps: mockActionDeps(),
       scanWorkItems: () => {
         scanCount++;
-        // Return 3 items -- but WIP limit is 1, so they should be queued/serial
+        // Return 3 items -- but session limit is 1, so they should be queued/serial
         return [makeWorkItem("L-1-1"), makeWorkItem("L-1-2"), makeWorkItem("L-1-3")];
       },
     };
@@ -5421,7 +5421,7 @@ describe("orchestrateLoop crew mode", () => {
       log: (e) => logs.push(e),
       actionDeps: actionDepsOverride,
       crewBroker: broker,
-      getFreeMem: () => 16 * 1024 ** 3, // 16GB -- prevent memory-based WIP reduction
+      getFreeMem: () => 16 * 1024 ** 3, // 16GB -- prevent memory-based session limit reduction
     };
 
     await orchestrateLoop(orch, defaultCtx, deps, { maxIterations: 2 });
@@ -6095,7 +6095,7 @@ describe("resolveScheduleExecutionEnabled", () => {
 });
 
 describe("createRuntimeControlHandlers", () => {
-  it("persists merge, review, WIP, and schedule changes while keeping pause and collaboration runtime-only", () => {
+  it("persists merge, review, session limit, and schedule changes while keeping pause and collaboration runtime-only", () => {
     const savedUpdates: Array<Record<string, unknown>> = [];
     const savedScheduleEnabled: boolean[] = [];
     const sentControls: Array<Record<string, unknown>> = [];

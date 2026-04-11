@@ -471,7 +471,7 @@ describe("structured log events", () => {
     expect(historyEntries[0]!.result).toBe("timeout");
   });
 
-  it("emits schedule-skipped with reason=session-limit-full-queued when WIP full", async () => {
+  it("emits schedule-skipped with reason=session-limit-full-queued when sessions full", async () => {
     const task = makeTask();
     const logs: LogEntry[] = [];
 

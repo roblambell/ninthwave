@@ -483,7 +483,7 @@ describe("runInteractiveFlow", () => {
     expect(result).toBeNull();
   });
 
-  it("uses precomputed WIP limit as default without prompting", async () => {
+  it("uses precomputed session limit as default without prompting", async () => {
     const prompt = makePrompt(["all", "", ""]);
     const result = await runInteractiveFlow(items, 7, { prompt, useLegacyPrompts: true });
 

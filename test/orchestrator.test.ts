@@ -169,9 +169,9 @@ describe("Orchestrator", () => {
     expect(orch.getItem("H-1-1")!.state).toBe("queued");
   });
 
-  // ── 3. Ready → Launching with WIP limit ────────────────────────
+  // ── 3. Ready → Launching with session limit ────────────────────────
 
-  it("launches ready items up to WIP limit", () => {
+  it("launches ready items up to session limit", () => {
     orch = new Orchestrator({ sessionLimit: 2 });
 
     orch.addItem(makeWorkItem("H-1-1"));
@@ -192,14 +192,14 @@ describe("Orchestrator", () => {
     expect(orch.getItem("H-1-3")!.state).toBe("ready");
   });
 
-  it("respects WIP limit across existing WIP items", () => {
+  it("respects session limit across existing active items", () => {
     orch = new Orchestrator({ sessionLimit: 2 });
 
     orch.addItem(makeWorkItem("H-1-1"));
     orch.getItem("H-1-1")!.reviewCompleted = true;
     orch.addItem(makeWorkItem("H-1-2"));
     orch.getItem("H-1-2")!.reviewCompleted = true;
-    orch.hydrateState("H-1-1", "implementing"); // already in WIP
+    orch.hydrateState("H-1-1", "implementing"); // already active
 
     const actions = orch.processTransitions(
       snapshotWith(
@@ -870,7 +870,7 @@ describe("Orchestrator", () => {
     expect(actions.some((a) => a.type === "notify-ci-failure")).toBe(true);
   });
 
-  // ── 15. WIP count and slots ────────────────────────────────────
+  // ── 15. Session count and slots ────────────────────────────────────
 
   it("activeSessionCount reflects items with active workspaces", () => {
     orch = new Orchestrator({ sessionLimit: 5 });
@@ -895,7 +895,7 @@ describe("Orchestrator", () => {
     expect(orch.availableSessionSlots).toBe(3);
   });
 
-  it("blocked does not count toward WIP", () => {
+  it("blocked does not count toward session limit", () => {
     orch = new Orchestrator({ sessionLimit: 3 });
 
     orch.addItem(makeWorkItem("H-1-1"));
@@ -1614,7 +1614,7 @@ describe("Orchestrator", () => {
       expect(result.error).toContain("No PR number");
     });
 
-    it("merge: sends rebase requests to dependent WIP items", () => {
+    it("merge: sends rebase requests to dependent active items", () => {
       const deps = mockDeps();
       const worktreePath = "/tmp/test/ninthwave-H-1-2";
       mkdirSync(worktreePath, { recursive: true });
@@ -2572,7 +2572,7 @@ describe("Orchestrator", () => {
     // ── ready ──────────────────────────────────────────────────────
 
     describe("ready →", () => {
-      it("→ launching when WIP slots available", () => {
+      it("→ launching when session slots available", () => {
         orch.addItem(makeWorkItem("X-1-1"));
         orch.getItem("X-1-1")!.reviewCompleted = true;
         orch.hydrateState("X-1-1", "ready");
@@ -2580,13 +2580,13 @@ describe("Orchestrator", () => {
         expect(orch.getItem("X-1-1")!.state).toBe("launching");
       });
 
-      it("stays ready when WIP limit reached", () => {
+      it("stays ready when session limit reached", () => {
         orch = new Orchestrator({ sessionLimit: 1 });
         orch.addItem(makeWorkItem("X-1-1"));
         orch.getItem("X-1-1")!.reviewCompleted = true;
         orch.addItem(makeWorkItem("X-1-2"));
         orch.getItem("X-1-2")!.reviewCompleted = true;
-        orch.hydrateState("X-1-1", "implementing"); // uses 1 WIP slot
+        orch.hydrateState("X-1-1", "implementing"); // uses 1 session slot
         orch.getItem("X-1-1")!.workspaceRef = "workspace:1";
         orch.hydrateState("X-1-2", "ready");
         orch.processTransitions(
@@ -3951,10 +3951,10 @@ describe("Orchestrator", () => {
     });
   });
 
-  // ── WIP-limited transitions ──────────────────────────────────────
+  // ── Session-limited transitions ──────────────────────────────────────
 
-  describe("WIP-limited transitions", () => {
-    it("zero WIP limit prevents any launches", () => {
+  describe("session-limited transitions", () => {
+    it("zero session limit prevents any launches", () => {
       orch = new Orchestrator({ sessionLimit: 0 });
       orch.addItem(makeWorkItem("X-1-1"));
       orch.getItem("X-1-1")!.reviewCompleted = true;
@@ -3962,7 +3962,7 @@ describe("Orchestrator", () => {
       expect(orch.getItem("X-1-1")!.state).toBe("ready");
     });
 
-    it("exact WIP limit: all slots used, no new launches", () => {
+    it("exact session limit: all slots used, no new launches", () => {
       orch = new Orchestrator({ sessionLimit: 2 });
       orch.addItem(makeWorkItem("A-1-1"));
       orch.getItem("A-1-1")!.reviewCompleted = true;
@@ -3986,7 +3986,7 @@ describe("Orchestrator", () => {
       expect(orch.activeSessionCount).toBe(2);
     });
 
-    it("WIP slot freed by done transition allows new launch in same tick", () => {
+    it("session slot freed by done transition allows new launch in same tick", () => {
       orch = new Orchestrator({ fixForward: false, sessionLimit: 1 });
       orch.addItem(makeWorkItem("A-1-1"));
       orch.getItem("A-1-1")!.reviewCompleted = true;
@@ -4001,7 +4001,7 @@ describe("Orchestrator", () => {
       expect(actions.some((a) => a.type === "launch")).toBe(true);
     });
 
-    it("all WIP states count toward limit", () => {
+    it("all active session states count toward limit", () => {
       orch = new Orchestrator({ sessionLimit: 8 });
       const activeSessionStates: OrchestratorItemState[] = [
         "launching", "implementing", "ci-pending",
@@ -4021,7 +4021,7 @@ describe("Orchestrator", () => {
       expect(orch.availableSessionSlots).toBe(0);
     });
 
-    it("non-WIP states do not count toward limit", () => {
+    it("non-session states do not count toward limit", () => {
       orch = new Orchestrator({ sessionLimit: 4 });
       orch.addItem(makeWorkItem("A-1-1"));
       orch.getItem("A-1-1")!.reviewCompleted = true;
@@ -4040,7 +4040,7 @@ describe("Orchestrator", () => {
       expect(orch.availableSessionSlots).toBe(4);
     });
 
-    it("launches exactly up to WIP limit, no more", () => {
+    it("launches exactly up to session limit, no more", () => {
       orch = new Orchestrator({ sessionLimit: 3 });
       for (let i = 1; i <= 5; i++) {
         orch.addItem(makeWorkItem(`X-1-${i}`));
@@ -4056,7 +4056,7 @@ describe("Orchestrator", () => {
       expect(orch.getItemsByState("ready")).toHaveLength(2);
     });
 
-    it("merged state does not count toward WIP (allows launches)", () => {
+    it("merged state does not count toward session limit (allows launches)", () => {
       orch = new Orchestrator({ sessionLimit: 1 });
       orch.addItem(makeWorkItem("A-1-1"));
       orch.getItem("A-1-1")!.reviewCompleted = true;
@@ -4065,7 +4065,7 @@ describe("Orchestrator", () => {
       orch.hydrateState("A-1-1", "merged");
       orch.hydrateState("B-1-1", "ready");
 
-      // merged is not WIP, so activeSessionCount is 0, 1 slot available
+      // merged is not active, so activeSessionCount is 0, 1 slot available
       expect(orch.activeSessionCount).toBe(0);
       const actions = orch.processTransitions(emptySnapshot());
       expect(orch.getItem("B-1-1")!.state).toBe("launching");
@@ -4206,7 +4206,7 @@ describe("Orchestrator", () => {
       expect(actions.some((a) => a.type === "clean" && a.itemId === "C-1-1")).toBe(true);
     });
 
-    it("merged items free WIP slots for ready items in the same tick", () => {
+    it("merged items free session slots for ready items in the same tick", () => {
       orch = new Orchestrator({ fixForward: false, sessionLimit: 1 });
       orch.addItem(makeWorkItem("A-1-1"));
       orch.getItem("A-1-1")!.reviewCompleted = true;
@@ -4505,12 +4505,12 @@ describe("Orchestrator", () => {
     });
   });
 
-  // ── Memory-aware WIP limits ───────────────────────────────────────
+  // ── Memory-aware session limits ───────────────────────────────────────
 
   describe("calculateMemorySessionLimit", () => {
     const GB = 1024 * 1024 * 1024;
 
-    it("returns correct WIP for various memory scenarios", () => {
+    it("returns correct session limit for various memory scenarios", () => {
       // 10 GB free → floor(10/1) = 10, but configured limit is 5 → 5
       expect(calculateMemorySessionLimit(5, 10 * GB)).toBe(5);
 
@@ -4581,7 +4581,7 @@ describe("Orchestrator", () => {
       orch = new Orchestrator({ sessionLimit: 5 });
       orch.addItem(makeWorkItem("H-1-1"));
       orch.getItem("H-1-1")!.reviewCompleted = true;
-      orch.hydrateState("H-1-1", "implementing"); // 1 in WIP
+      orch.hydrateState("H-1-1", "implementing"); // 1 active session
       orch.getItem("H-1-1")!.workspaceRef = "workspace:1";
 
       // Without memory adjustment: 5 - 1 = 4 slots
@@ -4592,7 +4592,7 @@ describe("Orchestrator", () => {
       expect(orch.availableSessionSlots).toBe(1);
     });
 
-    it("memory-constrained WIP queues items instead of launching", () => {
+    it("memory-constrained session limit queues items instead of launching", () => {
       orch = new Orchestrator({ sessionLimit: 5 });
 
       // Add 3 items and make them all ready
@@ -6577,15 +6577,15 @@ describe("Orchestrator", () => {
       expect(actions.some((a) => a.type === "notify-ci-failure")).toBe(true);
     });
 
-    // ── reviewing counts toward unified WIP ─────────────────────────
+    // ── reviewing counts toward unified session limit ─────────────────────────
 
-    it("reviewing is counted in unified WIP (both can review when slots available)", () => {
+    it("reviewing is counted in unified session limit (both can review when slots available)", () => {
       // Both items in the pipeline; since reviewing is in ACTIVE_SESSION_STATES and ci-passed→reviewing
-      // is in-place (same WIP slot), both can enter reviewing without deadlock.
+      // is in-place (same session slot), both can enter reviewing without deadlock.
       orch = new Orchestrator({ mergeStrategy: "auto" });
       orch.addItem(makeWorkItem("R-7-1"));
       orch.addItem(makeWorkItem("R-7-2"));
-      orch.hydrateState("R-7-1", "reviewing"); // occupies a WIP slot
+      orch.hydrateState("R-7-1", "reviewing"); // occupies a session slot
       orch.getItem("R-7-1")!.prNumber = 42;
       orch.hydrateState("R-7-2", "ci-pending");
       orch.getItem("R-7-2")!.prNumber = 43;
@@ -6598,12 +6598,12 @@ describe("Orchestrator", () => {
       );
 
       // R-7-2 enters reviewing via in-place transition (ci-pending→ci-passed→reviewing)
-      // No separate review slot limit blocks it -- reviewing shares the unified WIP pool.
+      // No separate review slot limit blocks it -- reviewing shares the unified session pool.
       expect(orch.getItem("R-7-2")!.state).toBe("reviewing");
       expect(actions.filter((a) => a.type === "launch-review" && a.itemId === "R-7-2")).toHaveLength(1);
     });
 
-    it("reviewing WIP slot is reused when review completes", () => {
+    it("reviewing session slot is reused when review completes", () => {
       orch = new Orchestrator({ mergeStrategy: "auto" });
       orch.addItem(makeWorkItem("R-7-3"));
       orch.addItem(makeWorkItem("R-7-4"));
@@ -6627,15 +6627,15 @@ describe("Orchestrator", () => {
 
       // R-7-3 should chain through: reviewing → ci-passed → merging (reviewCompleted=true)
       expect(orch.getItem("R-7-3")!.state).toBe("merging");
-      // R-7-4 was in ci-passed; reviewing is an in-place transition (same WIP slot).
-      // R-7-3's WIP slot was freed (it is now merging) and R-7-4 reuses its own slot.
+      // R-7-4 was in ci-passed; reviewing is an in-place transition (same session slot).
+      // R-7-3's session slot was freed (it is now merging) and R-7-4 reuses its own slot.
       expect(orch.getItem("R-7-4")!.state).toBe("reviewing");
       expect(actions.some((a) => a.type === "launch-review" && a.itemId === "R-7-4")).toBe(true);
     });
 
-    // ── reviewing counts toward unified WIP limit (blocks new launches) ──
+    // ── reviewing counts toward unified session limit (blocks new launches) ──
 
-    it("reviewing counts toward unified WIP limit (blocks new launches)", () => {
+    it("reviewing counts toward unified session limit (blocks new launches)", () => {
       orch = new Orchestrator({ sessionLimit: 2, mergeStrategy: "auto" });
       orch.addItem(makeWorkItem("R-8-1"));
       orch.addItem(makeWorkItem("R-8-2"));
@@ -6644,7 +6644,7 @@ describe("Orchestrator", () => {
       orch.hydrateState("R-8-1", "reviewing"); // counts toward sessionLimit (unified pool)
       orch.getItem("R-8-1")!.prNumber = 42;
       orch.getItem("R-8-1")!.reviewWorkspaceRef = "workspace:review:1";
-      orch.hydrateState("R-8-2", "implementing"); // counts as 1 WIP
+      orch.hydrateState("R-8-2", "implementing"); // counts as 1 active session
       orch.getItem("R-8-2")!.workspaceRef = "workspace:1";
       orch.hydrateState("R-8-3", "ready");
 
@@ -7033,7 +7033,7 @@ describe("Orchestrator", () => {
       }).not.toThrow();
     });
 
-    it("reviewing is now included in WIP states", () => {
+    it("reviewing is now included in active session states", () => {
       orch = new Orchestrator({ sessionLimit: 10 });
       const activeSessionStates: OrchestratorItemState[] = [
         "launching", "implementing", "ci-pending",
@@ -7044,7 +7044,7 @@ describe("Orchestrator", () => {
         orch.hydrateState(`WR-${i + 1}`, state);
         orch.getItem(`WR-${i + 1}`)!.workspaceRef = `workspace:${i + 1}`;
       });
-      // Add reviewing item -- should count toward unified WIP
+      // Add reviewing item -- should count toward unified session limit
       orch.addItem(makeWorkItem("WR-8"));
       orch.hydrateState("WR-8", "reviewing");
       orch.getItem("WR-8")!.reviewWorkspaceRef = "workspace:review:1";

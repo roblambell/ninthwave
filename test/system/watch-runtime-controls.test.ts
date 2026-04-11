@@ -39,7 +39,7 @@ Key files: \`test/system/watch-runtime-controls.test.ts\`
 
 Runtime control coverage for the second item.
 
-Acceptance: WIP changes can launch queued work during a live run.
+Acceptance: Session limit changes can launch queued work during a live run.
 
 Key files: \`test/system/watch-runtime-controls.test.ts\`
 `;
@@ -61,7 +61,7 @@ describe("system: watch runtime controls", () => {
     cleanupTempRepos();
   });
 
-  it("applies live WIP, review, and merge strategy changes during a headless watch run", async () => {
+  it("applies live session limit, review, and merge strategy changes during a headless watch run", async () => {
     const harness = new CliHarness();
     harness.writeWorkItems(RUNTIME_ITEMS);
     harness.commitAndPushWorkItems("Add watch runtime control test items");

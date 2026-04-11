@@ -1389,7 +1389,7 @@ describe("formatStatusTable", () => {
     expect(table).not.toContain("└");
   });
 
-  it("keeps verifying items in the active section but excludes from WIP count", () => {
+  it("keeps verifying items in the active section but excludes from session count", () => {
     const items = [
       makeStatusItem({ id: "A-1", state: "verifying" }),
       makeStatusItem({ id: "A-2", state: "queued" }),
@@ -1398,7 +1398,7 @@ describe("formatStatusTable", () => {
     const table = stripAnsi(formatStatusTable(items, 100, 4));
     const verifyingIndex = table.indexOf("A-1");
     const doneIndex = table.indexOf("A-3");
-    // Verifying doesn't count toward active sessions (post-merge, no WIP slot consumed)
+    // Verifying doesn't count toward active sessions (post-merge, no session slot consumed)
     const queueIndex = table.indexOf("Queue (1 waiting, 0/4 active sessions)");
     expect(verifyingIndex).toBeGreaterThan(-1);
     expect(doneIndex).toBeGreaterThan(-1);

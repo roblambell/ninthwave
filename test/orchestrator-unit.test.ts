@@ -637,13 +637,13 @@ describe("evaluateMerge", () => {
     expect(actions.some((a) => a.type === "merge")).toBe(false);
   });
 
-  it("review gate: ci-passed always transitions to reviewing (no separate review WIP limit)", () => {
+  it("review gate: ci-passed always transitions to reviewing (no separate review session limit)", () => {
     // reviewing is in ACTIVE_SESSION_STATES; ci-passed→reviewing is an in-place transition
-    // (same WIP slot). No separate reviewSessionLimit blocks it.
+    // (same session slot). No separate reviewSessionLimit blocks it.
     const orch = new Orchestrator({ mergeStrategy: "auto" });
     orch.addItem(makeWorkItem("H-1-1"));
     orch.addItem(makeWorkItem("H-1-2"));
-    orch.hydrateState("H-1-1", "reviewing"); // occupies a WIP slot
+    orch.hydrateState("H-1-1", "reviewing"); // occupies a session slot
     orch.getItem("H-1-1")!.prNumber = 10;
     orch.hydrateState("H-1-2", "ci-passed");
     orch.getItem("H-1-2")!.prNumber = 20;
@@ -835,13 +835,13 @@ describe("setSessionLimit", () => {
     const orch = new Orchestrator({ sessionLimit: 2 });
     orch.addItem(makeWorkItem("H-1-1"));
     orch.hydrateState("H-1-1", "implementing");
-    orch.getItem("H-1-1")!.workspaceRef = "workspace:1"; // active worker uses 1 WIP slot
+    orch.getItem("H-1-1")!.workspaceRef = "workspace:1"; // active worker uses 1 session slot
     expect(orch.availableSessionSlots).toBe(1);
     orch.setSessionLimit(4);
     expect(orch.availableSessionSlots).toBe(3);
   });
 
-  it("reducing WIP below current count does not eject items", () => {
+  it("reducing session limit below current count does not eject items", () => {
     const orch = new Orchestrator({ sessionLimit: 3 });
     orch.addItem(makeWorkItem("H-1-1"));
     orch.addItem(makeWorkItem("H-1-2"));
@@ -1801,7 +1801,7 @@ describe("stuck dep notification for stacked items", () => {
     expect(orch.getItem("H-1-1")!.state).toBe("stuck");
     expect(orch.getItem("H-1-2")!.state).toBe("queued");
     expect(orch.getItem("H-1-2")!.baseBranch).toBeUndefined();
-    // No rebase action for pre-WIP dependent
+    // No rebase action for pre-session dependent
     const rebaseAction = actions.find((a) => a.type === "rebase" && a.itemId === "H-1-2");
     expect(rebaseAction).toBeUndefined();
   });
@@ -6149,7 +6149,7 @@ describe("session parking (H-SP-2)", () => {
     expect(orch.getItem("H-1-2")!.state).toBe("ready");
   });
 
-  it("queued item can launch after another item is parked (WIP slot freed)", () => {
+  it("queued item can launch after another item is parked (session slot freed)", () => {
     const orch = new Orchestrator({ mergeStrategy: "manual", sessionLimit: 1 });
     orch.addItem(makeWorkItem("H-1-1"));
     orch.addItem(makeWorkItem("H-1-2"));
