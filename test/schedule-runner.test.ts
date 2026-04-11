@@ -126,21 +126,21 @@ describe("checkSchedules", () => {
 // ── processScheduleQueue ────────────────────────────────────────────
 
 describe("processScheduleQueue", () => {
-  it("launches tasks when WIP slots available", () => {
+  it("launches tasks when session slots available", () => {
     const state = makeState({ queued: ["task-a", "task-b"] });
     const result = processScheduleQueue(state, 2);
     expect(result.toLaunch).toEqual(["task-a", "task-b"]);
     expect(result.remainingQueue).toEqual([]);
   });
 
-  it("queues tasks when WIP is full", () => {
+  it("queues tasks when sessions are full", () => {
     const state = makeState({ queued: ["task-a", "task-b", "task-c"] });
     const result = processScheduleQueue(state, 0);
     expect(result.toLaunch).toEqual([]);
     expect(result.remainingQueue).toEqual(["task-a", "task-b", "task-c"]);
   });
 
-  it("partially dequeues when limited WIP", () => {
+  it("partially dequeues when limited session slots", () => {
     const state = makeState({ queued: ["task-a", "task-b", "task-c"] });
     const result = processScheduleQueue(state, 1);
     expect(result.toLaunch).toEqual(["task-a"]);
@@ -397,13 +397,13 @@ describe("processScheduledTasks", () => {
     expect(triggered.length).toBeGreaterThan(0);
   });
 
-  it("WIP queueing: fills WIP, confirms queued, frees slot, confirms launched", async () => {
+  it("session queueing: fills sessions, confirms queued, frees slot, confirms launched", async () => {
     const now = new Date("2026-03-28T10:00:00Z");
     const task = makeTask();
     let savedState: ScheduleState | null = null;
     const logs: LogEntry[] = [];
 
-    // Step 1: WIP full -- task gets queued
+    // Step 1: sessions full -- task gets queued
     const fullDeps: ScheduleLoopDeps = {
       listScheduledTasks: () => [task],
       readState: () => makeState(),
@@ -417,7 +417,7 @@ describe("processScheduledTasks", () => {
       triggerDir: "/nonexistent",
     };
 
-    // All 5 WIP slots filled by active work items
+    // All 5 session slots filled by active work items
     const orch = makeMinimalOrch(0);
     // Simulate active items by setting effectiveSessionLimit to 0
     await processScheduledTasks("/project", orch, fullDeps, (e) => logs.push(e), 0);

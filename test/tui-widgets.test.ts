@@ -1075,7 +1075,7 @@ describe("runStartupSettingsScreen", () => {
       "\x1B[C", // off -> mine
       "\x1B[B", // collaboration
       "\x1B[C", // local -> share
-      "\x1B[B", // WIP
+      "\x1B[B", // session limit
       "\x1B[C", // 4 -> 5
       "\r",
     ]);
@@ -1494,7 +1494,7 @@ describe("runSelectionScreen", () => {
     expect(result!.allSelected).toBe(true);
   });
 
-  it("returns local-first defaults for merge, review, connection, and WIP", async () => {
+  it("returns local-first defaults for merge, review, connection, and session limit", async () => {
     const { io, sendKeyBatches } = createMockIO();
     const items = [makeWorkItem("A-1", "First")];
 

@@ -1,5 +1,5 @@
 // Tests for core/tui-keyboard.ts -- keyboard handler, controls overlay,
-// WIP +/- shortcuts, and runtime control state management.
+// session limit +/- shortcuts, and runtime control state management.
 
 import { describe, it, expect, vi } from "vitest";
 import {
@@ -663,7 +663,7 @@ describe("setupKeyboardShortcuts", () => {
     cleanup();
   });
 
-  it("+ and = increase WIP via onSessionLimitChange", () => {
+  it("+ and = increase session limit via onSessionLimitChange", () => {
     const ac = new AbortController();
     const stdin = makeFakeStdin();
     const onSessionLimitChange = vi.fn();
@@ -679,7 +679,7 @@ describe("setupKeyboardShortcuts", () => {
     cleanup();
   });
 
-  it("- and _ decrease WIP via onSessionLimitChange", () => {
+  it("- and _ decrease session limit via onSessionLimitChange", () => {
     const ac = new AbortController();
     const stdin = makeFakeStdin();
     const onSessionLimitChange = vi.fn();
@@ -1160,7 +1160,7 @@ describe("controls overlay row navigation", () => {
     vi.useRealTimers();
   });
 
-  it("Left/Right adjust WIP limit on the active row", () => {
+  it("Left/Right adjust session limit on the active row", () => {
     const ac = new AbortController();
     const stdin = makeFakeStdin();
     const onSessionLimitChange = vi.fn();

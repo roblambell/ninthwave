@@ -1,7 +1,7 @@
 // Scenario test: stacked branch lifecycle through the real orchestrateLoop.
 // Exercises stacking scenarios with enableStacking: true:
 // 1. Item B depends on A; A reaches ci-passed → B promotes from queued with baseBranch set, launch includes baseBranch
-// 2. When A goes stuck, pre-WIP stacked B rolls back to queued with baseBranch cleared
+// 2. When A goes stuck, pre-session stacked B rolls back to queued with baseBranch cleared
 // 3. When A's CI recovers from ci-failed to ci-pending, stacked implementing B receives a resume/rebase message
 // 4. sync-stack-comments action is emitted when a stacked PR opens
 
@@ -81,7 +81,7 @@ describe("scenario: stacking", () => {
     const fakeGh = new FakeGitHub();
     const fakeMux = new FakeMux();
 
-    // sessionLimit = 1: B gets promoted to ready but can't launch (WIP full with A).
+    // sessionLimit = 1: B gets promoted to ready but can't launch (sessions full with A).
     // maxCiRetries = 0: A goes stuck when CI failure is re-evaluated next cycle.
     const orch = new Orchestrator({
       sessionLimit: 1,

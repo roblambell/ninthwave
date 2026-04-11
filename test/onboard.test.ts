@@ -529,7 +529,7 @@ describe("cmdNoArgs", () => {
     expect(output).toContain("12345");
   });
 
-  it("calls cmdWatch with item IDs, merge strategy, and WIP limit", async () => {
+  it("calls cmdWatch with item IDs, merge strategy, and session limit", async () => {
     const projectDir = setupTempRepo();
     mkdirSync(join(projectDir, ".ninthwave", "work"), { recursive: true });
 

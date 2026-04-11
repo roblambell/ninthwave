@@ -349,7 +349,7 @@ describe("processExternalReviews", () => {
     expect(headChangedLog!.prNumber).toBe(10);
   });
 
-  it("respects unified WIP limit (1 internal reviewing reduces available slots)", () => {
+  it("respects unified session limit (1 internal reviewing reduces available slots)", () => {
     const prs = [
       makeExternalPR({ prNumber: 10, headSha: "a" }),
       makeExternalPR({ prNumber: 11, headSha: "b" }),
@@ -367,7 +367,7 @@ describe("processExternalReviews", () => {
     expect(result.filter((r) => r.state === "detected")).toHaveLength(2);
   });
 
-  it("respects unified WIP limit when external reviews are already in progress", () => {
+  it("respects unified session limit when external reviews are already in progress", () => {
     const prs = [
       makeExternalPR({ prNumber: 10, headSha: "a" }),
       makeExternalPR({ prNumber: 11, headSha: "b" }),

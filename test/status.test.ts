@@ -1290,7 +1290,7 @@ describe("formatStatusTable with queued items", () => {
       makeItem("A-2", "verifying", "Verifying"),
       makeItem("Q-1", "queued", "Waiting"),
     ];
-    // Only A-1 counts as active; verifying is post-merge and doesn't consume a WIP slot.
+    // Only A-1 counts as active; verifying is post-merge and doesn't consume a session slot.
     const output = stripAnsi(formatStatusTable(items, 80, 3));
     expect(output).toContain("1/3 active sessions");
   });
