@@ -2070,6 +2070,62 @@ describe("handleReviewing", () => {
     expect(actions.some((a) => a.type === "clean-review")).toBe(true);
   });
 
+  it("approve verdict records lastReviewedCommitSha for SHA gate", () => {
+    const orch = new Orchestrator({ mergeStrategy: "manual" });
+    orch.addItem(makeWorkItem("H-1-1"));
+    orch.hydrateState("H-1-1", "reviewing");
+    const item = orch.getItem("H-1-1")!;
+    item.prNumber = 42;
+
+    orch.processTransitions(
+      snapshotWith([{
+        id: "H-1-1", ciStatus: "pass", prState: "open",
+        reviewVerdict: approveVerdict, headSha: "abc123",
+      }]),
+    );
+
+    expect(item.reviewCompleted).toBe(true);
+    expect(item.lastReviewedCommitSha).toBe("abc123");
+  });
+
+  it("respawn after approved review blocks re-review on unchanged code", () => {
+    // After approve sets lastReviewedCommitSha, a feedback respawn should not
+    // re-review until the implementer pushes a new commit.
+    const orch = new Orchestrator({ mergeStrategy: "manual" });
+    orch.addItem(makeWorkItem("H-1-1"));
+    // Simulate: implementer was respawned for feedback and is now implementing
+    orch.hydrateState("H-1-1", "implementing");
+    const item = orch.getItem("H-1-1")!;
+    item.prNumber = 42;
+    item.reviewCompleted = false; // reset by respawnForFeedback
+    item.lastReviewedCommitSha = "approved-sha"; // set by approve verdict
+
+    // Poll: PR exists, CI passes, but HEAD matches lastReviewedCommitSha (no new commit)
+    const actions = orch.processTransitions(
+      snapshotWith([{
+        id: "H-1-1", prNumber: 42, ciStatus: "pass", prState: "open",
+        headSha: "approved-sha",
+      }]),
+      NOW,
+    );
+
+    // SHA gate: should stay in implementing, not progress to reviewing
+    expect(item.state).toBe("implementing");
+    expect(actions.some((a) => a.type === "launch-review")).toBe(false);
+
+    // Now implementer pushes a new commit -- different headSha
+    const actions2 = orch.processTransitions(
+      snapshotWith([{
+        id: "H-1-1", prNumber: 42, ciStatus: "pass", prState: "open",
+        headSha: "new-commit-sha",
+      }]),
+      NOW,
+    );
+
+    // Should progress and launch a review for the new code
+    expect(actions2.some((a) => a.type === "launch-review")).toBe(true);
+  });
+
   it("transitions to review-pending on request-changes verdict", () => {
     const orch = new Orchestrator();
     orch.addItem(makeWorkItem("H-1-1"));
@@ -3606,6 +3662,71 @@ describe("processComments (via processTransitions)", () => {
     expect(item.needsFeedbackResponse).toBeUndefined();
     expect(item.pendingFeedbackMessage).toBeUndefined();
     expect(item.lastCommentCheck).toBeUndefined();
+  });
+
+  it("parked item detects human comment that quotes an agent comment", () => {
+    // Human used GitHub "Quote reply" on an implementer comment, adding their
+    // own text after the blockquote. The agent identifier inside the blockquote
+    // must NOT cause the comment to be filtered out.
+    const orch = new Orchestrator({ mergeStrategy: "manual" });
+    orch.addItem(makeWorkItem("H-1-1"));
+    orch.hydrateState("H-1-1", "review-pending");
+    const item = orch.getItem("H-1-1")!;
+    item.prNumber = 42;
+    item.reviewCompleted = true;
+    item.sessionParked = true;
+
+    const actions = orch.processTransitions(
+      snapshotWith([{
+        id: "H-1-1",
+        ciStatus: "pass",
+        prState: "open",
+        newComments: [
+          {
+            id: 901,
+            body: "> **[Implementer](https://github.com/org/repo/blob/main/agents/implementer.md)** Here is the plan.\n\nplease also update the deployment docs",
+            author: "reviewer",
+            createdAt: "2026-01-15T12:01:00Z",
+            commentType: "issue",
+          },
+        ],
+      }]),
+      NOW,
+    );
+
+    expect(actions.some((a) => a.type === "retry" && a.itemId === "H-1-1")).toBe(true);
+    expect(actions.some((a) => a.type === "launch" && a.itemId === "H-1-1")).toBe(true);
+    expect(item.state).toBe("launching");
+    expect(item.needsFeedbackResponse).toBe(true);
+    expect(item.pendingFeedbackMessage).toContain("please also update the deployment docs");
+    expect(item.lastCommentCheck).toBe("2026-01-15T12:01:00Z");
+  });
+
+  it("parked item emits react-to-comment on human feedback comments", () => {
+    const orch = new Orchestrator({ mergeStrategy: "manual" });
+    orch.addItem(makeWorkItem("H-1-1"));
+    orch.hydrateState("H-1-1", "review-pending");
+    const item = orch.getItem("H-1-1")!;
+    item.prNumber = 42;
+    item.reviewCompleted = true;
+    item.sessionParked = true;
+
+    const actions = orch.processTransitions(
+      snapshotWith([{
+        id: "H-1-1",
+        ciStatus: "pass",
+        prState: "open",
+        newComments: [
+          { id: 901, body: "Please fix the docs.", author: "reviewer", createdAt: "2026-01-15T12:01:00Z", commentType: "issue" },
+        ],
+      }]),
+      NOW,
+    );
+
+    const reaction = actions.find((a) => a.type === "react-to-comment" && a.itemId === "H-1-1");
+    expect(reaction).toBeDefined();
+    expect(reaction!.commentId).toBe(901);
+    expect(reaction!.commentType).toBe("issue");
   });
 
   it("skips orchestrator's own audit-trail comments", () => {

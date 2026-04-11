@@ -112,7 +112,7 @@ const FAILURE_REASON_STATES: Set<OrchestratorItemState> = new Set([
   "ci-failed", "stuck", "fix-forward-failed",
 ]);
 
-const AGENT_PR_COMMENT_RE = /\*\*\[(Orchestrator|Implementer|Reviewer|Forward-Fixer|Rebaser)\]/;
+const AGENT_PR_COMMENT_RE = /^\*\*\[(Orchestrator|Implementer|Reviewer|Forward-Fixer|Rebaser)\]/;
 const NINTHWAVE_HTML_COMMENT_MARKER_PREFIX = "<!-- ninthwave-";
 
 function hasNinthwaveHtmlCommentMarker(body: string): boolean {
@@ -947,7 +947,10 @@ export class Orchestrator {
   }
 
   /** Collect human PR feedback for parked-item relaunches and advance the comment cursor. */
-  private collectParkedFeedback(item: OrchestratorItem, snap: ItemSnapshot | undefined): string | undefined {
+  private collectParkedFeedback(
+    item: OrchestratorItem,
+    snap: ItemSnapshot | undefined,
+  ): { message: string; reactions: Action[] } | undefined {
     if (!snap?.newComments?.length) return undefined;
 
     const humanComments = snap.newComments.filter((comment) => {
@@ -966,9 +969,20 @@ export class Orchestrator {
       item.lastCommentCheck = latestCreatedAt;
     }
 
-    return humanComments
+    const message = humanComments
       .map((comment) => `@${comment.author} commented on PR #${item.prNumber}:\n\n${comment.body}`)
       .join("\n\n");
+
+    const reactions: Action[] = humanComments
+      .filter((comment) => comment.id != null)
+      .map((comment) => ({
+        type: "react-to-comment" as const,
+        itemId: item.id,
+        commentId: comment.id,
+        commentType: comment.commentType,
+      }));
+
+    return { message, reactions };
   }
 
   /** Handle ci-failed state: retry circuit breaker, recovery, notification, unresponsive detection. */
@@ -1179,15 +1193,16 @@ export class Orchestrator {
     // Resume parked session: human requested changes on a parked item.
     // Reset reviewCompleted so the worker can address the feedback, and respawn.
     if (item.sessionParked && snap?.reviewDecision === "CHANGES_REQUESTED") {
-      const feedbackMessage = this.collectParkedFeedback(item, snap)
+      const feedback = this.collectParkedFeedback(item, snap);
+      const feedbackMessage = feedback?.message
         ?? `GitHub review requested changes on PR #${item.prNumber}.`;
-      return this.respawnForFeedback(item, feedbackMessage);
+      return [...(feedback?.reactions ?? []), ...this.respawnForFeedback(item, feedbackMessage)];
     }
 
     if (item.sessionParked) {
-      const feedbackMessage = this.collectParkedFeedback(item, snap);
-      if (feedbackMessage) {
-        return this.respawnForFeedback(item, feedbackMessage);
+      const feedback = this.collectParkedFeedback(item, snap);
+      if (feedback) {
+        return [...feedback.reactions, ...this.respawnForFeedback(item, feedback.message)];
       }
     }
 
@@ -1344,6 +1359,9 @@ export class Orchestrator {
 
       if (v.verdict === "approve") {
         item.reviewCompleted = true;
+        // Record HEAD so the SHA gate in handleImplementing/evaluateMerge blocks
+        // re-review on unchanged code if the item is later respawned for feedback.
+        item.lastReviewedCommitSha = snap?.headSha ?? null;
         this.transition(item, "ci-passed", snap?.eventTime);
         actions.push({ type: "clean-review", itemId: item.id });
         actions.push({
