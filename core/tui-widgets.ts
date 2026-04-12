@@ -18,7 +18,6 @@ import type { AiToolProfile } from "./ai-tools.ts";
 import {
   COLLABORATION_MODE_OPTIONS,
   REVIEW_MODE_OPTIONS,
-  SCHEDULE_ENABLED_OPTIONS,
   STARTUP_MERGE_STRATEGY_OPTIONS,
   TUI_SETTINGS_DEFAULTS,
   type TuiSettingsDefaults,

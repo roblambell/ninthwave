@@ -5996,8 +5996,6 @@ describe("createRuntimeControlHandlers", () => {
     const handlers = createRuntimeControlHandlers({
       sendControl: () => {},
       getSessionLimit: () => 3,
-      getScheduleEnabled: () => false,
-      projectRoot: "/tmp/runtime-controls",
       saveUserConfigFn,
     });
 
