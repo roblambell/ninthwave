@@ -7,7 +7,18 @@ import { loadUserConfig, type UserConfig } from "./config.ts";
 import { getBundleDir } from "./paths.ts";
 
 const LATEST_RELEASE_URL = "https://api.github.com/repos/ninthwave-sh/ninthwave/releases/latest";
+const RELEASE_NOTES_URL_PREFIX = "https://github.com/ninthwave-sh/ninthwave/releases/tag/v";
 const DIRECT_INSTALL_COMMAND = "curl -fsSL https://ninthwave.sh/install | bash";
+
+/**
+ * Build the public release-notes URL for a given version. Used by the startup
+ * update prompt so the interactive path points users at the same release page
+ * Homebrew and the passive notice reference elsewhere.
+ */
+export function getReleaseNotesUrl(version: string): string {
+  const normalized = version.trim().replace(/^v/, "");
+  return `${RELEASE_NOTES_URL_PREFIX}${normalized}`;
+}
 
 export const UPDATE_CHECK_CACHE_TTL_MS = 24 * 60 * 60 * 1000;
 export const UPDATE_CHECK_TIMEOUT_MS = 3000;
