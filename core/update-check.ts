@@ -1,6 +1,6 @@
 // Passive update-check core with 24-hour caching under ~/.ninthwave/.
 
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from "fs";
+import { existsSync, mkdirSync, readFileSync, realpathSync, writeFileSync } from "fs";
 import { homedir } from "os";
 import { basename, dirname, join, resolve } from "path";
 import { loadUserConfig, type UserConfig } from "./config.ts";
@@ -61,6 +61,7 @@ export interface ResolveCurrentInstallDeps {
   homeDir?: () => string;
   getBundleDir?: () => string;
   getCurrentExecutablePath?: () => string | null;
+  realpathPath?: (path: string) => string;
 }
 
 export interface UpdateCheckDeps extends FetchLatestPublishedVersionDeps {
@@ -75,6 +76,7 @@ export interface UpdateCheckDeps extends FetchLatestPublishedVersionDeps {
   fetchLatestVersion?: () => Promise<string | null>;
   getBundleDir?: () => string;
   getCurrentExecutablePath?: () => string | null;
+  realpathPath?: (path: string) => string;
 }
 
 function defaultReadTextFile(path: string): string {
@@ -147,22 +149,48 @@ function getUpdateCommandForSource(source: UpdateInstallSource): UpdateCommandMe
 }
 
 function resolveHomebrewPrefix(
-  bundleDir: string | null,
-  executablePath: string | null,
+  apparentBundleDir: string | null,
+  apparentExecutablePath: string | null,
+  resolvedBundleDir: string | null,
+  resolvedExecutablePath: string | null,
 ): string | null {
-  if (!bundleDir || !executablePath) return null;
-  if (basename(bundleDir) !== "ninthwave") return null;
+  if (!apparentBundleDir || !apparentExecutablePath) return null;
+  if (basename(apparentBundleDir) !== "ninthwave") return null;
 
-  const shareDir = dirname(bundleDir);
+  const shareDir = dirname(apparentBundleDir);
   if (basename(shareDir) !== "share") return null;
 
   const prefix = dirname(shareDir);
-  return isPathWithin(executablePath, join(prefix, "bin")) ? prefix : null;
+  if (!isPathWithin(apparentExecutablePath, join(prefix, "bin"))) return null;
+
+  const cellarRoot = join(prefix, "Cellar", "ninthwave");
+  if (
+    (resolvedBundleDir && isPathWithin(resolvedBundleDir, cellarRoot)) ||
+    (resolvedExecutablePath && isPathWithin(resolvedExecutablePath, cellarRoot))
+  ) {
+    return prefix;
+  }
+
+  return null;
+}
+
+function resolveRealPath(
+  path: string | null,
+  realpathPath: (path: string) => string,
+): string | null {
+  if (!path) return null;
+
+  try {
+    return normalizePath(realpathPath(path)) ?? path;
+  } catch {
+    return path;
+  }
 }
 
 export function resolveCurrentInstall(
   deps: ResolveCurrentInstallDeps = {},
 ): UpdateInstallMetadata {
+  const realpathPath = deps.realpathPath ?? ((path: string) => realpathSync.native(path));
   const homeDir = normalizePath((deps.homeDir ?? homedir)());
   const bundleDir = normalizePath((() => {
     try {
@@ -174,6 +202,8 @@ export function resolveCurrentInstall(
   const executablePath = normalizePath(
     deps.getCurrentExecutablePath?.() ?? process.execPath ?? process.argv[0] ?? null,
   );
+  const resolvedBundleDir = resolveRealPath(bundleDir, realpathPath);
+  const resolvedExecutablePath = resolveRealPath(executablePath, realpathPath);
 
   if (homeDir) {
     const directInstallRoot = join(homeDir, ".ninthwave");
@@ -183,7 +213,7 @@ export function resolveCurrentInstall(
     }
   }
 
-  if (resolveHomebrewPrefix(bundleDir, executablePath)) {
+  if (resolveHomebrewPrefix(bundleDir, executablePath, resolvedBundleDir, resolvedExecutablePath)) {
     return { source: "homebrew", command: getUpdateCommandForSource("homebrew") };
   }
 
@@ -331,6 +361,7 @@ export function getPassiveUpdateStartupState(
     homeDir,
     getBundleDir: deps.getBundleDir,
     getCurrentExecutablePath: deps.getCurrentExecutablePath,
+    realpathPath: deps.realpathPath,
   });
 
   return {
@@ -395,6 +426,7 @@ export async function getPassiveUpdateState(
     homeDir,
     getBundleDir: deps.getBundleDir,
     getCurrentExecutablePath: deps.getCurrentExecutablePath,
+    realpathPath: deps.realpathPath,
   });
 
   const currentVersion = normalizeVersion(

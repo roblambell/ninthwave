@@ -34,6 +34,7 @@ function createDeps(overrides: {
   fetchLatestVersion?: FetchLatestVersionMock;
   bundleDir?: string;
   currentExecutablePath?: string | null;
+  realpathPath?: (path: string) => string;
 } = {}) {
   const home = overrides.home ?? setupTempRepo();
   const fetchLatestVersion = overrides.fetchLatestVersion ?? vi.fn<() => Promise<string | null>>(async () => "0.4.0");
@@ -51,6 +52,7 @@ function createDeps(overrides: {
       fetchLatestVersion,
       getBundleDir: () => bundleDir,
       getCurrentExecutablePath: () => currentExecutablePath,
+      realpathPath: overrides.realpathPath,
     },
   };
 }
@@ -72,6 +74,15 @@ describe("resolveCurrentInstall", () => {
       homeDir: () => home,
       getBundleDir: () => "/opt/homebrew/share/ninthwave",
       getCurrentExecutablePath: () => "/opt/homebrew/bin/ninthwave",
+      realpathPath: (path) => {
+        if (path === "/opt/homebrew/share/ninthwave") {
+          return "/opt/homebrew/Cellar/ninthwave/0.4.0/share/ninthwave";
+        }
+        if (path === "/opt/homebrew/bin/ninthwave") {
+          return "/opt/homebrew/Cellar/ninthwave/0.4.0/bin/ninthwave";
+        }
+        return path;
+      },
     })).toEqual({
       source: "homebrew",
       command: {
@@ -106,6 +117,20 @@ describe("resolveCurrentInstall", () => {
       homeDir: () => home,
       getBundleDir: () => join(home, "repo"),
       getCurrentExecutablePath: () => join(home, "repo", "bin", "ninthwave"),
+    })).toEqual({
+      source: "unknown",
+      command: null,
+    });
+  });
+
+  it("does not treat generic prefix installs as Homebrew", () => {
+    const home = setupTempRepo();
+
+    expect(resolveCurrentInstall({
+      homeDir: () => home,
+      getBundleDir: () => "/tmp/nw/share/ninthwave",
+      getCurrentExecutablePath: () => "/tmp/nw/bin/ninthwave",
+      realpathPath: (path) => path,
     })).toEqual({
       source: "unknown",
       command: null,
@@ -290,6 +315,15 @@ describe("getPassiveUpdateState", () => {
       bundleDir: "/opt/homebrew/share/ninthwave",
       currentExecutablePath: "/opt/homebrew/bin/ninthwave",
       fetchLatestVersion: vi.fn<() => Promise<string | null>>(async () => "0.4.0"),
+      realpathPath: (path) => {
+        if (path === "/opt/homebrew/share/ninthwave") {
+          return "/opt/homebrew/Cellar/ninthwave/0.4.0/share/ninthwave";
+        }
+        if (path === "/opt/homebrew/bin/ninthwave") {
+          return "/opt/homebrew/Cellar/ninthwave/0.4.0/bin/ninthwave";
+        }
+        return path;
+      },
     });
 
     const state = await getPassiveUpdateState(deps);
