@@ -1,4 +1,4 @@
-# Refactor: Delete schedule modules, tests, and docs (H-RS-2)
+# Refactor: Delete remaining schedule modules and docs (H-RS-2)
 
 **Priority:** High
 **Source:** CEO review -- scheduled task functionality unused, adds complexity beyond core wedge
@@ -6,7 +6,7 @@
 **Domain:** remove-schedules
 **Lineage:** d0563574-ba2b-4779-b428-24a1f497d9ac
 
-Delete all schedule-specific code, tests, and documentation now that nothing imports these modules (disconnected in H-RS-1). Update README.md to remove the paragraph about scheduled work.
+Delete the remaining schedule-specific code and documentation now that shared-module integration is gone. Schedule test files were deleted in H-RS-1 follow-up work to restore green CI after the shared exports were removed. Update README.md to remove the paragraph about scheduled work.
 
 Files to delete:
 - `core/schedule-eval.ts` (262 lines)
@@ -16,12 +16,6 @@ Files to delete:
 - `core/schedule-files.ts` (214 lines)
 - `core/schedule-history.ts` (130 lines)
 - `core/commands/schedule.ts` (408 lines)
-- `test/schedule-eval.test.ts`
-- `test/schedule-files.test.ts`
-- `test/schedule-runner.test.ts`
-- `test/schedule-history.test.ts`
-- `test/schedule-command.test.ts`
-- `test/schedule-tui.test.ts`
 - `.ninthwave/schedule-format.md`
 - `core/docs/schedule-format.md`
 
@@ -31,7 +25,7 @@ Files to edit:
 **Test plan:**
 - `bun run test` passes cleanly (all schedule tests deleted, no remaining references)
 - `nw init` in a temp directory does not create `.ninthwave/schedules/`
-- Verify no remaining imports of deleted modules: `grep -r "schedule" core/ --include="*.ts"` returns zero hits (excluding comments/changelog)
+- Verify no remaining imports of deleted modules after module removal: `grep -r "schedule" core/ --include="*.ts"` returns zero hits (excluding comments/changelog)
 
 Acceptance: No schedule-related files exist in core/, test/, or .ninthwave/. README describes only the decompose-and-orchestrate workflow. `bun run test` passes. `grep -r "from.*schedule" core/` returns nothing.
 
