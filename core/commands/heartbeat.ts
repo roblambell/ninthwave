@@ -23,7 +23,7 @@ const defaultDeps: HeartbeatDeps = {
   io: { writeFileSync, readFileSync, unlinkSync, existsSync, mkdirSync, renameSync },
   getBranch: () => {
     try {
-      const result = Bun.spawnSync(["git", "rev-parse", "--abbrev-ref", "HEAD"]);
+      const result = Bun.spawnSync(["git", "rev-parse", "--abbrev-ref", "HEAD"], { stdout: "pipe", stderr: "pipe" });
       return result.exitCode === 0 ? result.stdout.toString().trim() : null;
     } catch {
       return null;
