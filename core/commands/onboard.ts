@@ -44,6 +44,12 @@ import { applyGithubToken } from "../gh.ts";
 import { ensureMuxInteractiveOrDie } from "../mux.ts";
 import { computeDefaultSessionLimit } from "./orchestrate.ts";
 import { requireCrewCode } from "./crew.ts";
+import { runUpdate, type UpdateRunResult } from "./update.ts";
+import {
+  getPassiveUpdateStartupState,
+  getReleaseNotesUrl,
+  type PassiveUpdateStartupState,
+} from "../update-check.ts";
 import { resolveTuiSettingsDefaults } from "../tui-settings.ts";
 import {
   loadLocalStartupItems,
@@ -119,6 +125,18 @@ export interface NoArgsDeps extends OnboardDeps {
   loadConfig?: (projectRoot: string) => ProjectConfig;
   loadUserConfig?: () => UserConfig;
   sleep?: (ms: number) => Promise<void>;
+  /**
+   * Fetches the cached passive update-check state for the interactive startup
+   * prompt. Defaults to {@link getPassiveUpdateStartupState}. Tests inject a
+   * stub so they do not read the developer's real update-check cache.
+   */
+  getUpdateStartupState?: () => PassiveUpdateStartupState;
+  /**
+   * Runs the shared manual-update flow from {@link runUpdate} when the user
+   * picks "Update now". Tests inject a stub that records the call without
+   * spawning a real subprocess.
+   */
+  runUpdate?: () => UpdateRunResult;
 }
 
 const defaultCommandExists: CommandChecker = (cmd: string): boolean => {
@@ -328,6 +346,100 @@ export async function cmdOnboard(projectDir: string): Promise<void> {
   await onboard(projectDir);
 }
 
+// ── Startup update prompt ─────────────────────────────────────────
+
+/**
+ * Result of running the interactive startup update prompt. Callers use the
+ * `action` tag to decide whether to continue into the normal startup flow
+ * ("none"/"skip"/"skip-forever") or exit early because the updater ran
+ * ("updated" -- always exit, regardless of the underlying update outcome).
+ */
+export type StartupUpdatePromptOutcome =
+  | { action: "none" }
+  | { action: "skip" }
+  | { action: "skip-forever"; dismissedVersion: string }
+  | { action: "updated"; result: UpdateRunResult };
+
+export interface StartupUpdatePromptDeps {
+  getUpdateStartupState?: () => PassiveUpdateStartupState;
+  runUpdate?: () => UpdateRunResult;
+  prompt?: PromptFn;
+  saveUserConfig?: (updates: Partial<UserConfig>) => void;
+  /** Write a line to stdout. Defaults to `console.log` -- tests replace it. */
+  log?: (line: string) => void;
+}
+
+/**
+ * Interactive startup update prompt.
+ *
+ * When the cached passive update-check state shows an available update that
+ * has not been dismissed, render the Codex-style three-option prompt (update
+ * now / skip / skip until next version) and act on the user's choice.
+ *
+ * - "Update now" runs the shared {@link runUpdate} flow and returns an
+ *   "updated" outcome so the caller exits startup rather than falling through
+ *   into the current session with a stale binary.
+ * - "Skip" returns without persisting anything.
+ * - "Skip until next version" persists `skipped_update_version` via
+ *   {@link saveUserConfig} so the prompt stays suppressed until a newer
+ *   version is offered.
+ *
+ * Returns `{ action: "none" }` when no prompt should be shown (cache empty,
+ * not an update, or already dismissed for this version).
+ */
+export async function maybeRunStartupUpdatePrompt(
+  deps: StartupUpdatePromptDeps = {},
+): Promise<StartupUpdatePromptOutcome> {
+  const getState = deps.getUpdateStartupState ?? getPassiveUpdateStartupState;
+  const promptFn = deps.prompt ?? defaultPrompt;
+  const saveConfigFn = deps.saveUserConfig ?? saveUserConfig;
+  const runUpdateFn = deps.runUpdate ?? (() => runUpdate());
+  const log = deps.log ?? ((line: string) => { console.log(line); });
+
+  let state: PassiveUpdateStartupState;
+  try {
+    state = getState();
+  } catch {
+    return { action: "none" };
+  }
+
+  const cached = state.cachedState;
+  if (!cached || cached.status !== "update-available" || cached.promptSuppressed) {
+    return { action: "none" };
+  }
+
+  log("");
+  log(
+    `${BOLD}Ninthwave update available${RESET}  v${cached.currentVersion} \u2192 v${cached.latestVersion}`,
+  );
+  log(`${DIM}Release notes: ${getReleaseNotesUrl(cached.latestVersion)}${RESET}`);
+  log("");
+  log(`  ${BOLD}1${RESET}. Update now`);
+  log(`  ${BOLD}2${RESET}. Skip`);
+  log(`  ${BOLD}3${RESET}. Skip until next version`);
+  log("");
+
+  while (true) {
+    const answer = (await promptFn("Choose [1-3]: ")).trim();
+    if (answer === "1") {
+      const result = runUpdateFn();
+      return { action: "updated", result };
+    }
+    if (answer === "2") {
+      return { action: "skip" };
+    }
+    if (answer === "3") {
+      try {
+        saveConfigFn({ skipped_update_version: cached.latestVersion });
+      } catch {
+        // Best-effort persistence only -- the user is still moving on.
+      }
+      return { action: "skip-forever", dismissedVersion: cached.latestVersion };
+    }
+    log(`  Please enter 1, 2, or 3.`);
+  }
+}
+
 // ── No-args handler ────────────────────────────────────────────────
 
 /**
@@ -371,10 +483,12 @@ export async function cmdNoArgs(
 
   // State 2: No .ninthwave/ dir → first-run onboarding
   const ninthwaveDir = join(projectRoot, ".ninthwave");
+  let freshOnboard = false;
   if (!checkExists(ninthwaveDir)) {
     await onboard(projectRoot, deps);
     // If onboarding was aborted (user cancelled, no AI tool, etc.), .ninthwave/ won't exist.
     if (!checkExists(ninthwaveDir)) return;
+    freshOnboard = true;
     // Fall through -- .ninthwave/ now exists; show no-work-items guidance below.
   }
 
@@ -394,6 +508,25 @@ export async function cmdNoArgs(
       await cmdStatusWatch(worktreeDir, projectRoot);
     }
     return;
+  }
+
+  // State 3b: Interactive update prompt. Runs before mux startup so a user who
+  // picks "Update now" never spins up cmux/tmux with a stale binary. We skip
+  // the prompt on a fresh onboard because the install is already brand new.
+  if (!freshOnboard) {
+    const updateOutcome = await maybeRunStartupUpdatePrompt({
+      getUpdateStartupState: deps.getUpdateStartupState,
+      runUpdate: deps.runUpdate,
+      prompt: deps.prompt,
+      saveUserConfig: doSaveUserConfig,
+    });
+    if (updateOutcome.action === "updated") {
+      // Whether the updater succeeded or not, we exit startup -- the caller
+      // should re-run `nw` once the new binary is installed (or fix the
+      // reported error and retry). Do NOT fall through into ensureMux and the
+      // normal interactive flow with a stale binary still in memory.
+      return;
+    }
   }
 
   // State 4: No daemon → interactive startup flow.

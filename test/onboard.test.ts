@@ -16,6 +16,7 @@ import {
   shouldOnboard,
   onboard,
   cmdNoArgs,
+  maybeRunStartupUpdatePrompt,
   MUX_OPTIONS,
   type CommandChecker,
   type OnboardDeps,
@@ -27,6 +28,50 @@ import type { InteractiveResult } from "../core/interactive.ts";
 import type { MergeStrategy } from "../core/orchestrator.ts";
 import type { CheckboxItem } from "../core/tui-widgets.ts";
 import type { StartupItemsRefreshResult } from "../core/startup-items.ts";
+import type {
+  PassiveUpdateStartupState,
+  PassiveUpdateState,
+} from "../core/update-check.ts";
+import type { UpdateRunResult } from "../core/commands/update.ts";
+
+/**
+ * Default injection for cmdNoArgs tests that do not exercise the startup
+ * update prompt. We never want these tests to read the developer's real
+ * `~/.ninthwave/update-check.json`, which could fire an interactive prompt
+ * and hang the suite on a machine where an update happens to be available.
+ */
+const NO_UPDATE_PROMPT: Pick<NoArgsDeps, "getUpdateStartupState"> = {
+  getUpdateStartupState: () => ({ cachedState: null, shouldRefresh: false }),
+};
+
+function makeAvailableUpdate(
+  overrides: Partial<PassiveUpdateState> = {},
+): PassiveUpdateState {
+  return {
+    status: "update-available",
+    currentVersion: "0.3.9",
+    latestVersion: "0.4.0",
+    checkedAt: 1_712_000_000_000,
+    installSource: "homebrew",
+    updateCommand: {
+      executable: "brew",
+      args: ["upgrade", "ninthwave"],
+      display: "brew upgrade ninthwave",
+    },
+    promptSuppressed: false,
+    ...overrides,
+  };
+}
+
+function makeStartupState(
+  cachedState: PassiveUpdateState | null,
+): PassiveUpdateStartupState {
+  return { cachedState, shouldRefresh: false };
+}
+
+function successfulUpdateResult(): UpdateRunResult {
+  return { installSource: "homebrew", exitCode: 0, outcome: "updated" };
+}
 
 afterEach(() => {
   cleanupTempRepos();
@@ -411,6 +456,7 @@ describe("cmdNoArgs", () => {
     let ensureMuxCalled = false;
     await cmdNoArgs(null, {
       isTTY: true,
+      ...NO_UPDATE_PROMPT,
       printHelp: () => { helpCalled = true; },
       ensureMux: async () => { ensureMuxCalled = true; },
     });
@@ -427,6 +473,7 @@ describe("cmdNoArgs", () => {
     try {
       await cmdNoArgs(projectDir, {
         isTTY: true,
+      ...NO_UPDATE_PROMPT,
         existsSync: (p) => typeof p === "string" && !p.includes(".ninthwave"),
         commandExists: () => false, // Will exit early at AI tool detection
         prompt: async () => "",
@@ -451,6 +498,7 @@ describe("cmdNoArgs", () => {
 
     await cmdNoArgs(projectDir, {
       isTTY: true,
+      ...NO_UPDATE_PROMPT,
       parseWorkItems: () => [],
       isDaemonRunning: () => null,
       ensureMux: async () => { ensureMuxCalled = true; },
@@ -478,6 +526,7 @@ describe("cmdNoArgs", () => {
 
     await cmdNoArgs(projectDir, {
       isTTY: true,
+      ...NO_UPDATE_PROMPT,
       existsSync: (p) => {
         if (typeof p === "string" && p.endsWith("work")) return false;
         return true;
@@ -509,6 +558,7 @@ describe("cmdNoArgs", () => {
     try {
       await cmdNoArgs(projectDir, {
         isTTY: true,
+      ...NO_UPDATE_PROMPT,
         parseWorkItems: () => {
           parseCalled = true;
           return [];
@@ -553,6 +603,7 @@ describe("cmdNoArgs", () => {
 
     await cmdNoArgs(projectDir, {
       isTTY: true,
+      ...NO_UPDATE_PROMPT,
       parseWorkItems: () => items,
       isDaemonRunning: () => null,
       ensureMux: async () => { ensureMuxCalled = true; },
@@ -592,6 +643,7 @@ describe("cmdNoArgs", () => {
 
     await cmdNoArgs(projectDir, {
       isTTY: true,
+      ...NO_UPDATE_PROMPT,
       parseWorkItems: () => allItems,
       loadStartupItems: () => runnableItems,
       isDaemonRunning: () => null,
@@ -622,6 +674,7 @@ describe("cmdNoArgs", () => {
 
     await cmdNoArgs(projectDir, {
       isTTY: true,
+      ...NO_UPDATE_PROMPT,
       parseWorkItems: () => localItems,
       refreshStartupItems: async (_workDir, _worktreeDir, _projectRoot, previousItems) => {
         refreshCalled = true;
@@ -676,6 +729,7 @@ describe("cmdNoArgs", () => {
 
     await cmdNoArgs(projectDir, {
       isTTY: true,
+      ...NO_UPDATE_PROMPT,
       parseWorkItems: () => [fakeWorkItem("H-1", "Task")],
       isDaemonRunning: () => null,
       loadConfig: () => ({ review_external: false } as any),
@@ -703,6 +757,7 @@ describe("cmdNoArgs", () => {
 
     await cmdNoArgs(projectDir, {
       isTTY: true,
+      ...NO_UPDATE_PROMPT,
       parseWorkItems: () => [],
       isDaemonRunning: () => null,
       loadConfig: () => ({ review_external: false } as any),
@@ -733,6 +788,7 @@ describe("cmdNoArgs", () => {
 
     await cmdNoArgs(projectDir, {
       isTTY: true,
+      ...NO_UPDATE_PROMPT,
       parseWorkItems: () => [fakeWorkItem("H-1", "Task")],
       isDaemonRunning: () => null,
       loadConfig: () => ({ review_external: false } as any),
@@ -760,6 +816,7 @@ describe("cmdNoArgs", () => {
 
     await cmdNoArgs(projectDir, {
       isTTY: true,
+      ...NO_UPDATE_PROMPT,
       parseWorkItems: () => [fakeWorkItem("H-1", "Task")],
       isDaemonRunning: () => null,
       loadConfig: () => ({ review_external: false } as any),
@@ -788,6 +845,7 @@ describe("cmdNoArgs", () => {
 
     await cmdNoArgs(projectDir, {
       isTTY: true,
+      ...NO_UPDATE_PROMPT,
       parseWorkItems: () => [fakeWorkItem("H-1", "Task")],
       isDaemonRunning: () => null,
       loadConfig: () => ({ review_external: false } as any),
@@ -816,6 +874,7 @@ describe("cmdNoArgs", () => {
 
     await cmdNoArgs(projectDir, {
       isTTY: true,
+      ...NO_UPDATE_PROMPT,
       parseWorkItems: () => [fakeWorkItem("H-1", "Task")],
       isDaemonRunning: () => null,
       loadConfig: () => ({ review_external: false } as any),
@@ -844,6 +903,7 @@ describe("cmdNoArgs", () => {
 
     await cmdNoArgs(projectDir, {
       isTTY: true,
+      ...NO_UPDATE_PROMPT,
       parseWorkItems: () => [fakeWorkItem("H-1", "Task")],
       isDaemonRunning: () => null,
       loadConfig: () => ({ review_external: false } as any),
@@ -871,6 +931,7 @@ describe("cmdNoArgs", () => {
 
     await cmdNoArgs(projectDir, {
       isTTY: true,
+      ...NO_UPDATE_PROMPT,
       parseWorkItems: () => [fakeWorkItem("H-1", "Task")],
       isDaemonRunning: () => null,
       loadConfig: () => ({ review_external: false } as any),
@@ -890,6 +951,7 @@ describe("cmdNoArgs", () => {
 
     await cmdNoArgs(projectDir, {
       isTTY: true,
+      ...NO_UPDATE_PROMPT,
       parseWorkItems: () => [fakeWorkItem("H-1", "Task")],
       isDaemonRunning: () => null,
       loadConfig: () => ({ review_external: false } as any),
@@ -920,6 +982,7 @@ describe("cmdNoArgs", () => {
 
     await cmdNoArgs(projectDir, {
       isTTY: true,
+      ...NO_UPDATE_PROMPT,
       parseWorkItems: () => [fakeWorkItem("H-1", "Task")],
       isDaemonRunning: () => null,
       loadConfig: () => ({ review_external: true } as any),
@@ -951,6 +1014,7 @@ describe("cmdNoArgs", () => {
 
     await cmdNoArgs(projectDir, {
       isTTY: true,
+      ...NO_UPDATE_PROMPT,
       parseWorkItems: () => [fakeWorkItem("H-1", "Task")],
       isDaemonRunning: () => null,
       loadConfig: () => ({ review_external: true, ai_tools: ["claude"] } as any),
@@ -980,6 +1044,7 @@ describe("cmdNoArgs", () => {
 
     await cmdNoArgs(projectDir, {
       isTTY: true,
+      ...NO_UPDATE_PROMPT,
       parseWorkItems: () => [fakeWorkItem("H-1", "Task")],
       isDaemonRunning: () => null,
       loadConfig: () => ({ review_external: false } as any),
@@ -1020,6 +1085,7 @@ describe("cmdNoArgs", () => {
 
     await cmdNoArgs(projectDir, {
       isTTY: true,
+      ...NO_UPDATE_PROMPT,
       parseWorkItems: () => [fakeWorkItem("H-1", "Task")],
       isDaemonRunning: () => null,
       loadConfig: () => ({ review_external: false } as any),
@@ -1049,5 +1115,422 @@ describe("cmdNoArgs", () => {
     expect(savedUpdates[0]).not.toHaveProperty("merge_strategy");
     expect(savedUpdates[0]).not.toHaveProperty("code");
     expect(JSON.stringify(savedUpdates[0])).not.toContain("K2F9-AB3X-7YPL-QM4N");
+  });
+
+  // ── Startup update prompt (H-UPD-3) ───────────────────────────────
+
+  describe("startup update prompt", () => {
+    /**
+     * Swallow console output from cmdNoArgs during a startup-update-prompt
+     * test. `maybeRunStartupUpdatePrompt` writes directly to console.log
+     * (the `log` field is not plumbed through `NoArgsDeps`), so we redirect
+     * it here to keep the test runner output clean.
+     */
+    async function runSilent<T>(fn: () => Promise<T>): Promise<T> {
+      const origLog = console.log;
+      console.log = () => {};
+      try {
+        return await fn();
+      } finally {
+        console.log = origLog;
+      }
+    }
+
+    it("runs the update prompt before ensureMux and the interactive picker", async () => {
+      const projectDir = setupTempRepo();
+      mkdirSync(join(projectDir, ".ninthwave", "work"), { recursive: true });
+
+      const callOrder: string[] = [];
+      let promptRendered = false;
+
+      await runSilent(() => cmdNoArgs(projectDir, {
+        isTTY: true,
+        parseWorkItems: () => [],
+        isDaemonRunning: () => null,
+        loadConfig: () => ({ review_external: false } as any),
+        loadUserConfig: () => ({}),
+        saveUserConfig: () => {},
+        getUpdateStartupState: () => {
+          callOrder.push("update-check");
+          return makeStartupState(makeAvailableUpdate());
+        },
+        prompt: async (question) => {
+          // The Codex-style prompt ends with "Choose [1-3]: ".
+          promptRendered = question.includes("Choose");
+          return "2"; // Skip
+        },
+        ensureMux: async () => { callOrder.push("mux"); },
+        runInteractiveFlow: async () => {
+          callOrder.push("interactive");
+          return null;
+        },
+        runWatch: async () => { callOrder.push("watch"); },
+      }));
+
+      expect(promptRendered).toBe(true);
+      expect(callOrder[0]).toBe("update-check");
+      expect(callOrder.indexOf("update-check")).toBeLessThan(callOrder.indexOf("mux"));
+      expect(callOrder.indexOf("mux")).toBeLessThan(callOrder.indexOf("interactive"));
+    });
+
+    it("does not show the prompt when no update is cached", async () => {
+      const projectDir = setupTempRepo();
+      mkdirSync(join(projectDir, ".ninthwave", "work"), { recursive: true });
+
+      let promptCalls = 0;
+      let interactiveCalled = false;
+
+      await runSilent(() => cmdNoArgs(projectDir, {
+        isTTY: true,
+        parseWorkItems: () => [],
+        isDaemonRunning: () => null,
+        loadConfig: () => ({ review_external: false } as any),
+        loadUserConfig: () => ({}),
+        saveUserConfig: () => {},
+        getUpdateStartupState: () => makeStartupState(null),
+        prompt: async () => { promptCalls++; return ""; },
+        runInteractiveFlow: async () => {
+          interactiveCalled = true;
+          return null;
+        },
+      }));
+
+      expect(promptCalls).toBe(0);
+      expect(interactiveCalled).toBe(true);
+    });
+
+    it("does not show the prompt when the cached version is already dismissed", async () => {
+      const projectDir = setupTempRepo();
+      mkdirSync(join(projectDir, ".ninthwave", "work"), { recursive: true });
+
+      let promptCalls = 0;
+
+      await runSilent(() => cmdNoArgs(projectDir, {
+        isTTY: true,
+        parseWorkItems: () => [],
+        isDaemonRunning: () => null,
+        loadConfig: () => ({ review_external: false } as any),
+        loadUserConfig: () => ({}),
+        saveUserConfig: () => {},
+        getUpdateStartupState: () =>
+          makeStartupState(makeAvailableUpdate({ promptSuppressed: true })),
+        prompt: async () => { promptCalls++; return ""; },
+        runInteractiveFlow: async () => null,
+      }));
+
+      expect(promptCalls).toBe(0);
+    });
+
+    it("Skip continues into normal startup without persisting any new user config", async () => {
+      const projectDir = setupTempRepo();
+      mkdirSync(join(projectDir, ".ninthwave", "work"), { recursive: true });
+
+      const savedUpdates: Array<Record<string, unknown>> = [];
+      let interactiveCalled = false;
+      let runUpdateCalled = false;
+
+      await runSilent(() => cmdNoArgs(projectDir, {
+        isTTY: true,
+        parseWorkItems: () => [],
+        isDaemonRunning: () => null,
+        loadConfig: () => ({ review_external: false } as any),
+        loadUserConfig: () => ({}),
+        saveUserConfig: (updates) => savedUpdates.push(updates as Record<string, unknown>),
+        getUpdateStartupState: () => makeStartupState(makeAvailableUpdate()),
+        runUpdate: () => {
+          runUpdateCalled = true;
+          return successfulUpdateResult();
+        },
+        prompt: async () => "2",
+        runInteractiveFlow: async () => {
+          interactiveCalled = true;
+          return null;
+        },
+      }));
+
+      expect(runUpdateCalled).toBe(false);
+      expect(interactiveCalled).toBe(true);
+      // "Skip" must not persist anything about the update. saveUserConfig is
+      // still invoked for normal startup persistence, but never with the
+      // skipped_update_version key.
+      for (const update of savedUpdates) {
+        expect(update).not.toHaveProperty("skipped_update_version");
+      }
+    });
+
+    it("Skip until next version persists the dismissed version and continues startup", async () => {
+      const projectDir = setupTempRepo();
+      mkdirSync(join(projectDir, ".ninthwave", "work"), { recursive: true });
+
+      const savedUpdates: Array<Record<string, unknown>> = [];
+      let interactiveCalled = false;
+
+      await runSilent(() => cmdNoArgs(projectDir, {
+        isTTY: true,
+        parseWorkItems: () => [],
+        isDaemonRunning: () => null,
+        loadConfig: () => ({ review_external: false } as any),
+        loadUserConfig: () => ({}),
+        saveUserConfig: (updates) => savedUpdates.push(updates as Record<string, unknown>),
+        getUpdateStartupState: () =>
+          makeStartupState(makeAvailableUpdate({ latestVersion: "0.5.2" })),
+        prompt: async () => "3",
+        runInteractiveFlow: async () => {
+          interactiveCalled = true;
+          return null;
+        },
+      }));
+
+      expect(interactiveCalled).toBe(true);
+      const dismissSave = savedUpdates.find(
+        (update) => update.skipped_update_version === "0.5.2",
+      );
+      expect(dismissSave).toBeDefined();
+    });
+
+    it("Skip until next version re-shows the prompt once the dismissed version is superseded", async () => {
+      // Simulate a user who dismissed 0.4.0 and now has a cache reporting 0.4.1.
+      // The passive cache builder in getPassiveUpdateStartupState clears
+      // `promptSuppressed` when the skipped version no longer matches, so the
+      // startup prompt should run again.
+      const projectDir = setupTempRepo();
+      mkdirSync(join(projectDir, ".ninthwave", "work"), { recursive: true });
+
+      let promptShown = false;
+
+      await runSilent(() => cmdNoArgs(projectDir, {
+        isTTY: true,
+        parseWorkItems: () => [],
+        isDaemonRunning: () => null,
+        loadConfig: () => ({ review_external: false } as any),
+        loadUserConfig: () => ({ skipped_update_version: "0.4.0" }),
+        saveUserConfig: () => {},
+        // A cache whose latestVersion is newer than the dismissed version
+        // arrives with promptSuppressed: false.
+        getUpdateStartupState: () =>
+          makeStartupState(
+            makeAvailableUpdate({
+              latestVersion: "0.4.1",
+              promptSuppressed: false,
+            }),
+          ),
+        prompt: async () => {
+          promptShown = true;
+          return "2"; // skip once
+        },
+        runInteractiveFlow: async () => null,
+      }));
+
+      expect(promptShown).toBe(true);
+    });
+
+    it("Update now runs the shared updater and exits startup instead of falling through", async () => {
+      const projectDir = setupTempRepo();
+      mkdirSync(join(projectDir, ".ninthwave", "work"), { recursive: true });
+
+      let runUpdateCalled = false;
+      let ensureMuxCalled = false;
+      let interactiveCalled = false;
+      let watchCalled = false;
+
+      await runSilent(() => cmdNoArgs(projectDir, {
+        isTTY: true,
+        parseWorkItems: () => [],
+        isDaemonRunning: () => null,
+        loadConfig: () => ({ review_external: false } as any),
+        loadUserConfig: () => ({}),
+        saveUserConfig: () => {},
+        getUpdateStartupState: () => makeStartupState(makeAvailableUpdate()),
+        runUpdate: () => {
+          runUpdateCalled = true;
+          return successfulUpdateResult();
+        },
+        prompt: async () => "1",
+        ensureMux: async () => { ensureMuxCalled = true; },
+        runInteractiveFlow: async () => {
+          interactiveCalled = true;
+          return null;
+        },
+        runWatch: async () => { watchCalled = true; },
+      }));
+
+      expect(runUpdateCalled).toBe(true);
+      expect(ensureMuxCalled).toBe(false);
+      expect(interactiveCalled).toBe(false);
+      expect(watchCalled).toBe(false);
+    });
+
+    it("does not show the update prompt when a daemon is already running", async () => {
+      const projectDir = setupTempRepo();
+      mkdirSync(join(projectDir, ".ninthwave"), { recursive: true });
+
+      let updateCheckCalled = false;
+      let statusWatchCalled = false;
+
+      await runSilent(() => cmdNoArgs(projectDir, {
+        isTTY: true,
+        parseWorkItems: () => [],
+        isDaemonRunning: () => 12345,
+        getUpdateStartupState: () => {
+          updateCheckCalled = true;
+          return makeStartupState(makeAvailableUpdate());
+        },
+        runStatusWatch: async () => { statusWatchCalled = true; },
+      }));
+
+      expect(updateCheckCalled).toBe(false);
+      expect(statusWatchCalled).toBe(true);
+    });
+
+    it("does not show the update prompt on a fresh onboarding", async () => {
+      // When `.ninthwave/` is missing we route into onboard(), which exits
+      // early because no AI tool is installed. We must not fall through into
+      // the update prompt in that case (a brand-new install does not need to
+      // be nagged about updates).
+      const projectDir = setupTempRepo();
+      let updateCheckCalled = false;
+
+      await runSilent(() => cmdNoArgs(projectDir, {
+        isTTY: true,
+        existsSync: (p) => typeof p === "string" && !p.includes(".ninthwave"),
+        commandExists: () => false,
+        prompt: async () => "",
+        getBundleDir: () => "/fake",
+        getUpdateStartupState: () => {
+          updateCheckCalled = true;
+          return makeStartupState(makeAvailableUpdate());
+        },
+      }));
+
+      expect(updateCheckCalled).toBe(false);
+    });
+  });
+});
+
+// ── maybeRunStartupUpdatePrompt (unit) ─────────────────────────────
+
+describe("maybeRunStartupUpdatePrompt", () => {
+  it("returns action:none when there is no cached update state", async () => {
+    const outcome = await maybeRunStartupUpdatePrompt({
+      getUpdateStartupState: () => ({ cachedState: null, shouldRefresh: false }),
+      prompt: async () => "1",
+      runUpdate: () => successfulUpdateResult(),
+      saveUserConfig: () => {},
+      log: () => {},
+    });
+    expect(outcome).toEqual({ action: "none" });
+  });
+
+  it("returns action:none when the prompt is suppressed for the dismissed version", async () => {
+    const outcome = await maybeRunStartupUpdatePrompt({
+      getUpdateStartupState: () =>
+        makeStartupState(makeAvailableUpdate({ promptSuppressed: true })),
+      prompt: async () => "1",
+      runUpdate: () => successfulUpdateResult(),
+      saveUserConfig: () => {},
+      log: () => {},
+    });
+    expect(outcome).toEqual({ action: "none" });
+  });
+
+  it("returns action:none when the status is up-to-date", async () => {
+    const outcome = await maybeRunStartupUpdatePrompt({
+      getUpdateStartupState: () =>
+        makeStartupState(
+          makeAvailableUpdate({
+            status: "up-to-date",
+            currentVersion: "0.4.0",
+            latestVersion: "0.4.0",
+          }),
+        ),
+      prompt: async () => "1",
+      runUpdate: () => successfulUpdateResult(),
+      saveUserConfig: () => {},
+      log: () => {},
+    });
+    expect(outcome).toEqual({ action: "none" });
+  });
+
+  it("skip returns action:skip without persisting anything", async () => {
+    const savedUpdates: Array<Record<string, unknown>> = [];
+    const outcome = await maybeRunStartupUpdatePrompt({
+      getUpdateStartupState: () => makeStartupState(makeAvailableUpdate()),
+      prompt: async () => "2",
+      runUpdate: () => successfulUpdateResult(),
+      saveUserConfig: (updates) => savedUpdates.push(updates as Record<string, unknown>),
+      log: () => {},
+    });
+    expect(outcome).toEqual({ action: "skip" });
+    expect(savedUpdates).toEqual([]);
+  });
+
+  it("skip-forever persists skipped_update_version and reports the dismissed version", async () => {
+    const savedUpdates: Array<Record<string, unknown>> = [];
+    const outcome = await maybeRunStartupUpdatePrompt({
+      getUpdateStartupState: () =>
+        makeStartupState(makeAvailableUpdate({ latestVersion: "0.7.1" })),
+      prompt: async () => "3",
+      runUpdate: () => successfulUpdateResult(),
+      saveUserConfig: (updates) => savedUpdates.push(updates as Record<string, unknown>),
+      log: () => {},
+    });
+    expect(outcome).toEqual({ action: "skip-forever", dismissedVersion: "0.7.1" });
+    expect(savedUpdates).toEqual([{ skipped_update_version: "0.7.1" }]);
+  });
+
+  it("Update now invokes runUpdate and returns its result", async () => {
+    let runUpdateCalled = 0;
+    const result: UpdateRunResult = { installSource: "direct", exitCode: 0, outcome: "updated" };
+    const outcome = await maybeRunStartupUpdatePrompt({
+      getUpdateStartupState: () => makeStartupState(makeAvailableUpdate()),
+      prompt: async () => "1",
+      runUpdate: () => {
+        runUpdateCalled += 1;
+        return result;
+      },
+      saveUserConfig: () => {},
+      log: () => {},
+    });
+    expect(runUpdateCalled).toBe(1);
+    expect(outcome).toEqual({ action: "updated", result });
+  });
+
+  it("re-prompts when the answer is not 1, 2, or 3", async () => {
+    const answers = ["", "q", "4", "2"];
+    let index = 0;
+    const logs: string[] = [];
+    const outcome = await maybeRunStartupUpdatePrompt({
+      getUpdateStartupState: () => makeStartupState(makeAvailableUpdate()),
+      prompt: async () => answers[index++]!,
+      runUpdate: () => successfulUpdateResult(),
+      saveUserConfig: () => {},
+      log: (line) => logs.push(line),
+    });
+    expect(outcome).toEqual({ action: "skip" });
+    // Three invalid answers -> three retry messages.
+    expect(logs.filter((line) => line.includes("Please enter 1, 2, or 3"))).toHaveLength(3);
+  });
+
+  it("renders the current and latest versions and the release-notes URL", async () => {
+    const logs: string[] = [];
+    await maybeRunStartupUpdatePrompt({
+      getUpdateStartupState: () =>
+        makeStartupState(
+          makeAvailableUpdate({ currentVersion: "0.3.9", latestVersion: "0.4.0" }),
+        ),
+      prompt: async () => "2",
+      runUpdate: () => successfulUpdateResult(),
+      saveUserConfig: () => {},
+      log: (line) => logs.push(line),
+    });
+    const joined = logs.join("\n");
+    expect(joined).toContain("v0.3.9");
+    expect(joined).toContain("v0.4.0");
+    expect(joined).toContain(
+      "https://github.com/ninthwave-sh/ninthwave/releases/tag/v0.4.0",
+    );
+    expect(joined).toContain("1. Update now");
+    expect(joined).toContain("2. Skip");
+    expect(joined).toContain("3. Skip until next version");
   });
 });
