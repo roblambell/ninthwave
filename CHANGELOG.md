@@ -42,6 +42,9 @@
 
 ## Unreleased
 
+### Changed
+- GitHub org renamed from `ninthwave-sh` to `ninthwave-io`. The Homebrew tap moved with it: install via `brew install ninthwave-io/tap/ninthwave`. Existing users on the old tap should migrate with `brew untap ninthwave-sh/tap && brew tap ninthwave-io/tap && brew upgrade ninthwave`. GitHub redirects handle old URLs for now, but the new paths are canonical.
+
 ### Fixed
 - opencode: stop workers pausing for permission. `nw init` now writes (or merges into) a project-level `.opencode/opencode.jsonc` that grants Ninthwave's orchestrated agents (`ninthwave-implementer`, `-reviewer`, `-rebaser`, `-forward-fixer`) full tool permissions. The previous `OPENCODE_PERMISSION` env var was the wrong shape (a full config file instead of a `Permission` value) so it silently did nothing; it has been removed.
 
