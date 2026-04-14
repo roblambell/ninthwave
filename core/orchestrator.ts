@@ -73,6 +73,7 @@ import {
   executeLaunchForwardFixer,
   executeCleanForwardFixer,
   executeReactToComment,
+  executeClearFeedbackDoneSignal,
 } from "./orchestrator-actions.ts";
 
 // ── Merge commit CI grace periods ────────────────────────────────────
@@ -740,6 +741,21 @@ export class Orchestrator {
     // -> evaluateMerge -> reviewing in a single poll cycle on unchanged code.
     if (snap?.prNumber && snap.prState === "open") {
       if (item.lastReviewedCommitSha && snap.headSha === item.lastReviewedCommitSha) {
+        // Feedback-done signal: worker addressed feedback without code changes.
+        // Clear the SHA gate and resume the normal loop.
+        if (snap.feedbackDoneSignal) {
+          item.lastReviewedCommitSha = null;
+          item.needsFeedbackResponse = false;
+          item.pendingFeedbackMessage = undefined;
+          item.prNumber = snap.prNumber;
+          this.transition(item, "ci-pending", snap?.eventTime);
+          const actions: Action[] = [{ type: "clear-feedback-done-signal", itemId: item.id }];
+          if (item.baseBranch) {
+            actions.push({ type: "sync-stack-comments", itemId: item.id });
+          }
+          actions.push(...this.handleCiPending(item, snap, now));
+          return actions;
+        }
         // PR exists but code hasn't changed since last review. Track the PR
         // number but stay in implementing -- wait for the worker to push.
         item.prNumber = snap.prNumber;
@@ -1412,15 +1428,36 @@ export class Orchestrator {
       // ci-passed -> evaluateMerge on unchanged code (evaluateMerge's SHA gate
       // would catch it, but the item gets stranded in ci-passed with no respawn).
       if (item.lastReviewedCommitSha && snap?.headSha === item.lastReviewedCommitSha) {
-        // Same commit -- implementer hasn't pushed yet. If the worker died
-        // (e.g., session timed out or post-restart), respawn with feedback.
-        const liveness = !item.workspaceRef ? "dead" as const : this.checkWorkerLiveness(item, snap);
-        if (liveness === "dead") {
-          const message = item.pendingFeedbackMessage
-            ?? `Review requested changes on PR #${item.prNumber}. Please address the feedback and push a fix.`;
-          return this.respawnForFeedback(item, message);
+        // Feedback-done signal: worker addressed feedback without code changes.
+        // Clear the SHA gate and resume the normal loop.
+        if (snap?.feedbackDoneSignal) {
+          item.lastReviewedCommitSha = null;
+          item.needsFeedbackResponse = false;
+          item.pendingFeedbackMessage = undefined;
+          actions.push({ type: "clear-feedback-done-signal", itemId: item.id });
+
+          if (ciStatus === "pending") {
+            this.transition(item, "ci-pending", snap?.eventTime);
+            this.resetRebaseRetryCooldown(item, snap?.eventTime ?? snap?.lastCommitTime);
+            return actions;
+          }
+          if (ciStatus === "pass") {
+            this.transition(item, "ci-passed", snap?.eventTime);
+            actions.push(...this.evaluateMerge(item, snap, snap?.eventTime, now));
+            return actions;
+          }
+          // CI status is fail or unknown -- fall through to normal handling
+        } else {
+          // Same commit -- implementer hasn't pushed yet. If the worker died
+          // (e.g., session timed out or post-restart), respawn with feedback.
+          const liveness = !item.workspaceRef ? "dead" as const : this.checkWorkerLiveness(item, snap);
+          if (liveness === "dead") {
+            const message = item.pendingFeedbackMessage
+              ?? `Review requested changes on PR #${item.prNumber}. Please address the feedback and push a fix.`;
+            return this.respawnForFeedback(item, message);
+          }
+          return actions; // stay in review-pending, worker is alive
         }
-        return actions; // stay in review-pending, worker is alive
       }
 
       if (ciStatus === "pending") {
@@ -1980,6 +2017,8 @@ export class Orchestrator {
         return executeSetCommitStatus(item, action, ctx, deps);
       case "post-review":
         return executePostReview(item, action, ctx, deps);
+      case "clear-feedback-done-signal":
+        return executeClearFeedbackDoneSignal(item, ctx);
     }
   }
 

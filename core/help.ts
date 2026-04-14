@@ -34,6 +34,7 @@ import { cmdStop } from "./commands/stop.ts";
 import { cmdRetry } from "./commands/retry.ts";
 import { cmdDoctor } from "./commands/doctor.ts";
 import { cmdHeartbeat } from "./commands/heartbeat.ts";
+import { cmdFeedbackDone } from "./commands/feedback-done.ts";
 import { cmdInbox } from "./commands/inbox.ts";
 import { cmdLogs } from "./commands/logs.ts";
 import { cmdLineageToken } from "./commands/lineage-token.ts";
@@ -449,6 +450,21 @@ export const COMMAND_REGISTRY: ReadonlyArray<CommandEntry> = [
     examples: [
       'nw heartbeat --progress 0.5 --label "Writing tests"',
       'nw heartbeat --progress 1.0 --label "PR created" --pr 42',
+    ],
+  },
+  {
+    name: "feedback-done",
+    usage: "feedback-done",
+    description: "Signal that review feedback was addressed without code changes",
+    group: "advanced",
+    needsRoot: true,
+    needsWork: false,
+    handler: (ctx) => {
+      cmdFeedbackDone(ctx.args, ctx.projectRoot);
+    },
+    flags: {},
+    examples: [
+      "nw feedback-done",
     ],
   },
   {

@@ -466,6 +466,12 @@ gh api repos/{owner}/{repo}/issues/{pr}/comments \
 5. Commit and push
 6. Reply in-thread on the relayed review comment summarizing changes (prefix with `**[Implementer](https://github.com/${HUB_REPO_NWO}/blob/main/agents/implementer.md)**`): `nw heartbeat --progress 1.0 --label "PR created"`
 
+**No-code feedback path.** Sometimes review feedback requires no code change -- the reviewer asked a question, requested clarification, or the existing code already handles the concern. When you address feedback purely by replying on the PR (no commits needed):
+
+1. Reply in-thread on the review comment explaining why no code change is needed
+2. Run `nw feedback-done` to signal the orchestrator that feedback is addressed
+3. The orchestrator will clear the pending feedback state and resume the review/merge loop without waiting for a new commit
+
 #### Rebase Request
 
 This can arrive as either a structured `[ORCHESTRATOR]` message or a plain-language inbox nudge. In both cases, the daemon is telling **you** to rebase the PR branch now.

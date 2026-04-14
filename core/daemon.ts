@@ -610,6 +610,73 @@ export function writeHeartbeat(
   );
 }
 
+// ── Feedback-done signal ─────────────────────────────────────────────
+
+/** Directory for one-shot signal files: ~/.ninthwave/projects/{slug}/signals/ */
+export function signalDir(projectRoot: string): string {
+  return join(userStateDir(projectRoot), "signals");
+}
+
+/** Path to a feedback-done signal file for a given item. */
+export function feedbackDoneSignalPath(projectRoot: string, itemId: string): string {
+  return join(signalDir(projectRoot), `feedback-done--${itemId}.json`);
+}
+
+export interface FeedbackDoneSignal {
+  id: string;
+  ts: string;
+}
+
+/** Write a feedback-done signal file atomically. Creates the directory if needed. */
+export function writeFeedbackDoneSignal(
+  projectRoot: string,
+  itemId: string,
+  io: DaemonIO = defaultIO,
+): void {
+  const dir = signalDir(projectRoot);
+  if (!io.existsSync(dir)) {
+    io.mkdirSync(dir, { recursive: true });
+  }
+  const data: FeedbackDoneSignal = {
+    id: itemId,
+    ts: new Date().toISOString(),
+  };
+  io.writeFileSync(
+    feedbackDoneSignalPath(projectRoot, itemId),
+    JSON.stringify(data, null, 2),
+    "utf-8",
+  );
+}
+
+/** Read a feedback-done signal file. Returns null if the file doesn't exist or is invalid. */
+export function readFeedbackDoneSignal(
+  projectRoot: string,
+  itemId: string,
+  io: DaemonIO = defaultIO,
+): FeedbackDoneSignal | null {
+  const filePath = feedbackDoneSignalPath(projectRoot, itemId);
+  if (!io.existsSync(filePath)) return null;
+  try {
+    const content = io.readFileSync(filePath, "utf-8");
+    return JSON.parse(content) as FeedbackDoneSignal;
+  } catch {
+    return null;
+  }
+}
+
+/** Delete a feedback-done signal file. No-op if the file doesn't exist. */
+export function clearFeedbackDoneSignal(
+  projectRoot: string,
+  itemId: string,
+  io: DaemonIO = defaultIO,
+): void {
+  const filePath = feedbackDoneSignalPath(projectRoot, itemId);
+  if (!io.existsSync(filePath)) return;
+  try {
+    io.unlinkSync(filePath);
+  } catch { /* best-effort */ }
+}
+
 // ── External review state ────────────────────────────────────────────
 
 export type ExternalReviewState = "detected" | "reviewing" | "reviewed" | "done";

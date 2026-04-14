@@ -4,7 +4,7 @@
 
 import { join } from "path";
 import { existsSync, unlinkSync } from "fs";
-import { heartbeatFilePath, writeHeartbeat } from "./daemon.ts";
+import { heartbeatFilePath, writeHeartbeat, clearFeedbackDoneSignal } from "./daemon.ts";
 import { cleanInbox } from "./commands/inbox.ts";
 import { validatePickupCandidate } from "./commands/launch.ts";
 import { NINTHWAVE_FOOTER, ORCHESTRATOR_LINK } from "./gh.ts";
@@ -1368,4 +1368,17 @@ export function executeCleanForwardFixer(
     "Forward-Fixer", item.id, item.fixForwardWorkspaceRef, deps.cleanup.cleanForwardFixer,
     () => { item.fixForwardWorkspaceRef = undefined; },
   );
+}
+
+/** Delete the one-shot feedback-done signal file after the orchestrator has consumed it. */
+export function executeClearFeedbackDoneSignal(
+  item: OrchestratorItem,
+  ctx: ExecutionContext,
+): ActionResult {
+  try {
+    clearFeedbackDoneSignal(ctx.projectRoot, item.id);
+    return { success: true };
+  } catch {
+    return { success: true }; // best-effort cleanup
+  }
 }

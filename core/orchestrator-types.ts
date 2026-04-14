@@ -338,6 +338,8 @@ export interface ItemSnapshot {
   inboxSnapshot?: import("./commands/inbox.ts").InboxSnapshot;
   /** SHA of the branch HEAD commit. Used by the SHA gate to detect unchanged code after review feedback. */
   headSha?: string;
+  /** One-shot signal: worker addressed feedback without code changes. */
+  feedbackDoneSignal?: boolean;
 }
 
 export interface PollSnapshot {
@@ -380,7 +382,8 @@ export type ActionType =
   | "send-message"
   | "react-to-comment"
   | "set-commit-status"
-  | "post-review";
+  | "post-review"
+  | "clear-feedback-done-signal";
 
 export interface Action {
   type: ActionType;

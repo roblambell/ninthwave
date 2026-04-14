@@ -12,7 +12,7 @@ import {
   TERMINAL_STATES,
 } from "./orchestrator.ts";
 import { type RequestQueue, type RequestPriority } from "./request-queue.ts";
-import { readHeartbeat, readVerdictFile } from "./daemon.ts";
+import { readHeartbeat, readVerdictFile, readFeedbackDoneSignal } from "./daemon.ts";
 import { snapshotInboxState } from "./commands/inbox.ts";
 import {
   checkPrStatusDetailed,
@@ -592,6 +592,14 @@ export function buildSnapshot(
       } catch { /* best-effort -- inbox read failure doesn't block polling */ }
     }
 
+    // Read feedback-done signal for items awaiting feedback response
+    if (heartbeatStates.has(orchItem.state)) {
+      try {
+        const signal = readFeedbackDoneSignal(projectRoot, orchItem.id);
+        if (signal) snap.feedbackDoneSignal = true;
+      } catch { /* best-effort */ }
+    }
+
     // Fast PR detection: if GitHub didn't find a PR but the heartbeat reports one,
     // trust the heartbeat. The worker writes --pr after gh pr create returns, so
     // the PR definitely exists. GitHub API will confirm on the next cycle.
@@ -858,6 +866,14 @@ export async function buildSnapshotAsync(
     if (heartbeatStates.has(orchItem.state)) {
       try {
         snap.inboxSnapshot = snapshotInboxState(projectRoot, orchItem.id);
+      } catch { /* best-effort */ }
+    }
+
+    // Read feedback-done signal for items awaiting feedback response
+    if (heartbeatStates.has(orchItem.state)) {
+      try {
+        const signal = readFeedbackDoneSignal(projectRoot, orchItem.id);
+        if (signal) snap.feedbackDoneSignal = true;
       } catch { /* best-effort */ }
     }
 
