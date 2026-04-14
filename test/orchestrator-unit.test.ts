@@ -67,6 +67,7 @@ function snapshotWith(items: ItemSnapshot[], readyIds: string[] = []): PollSnaps
 
 // Fixed timestamp to keep transition checks deterministic
 const NOW = new Date("2026-01-15T12:00:00Z");
+const FEEDBACK_FLUSH_NOW = new Date("2026-01-15T12:03:00Z");
 
 // ── STATE_TRANSITIONS table validation ──────────────────────────────
 
@@ -3524,7 +3525,7 @@ describe("processComments (via processTransitions)", () => {
     expect(actions2.filter((a) => a.type === "send-message")).toHaveLength(0);
   });
 
-  it("generates daemon-rebase action for 'rebase' keyword in comment", () => {
+  it("batches rebase comments before relaying them", () => {
     const orch = new Orchestrator();
     orch.addItem(makeWorkItem("H-1-1"));
     orch.getItem("H-1-1")!.reviewCompleted = true;
@@ -3532,7 +3533,7 @@ describe("processComments (via processTransitions)", () => {
     orch.getItem("H-1-1")!.prNumber = 42;
     orch.getItem("H-1-1")!.workspaceRef = "workspace:1";
 
-    const actions = orch.processTransitions(
+    const waitingActions = orch.processTransitions(
       snapshotWith([{
         id: "H-1-1",
         ciStatus: "pending",
@@ -3541,14 +3542,28 @@ describe("processComments (via processTransitions)", () => {
           { id: 401, body: "Please rebase onto main", author: "reviewer", createdAt: "2026-01-15T12:01:00Z", commentType: "issue" },
         ],
       }]),
+      NOW,
     );
 
-    const rebaseAction = actions.find((a) => a.type === "daemon-rebase" && a.itemId === "H-1-1");
-    expect(rebaseAction).toBeDefined();
-    expect(rebaseAction!.message).toContain("@reviewer");
-    expect(rebaseAction!.message).toContain("rebase");
-    // Should NOT also generate a send-message for the same comment
-    expect(actions.filter((a) => a.type === "send-message" && a.itemId === "H-1-1")).toHaveLength(0);
+    expect(waitingActions).toEqual([]);
+    expect(orch.getItem("H-1-1")!.pendingFeedbackBatch).toEqual(
+      expect.objectContaining({ deadline: "2026-01-15T12:02:00.000Z" }),
+    );
+
+    const flushedActions = orch.processTransitions(
+      snapshotWith([{
+        id: "H-1-1",
+        ciStatus: "pending",
+        prState: "open",
+      }]),
+      FEEDBACK_FLUSH_NOW,
+    );
+
+    const sendMessage = flushedActions.find((a) => a.type === "send-message" && a.itemId === "H-1-1");
+    expect(sendMessage).toBeDefined();
+    expect(sendMessage!.message).toContain("@reviewer");
+    expect(sendMessage!.message).toContain("Please rebase onto main");
+    expect(flushedActions.find((a) => a.type === "daemon-rebase" && a.itemId === "H-1-1")).toBeUndefined();
   });
 
   it("does not process comments for items without a prNumber", () => {
@@ -3612,12 +3627,14 @@ describe("processComments (via processTransitions)", () => {
     item.prNumber = 42;
     item.reviewCompleted = true;
     item.sessionParked = true;
+    item.lastReviewedCommitSha = null;
 
-    const actions = orch.processTransitions(
+    const waitingActions = orch.processTransitions(
       snapshotWith([{
         id: "H-1-1",
         ciStatus: "pass",
         prState: "open",
+        headSha: "abc123",
         newComments: [
           { body: "Please tighten this wording.", author: "reviewer", createdAt: "2026-01-15T12:01:00Z" },
         ],
@@ -3625,11 +3642,27 @@ describe("processComments (via processTransitions)", () => {
       NOW,
     );
 
+    expect(waitingActions).toEqual([]);
+    expect(item.pendingFeedbackBatch).toBeDefined();
+    expect(item.state).toBe("review-pending");
+    expect(item.sessionParked).toBe(true);
+
+    const actions = orch.processTransitions(
+      snapshotWith([{
+        id: "H-1-1",
+        ciStatus: "pass",
+        prState: "open",
+        headSha: "abc123",
+      }]),
+      FEEDBACK_FLUSH_NOW,
+    );
+
     expect(actions.some((a) => a.type === "retry" && a.itemId === "H-1-1")).toBe(true);
     expect(actions.some((a) => a.type === "launch" && a.itemId === "H-1-1")).toBe(true);
     expect(item.state).toBe("launching");
     expect(item.sessionParked).toBe(false);
     expect(item.reviewCompleted).toBe(false);
+    expect(item.lastReviewedCommitSha).toBe("abc123");
     expect(item.needsFeedbackResponse).toBe(true);
     expect(item.pendingFeedbackMessage).toContain("Please tighten this wording.");
     expect(item.lastCommentCheck).toBe("2026-01-15T12:01:00Z");
@@ -3656,7 +3689,7 @@ describe("processComments (via processTransitions)", () => {
           { body: "<!-- ninthwave-orchestrator-status -->", author: "bot", createdAt: "2026-01-15T12:02:00Z" },
         ],
       }]),
-      NOW,
+      FEEDBACK_FLUSH_NOW,
     );
 
     expect(actions.some((a) => a.type === "retry" && a.itemId === "H-1-1")).toBe(false);
@@ -3697,7 +3730,7 @@ describe("processComments (via processTransitions)", () => {
           },
         ],
       }]),
-      NOW,
+      FEEDBACK_FLUSH_NOW,
     );
 
     expect(actions.some((a) => a.type === "retry" && a.itemId === "H-1-1")).toBe(true);
@@ -3726,7 +3759,7 @@ describe("processComments (via processTransitions)", () => {
           { id: 901, body: "Please fix the docs.", author: "reviewer", createdAt: "2026-01-15T12:01:00Z", commentType: "issue" },
         ],
       }]),
-      NOW,
+      FEEDBACK_FLUSH_NOW,
     );
 
     const reaction = actions.find((a) => a.type === "react-to-comment" && a.itemId === "H-1-1");
@@ -3841,9 +3874,13 @@ describe("processComments (via processTransitions)", () => {
     );
 
     const sendMsgs = actions.filter((a) => a.type === "send-message" && a.itemId === "H-1-1");
-    expect(sendMsgs).toHaveLength(2);
+    expect(sendMsgs).toHaveLength(1);
     expect(sendMsgs[0]!.message).toContain("@alice");
-    expect(sendMsgs[1]!.message).toContain("@bob");
+    expect(sendMsgs[0]!.message).toContain("@bob");
+    expect(actions.filter((a) => a.type === "react-to-comment" && a.itemId === "H-1-1")).toEqual([
+      { type: "react-to-comment", itemId: "H-1-1", commentId: 1001, commentType: "issue" },
+      { type: "react-to-comment", itemId: "H-1-1", commentId: 1002, commentType: "review" },
+    ]);
     // lastCommentCheck should be the latest comment timestamp
     expect(orch.getItem("H-1-1")!.lastCommentCheck).toBe("2026-01-15T12:02:00Z");
   });
@@ -5414,6 +5451,8 @@ describe("implementer inbox delivery resolution", () => {
     const item = orch.getItem("H-1-1")!;
     item.prNumber = 42;
     // workspaceRef is undefined -- session was retried, but worktree still on disk
+    item.needsFeedbackResponse = true;
+    item.pendingFeedbackMessage = "[ORCHESTRATOR] Review Feedback: @reviewer commented:\n\nFix this.";
 
     const writes: Array<{ targetRoot: string; itemId: string; message: string }> = [];
     const deps = makeMinimalDeps({ io: { writeInbox: (targetRoot, itemId, message) => {
@@ -5437,6 +5476,94 @@ describe("implementer inbox delivery resolution", () => {
     expect(writes).toEqual([
       { targetRoot: worktreePath, itemId: "H-1-1", message: "[ORCHESTRATOR] Review Feedback: @reviewer commented:\n\nFix this." },
     ]);
+    expect(item.needsFeedbackResponse).toBe(true);
+    expect(item.pendingFeedbackMessage).toContain("Fix this.");
+  });
+
+  it("send-message clears pending feedback after verified live delivery", () => {
+    const hubRepo = setupTempRepo();
+    const worktreeDir = join(hubRepo, ".ninthwave", ".worktrees");
+    const worktreePath = join(worktreeDir, "ninthwave-H-1-1");
+    mkdirSync(worktreePath, { recursive: true });
+
+    const { orch } = createEventCollector();
+    orch.addItem(makeWorkItem("H-1-1"));
+    orch.getItem("H-1-1")!.reviewCompleted = true;
+    orch.hydrateState("H-1-1", "review-pending");
+    const item = orch.getItem("H-1-1")!;
+    item.prNumber = 42;
+    item.workspaceRef = "workspace:1";
+    item.needsFeedbackResponse = true;
+    item.pendingFeedbackMessage = "[ORCHESTRATOR] Review Feedback: @reviewer commented:\n\nFix this.";
+    item.pendingFeedbackLiveDeliveryArmed = true;
+
+    const writes: Array<{ targetRoot: string; itemId: string; message: string }> = [];
+    const deps = makeMinimalDeps({ io: { writeInbox: (targetRoot, itemId, message) => {
+      writes.push({ targetRoot, itemId, message });
+    } } });
+    const ctx: ExecutionContext = {
+      projectRoot: hubRepo,
+      worktreeDir,
+      workDir: join(hubRepo, ".ninthwave", "work"),
+      aiTool: "claude",
+    };
+
+    const result = orch.executeAction(
+      { type: "send-message", itemId: "H-1-1", message: "[ORCHESTRATOR] Review Feedback: @reviewer commented:\n\nFix this." },
+      ctx,
+      deps,
+    );
+
+    expect(result.success).toBe(true);
+    expect(writes).toEqual([
+      { targetRoot: worktreePath, itemId: "H-1-1", message: "[ORCHESTRATOR] Review Feedback: @reviewer commented:\n\nFix this." },
+    ]);
+    expect(item.needsFeedbackResponse).toBe(false);
+    expect(item.pendingFeedbackMessage).toBeUndefined();
+    expect(item.pendingFeedbackLiveDeliveryArmed).toBeUndefined();
+  });
+
+  it("send-message preserves pending feedback for stale workspace metadata", () => {
+    const hubRepo = setupTempRepo();
+    const worktreeDir = join(hubRepo, ".ninthwave", ".worktrees");
+    const worktreePath = join(worktreeDir, "ninthwave-H-1-1");
+    mkdirSync(worktreePath, { recursive: true });
+
+    const { orch } = createEventCollector();
+    orch.addItem(makeWorkItem("H-1-1"));
+    orch.getItem("H-1-1")!.reviewCompleted = true;
+    orch.hydrateState("H-1-1", "review-pending");
+    const item = orch.getItem("H-1-1")!;
+    item.prNumber = 42;
+    item.workspaceRef = "workspace:stale";
+    item.needsFeedbackResponse = true;
+    item.pendingFeedbackMessage = "[ORCHESTRATOR] Review Feedback: @reviewer commented:\n\nFix this.";
+    item.pendingFeedbackLiveDeliveryArmed = undefined;
+
+    const writes: Array<{ targetRoot: string; itemId: string; message: string }> = [];
+    const deps = makeMinimalDeps({ io: { writeInbox: (targetRoot, itemId, message) => {
+      writes.push({ targetRoot, itemId, message });
+    } } });
+    const ctx: ExecutionContext = {
+      projectRoot: hubRepo,
+      worktreeDir,
+      workDir: join(hubRepo, ".ninthwave", "work"),
+      aiTool: "claude",
+    };
+
+    const result = orch.executeAction(
+      { type: "send-message", itemId: "H-1-1", message: "[ORCHESTRATOR] Review Feedback: @reviewer commented:\n\nFix this." },
+      ctx,
+      deps,
+    );
+
+    expect(result.success).toBe(true);
+    expect(writes).toEqual([
+      { targetRoot: worktreePath, itemId: "H-1-1", message: "[ORCHESTRATOR] Review Feedback: @reviewer commented:\n\nFix this." },
+    ]);
+    expect(item.needsFeedbackResponse).toBe(true);
+    expect(item.pendingFeedbackMessage).toContain("Fix this.");
+    expect(item.pendingFeedbackLiveDeliveryArmed).toBeUndefined();
   });
 
   it("send-message returns success:false when no worktree path exists at all", () => {
@@ -6315,7 +6442,7 @@ describe("session parking (H-SP-2)", () => {
     orch.getItem("H-1-1")!.reviewCompleted = true;
     orch.getItem("H-1-1")!.prNumber = 42;
 
-    const actions = orch.processTransitions(
+    const waitingActions = orch.processTransitions(
       snapshotWith([{
         id: "H-1-1", ciStatus: "pass", prState: "open",
         reviewDecision: "CHANGES_REQUESTED",
@@ -6324,7 +6451,7 @@ describe("session parking (H-SP-2)", () => {
 
     expect(orch.getItem("H-1-1")!.state).toBe("review-pending");
     expect(orch.getItem("H-1-1")!.sessionParked).not.toBe(true);
-    expect(actions.some((a) => a.type === "workspace-close")).toBe(false);
+    expect(waitingActions.some((a) => a.type === "workspace-close")).toBe(false);
   });
 
   it("parked item resumes on CHANGES_REQUESTED with queued feedback", () => {
@@ -6335,7 +6462,7 @@ describe("session parking (H-SP-2)", () => {
     orch.getItem("H-1-1")!.reviewCompleted = true;
     orch.getItem("H-1-1")!.sessionParked = true;
 
-    const actions = orch.processTransitions(
+    const waitingActions = orch.processTransitions(
       snapshotWith([{
         id: "H-1-1", ciStatus: "pass", prState: "open",
         reviewDecision: "CHANGES_REQUESTED",
@@ -6348,8 +6475,8 @@ describe("session parking (H-SP-2)", () => {
     expect(orch.getItem("H-1-1")!.sessionParked).toBe(false);
     expect(orch.getItem("H-1-1")!.needsFeedbackResponse).toBe(true);
     expect(orch.getItem("H-1-1")!.pendingFeedbackMessage).toContain("GitHub review requested changes on PR #42.");
-    expect(actions.some((a) => a.type === "retry")).toBe(true);
-    expect(actions.some((a) => a.type === "launch" && a.itemId === "H-1-1")).toBe(true);
+    expect(waitingActions.some((a) => a.type === "retry")).toBe(true);
+    expect(waitingActions.some((a) => a.type === "launch" && a.itemId === "H-1-1")).toBe(true);
   });
 
   it("parked CHANGES_REQUESTED review with comments queues the review comment text", () => {
@@ -6360,11 +6487,13 @@ describe("session parking (H-SP-2)", () => {
     item.prNumber = 42;
     item.reviewCompleted = true;
     item.sessionParked = true;
+    item.lastReviewedCommitSha = null;
 
-    const actions = orch.processTransitions(
+    const waitingActions = orch.processTransitions(
       snapshotWith([{
         id: "H-1-1", ciStatus: "pass", prState: "open",
         reviewDecision: "CHANGES_REQUESTED",
+        headSha: "sha-parked-1",
         newComments: [
           { body: "Please cover the failed relaunch path.", author: "reviewer", createdAt: "2026-01-15T12:01:00Z" },
         ],
@@ -6372,11 +6501,24 @@ describe("session parking (H-SP-2)", () => {
       NOW,
     );
 
+    expect(waitingActions).toEqual([]);
+    expect(item.pendingFeedbackBatch).toBeDefined();
+
+    const actions = orch.processTransitions(
+      snapshotWith([{
+        id: "H-1-1", ciStatus: "pass", prState: "open",
+        reviewDecision: "CHANGES_REQUESTED",
+        headSha: "sha-parked-1",
+      }]),
+      FEEDBACK_FLUSH_NOW,
+    );
+
     expect(actions.some((a) => a.type === "retry" && a.itemId === "H-1-1")).toBe(true);
     expect(actions.some((a) => a.type === "launch" && a.itemId === "H-1-1")).toBe(true);
     expect(item.state).toBe("launching");
     expect(item.reviewCompleted).toBe(false);
     expect(item.needsFeedbackResponse).toBe(true);
+    expect(item.lastReviewedCommitSha).toBe("sha-parked-1");
     expect(item.pendingFeedbackMessage).toContain("Please cover the failed relaunch path.");
     expect(item.lastCommentCheck).toBe("2026-01-15T12:01:00Z");
   });

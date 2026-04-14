@@ -3,7 +3,7 @@
 
 import { existsSync } from "fs";
 import { join } from "path";
-import type { Orchestrator, OrchestratorItem, OrchestratorItemState } from "./orchestrator.ts";
+import type { Orchestrator, OrchestratorItem, OrchestratorItemState, PendingFeedbackBatch } from "./orchestrator.ts";
 import type { DaemonState } from "./daemon.ts";
 import { checkPrStatus } from "./commands/pr-monitor.ts";
 import { classifyPrMetadataMatch } from "./work-item-files.ts";
@@ -183,6 +183,9 @@ export function reconstructState(
     reviewRound?: number;
     lastReviewedCommitSha?: string | null;
     lastCommentCheck?: string;
+    pendingFeedbackBatch?: PendingFeedbackBatch;
+    needsFeedbackResponse?: boolean;
+    pendingFeedbackMessage?: string;
     rebaseRequested?: boolean;
     lastRebaseNudgeAt?: string;
     rebaseNudgeCount?: number;
@@ -220,6 +223,9 @@ export function reconstructState(
         reviewRound: si.reviewRound,
         lastReviewedCommitSha: si.lastReviewedCommitSha,
         lastCommentCheck: si.lastCommentCheck,
+        pendingFeedbackBatch: si.pendingFeedbackBatch,
+        needsFeedbackResponse: si.needsFeedbackResponse,
+        pendingFeedbackMessage: si.pendingFeedbackMessage,
         rebaseRequested: si.rebaseRequested,
         lastRebaseNudgeAt: si.lastRebaseNudgeAt,
         rebaseNudgeCount: si.rebaseNudgeCount,
@@ -257,6 +263,9 @@ export function reconstructState(
       if (saved.reviewRound != null) item.reviewRound = saved.reviewRound;
       if (saved.lastReviewedCommitSha != null) item.lastReviewedCommitSha = saved.lastReviewedCommitSha;
       if (saved.lastCommentCheck) item.lastCommentCheck = saved.lastCommentCheck;
+      if (saved.pendingFeedbackBatch) item.pendingFeedbackBatch = saved.pendingFeedbackBatch;
+      if (saved.needsFeedbackResponse) item.needsFeedbackResponse = saved.needsFeedbackResponse;
+      if (saved.pendingFeedbackMessage) item.pendingFeedbackMessage = saved.pendingFeedbackMessage;
       if (saved.rebaseRequested) item.rebaseRequested = saved.rebaseRequested;
       if (saved.lastRebaseNudgeAt) item.lastRebaseNudgeAt = saved.lastRebaseNudgeAt;
       if (saved.rebaseNudgeCount != null) item.rebaseNudgeCount = saved.rebaseNudgeCount;

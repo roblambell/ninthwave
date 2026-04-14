@@ -33,6 +33,19 @@ export type OrchestratorItemState =
 
 export type MergeStrategy = "auto" | "manual" | "bypass";
 
+export interface PendingFeedbackComment {
+  id?: number;
+  body: string;
+  author: string;
+  createdAt: string;
+  commentType?: "issue" | "review";
+}
+
+export interface PendingFeedbackBatch {
+  comments: PendingFeedbackComment[];
+  deadline: string;
+}
+
 // ── Interfaces ───────────────────────────────────────────────────────
 
 export interface OrchestratorItem {
@@ -118,6 +131,10 @@ export interface OrchestratorItem {
   needsFeedbackResponse?: boolean;
   /** Pending human PR feedback delivered to the next relaunched worker. Cleared after launch. */
   pendingFeedbackMessage?: string;
+  /** True only when the orchestrator has verified a live worker for one-shot feedback delivery. */
+  pendingFeedbackLiveDeliveryArmed?: boolean;
+  /** Debounced trusted human PR comments waiting to be relayed as a single batch. */
+  pendingFeedbackBatch?: PendingFeedbackBatch;
   /** Absolute path to the worktree directory. Preserved for stuck items so users can inspect partial work. */
   worktreePath?: string;
   /** SHA of the merge commit on the repo default branch after PR is merged. */
@@ -304,13 +321,7 @@ export interface ItemSnapshot {
    *  e.g., GitHub's completedAt for CI checks, mergedAt for merges, updatedAt for PR changes. */
   eventTime?: string;
   /** New trusted PR comments since last check. */
-  newComments?: Array<{
-    id: number;
-    body: string;
-    author: string;
-    createdAt: string;
-    commentType: "issue" | "review";
-  }>;
+  newComments?: PendingFeedbackComment[];
   /** Worker heartbeat data read from the heartbeat file. Null if no heartbeat file exists. */
   lastHeartbeat?: import("./daemon.ts").WorkerProgress | null;
   /** Best-effort merge commit SHA for merged PRs, backfilled by polling. */
@@ -722,6 +733,13 @@ export const TIMEOUTS = {
    */
   ciFixAck: 30 * 60 * 1000, // 30 min
 
+  /**
+   * Debounce window for batching trusted human PR comments before relaying.
+   * Comments arriving inside the window extend the deadline so the worker gets
+   * one consolidated feedback batch instead of a burst of per-comment nudges.
+   */
+  humanFeedbackDebounce: 60 * 1000, // 60 sec
+
   // ── Merge pipeline ───────────────────────────────────────────────
   /**
    * Post-merge CI grace period (ms) when the repo has push workflows.
@@ -805,7 +823,7 @@ export const STATE_TRANSITIONS: Record<OrchestratorItemState, readonly Orchestra
   "rebasing":             ["ci-pending", "stuck"],
   "reviewing":            ["ci-passed", "ci-failed", "ci-pending", "review-pending", "merged"],
   "review-pending":       ["ci-pending", "ci-passed", "ci-failed", "merging", "merged", "stuck", "reviewing", "rebasing", "ready"],
-  "merging":              ["merged", "ci-passed", "ci-pending", "stuck"],
+  "merging":              ["merged", "ci-passed", "ci-pending", "review-pending", "stuck"],
   "merged":               ["forward-fix-pending", "fix-forward-failed", "done"],
   "forward-fix-pending":  ["done", "fix-forward-failed"],
   "fix-forward-failed":   ["fixing-forward", "stuck", "done"],

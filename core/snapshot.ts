@@ -567,7 +567,7 @@ export function buildSnapshot(
 
     // Track branch HEAD SHA for all states that can reach evaluateMerge or need
     // to record lastReviewedCommitSha. This gates reviews on new commits.
-    const headShaStates = new Set(["implementing", "ci-pending", "ci-passed", "ci-failed", "reviewing", "review-pending"]);
+    const headShaStates = new Set(["implementing", "ci-pending", "ci-passed", "ci-failed", "reviewing", "review-pending", "merging"]);
     if (headShaStates.has(orchItem.state)) {
       snap.headSha = getHeadSha(repoRoot, `ninthwave/${orchItem.id}`);
     }
@@ -604,7 +604,7 @@ export function buildSnapshot(
 
     // Fetch new trusted PR comments for items with open PRs in active states
     if (orchItem.prNumber && fetchComments) {
-      const commentRelayStates = new Set(["ci-pending", "ci-passed", "ci-failed", "review-pending", "reviewing"]);
+      const commentRelayStates = new Set(["ci-pending", "ci-passed", "ci-failed", "review-pending", "reviewing", "merging"]);
       if (commentRelayStates.has(orchItem.state)) {
         const since = orchItem.lastCommentCheck || orchItem.lastTransition;
         try {
@@ -837,7 +837,7 @@ export async function buildSnapshotAsync(
     }
 
     // Track branch HEAD SHA for review gating (see sync version for rationale)
-    const headShaStates = new Set(["implementing", "ci-pending", "ci-passed", "ci-failed", "reviewing", "review-pending"]);
+    const headShaStates = new Set(["implementing", "ci-pending", "ci-passed", "ci-failed", "reviewing", "review-pending", "merging"]);
     if (headShaStates.has(orchItem.state)) {
       snap.headSha = await getHeadSha(repoRoot, `ninthwave/${orchItem.id}`);
     }
@@ -873,7 +873,7 @@ export async function buildSnapshotAsync(
 
     // PR comments
     if (orchItem.prNumber && fetchComments) {
-      const commentRelayStates = new Set(["ci-pending", "ci-passed", "ci-failed", "review-pending", "reviewing"]);
+      const commentRelayStates = new Set(["ci-pending", "ci-passed", "ci-failed", "review-pending", "reviewing", "merging"]);
       if (commentRelayStates.has(orchItem.state)) {
         const since = orchItem.lastCommentCheck || orchItem.lastTransition;
         try {

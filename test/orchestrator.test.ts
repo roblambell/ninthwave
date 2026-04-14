@@ -3469,6 +3469,117 @@ describe("Orchestrator", () => {
         expect(actions[0]!.itemId).toBe("X-1-1");
       });
 
+      it("pauses merging when trusted human feedback arrives before merge lands", () => {
+        orch.addItem(makeWorkItem("X-1-1"));
+        const item = orch.getItem("X-1-1")!;
+        item.reviewCompleted = true;
+        item.prNumber = 42;
+        orch.hydrateState("X-1-1", "merging");
+
+        const waitingActions = orch.processTransitions(
+          snapshotWith([{
+            id: "X-1-1",
+            prState: "open",
+            ciStatus: "pass",
+            headSha: "merge-sha-1",
+            newComments: [{
+              id: 1234,
+              body: "Please fix this before merge.",
+              author: "reviewer",
+              createdAt: "2026-03-29T00:01:00Z",
+              commentType: "issue",
+            }],
+          }]),
+          new Date("2026-03-29T00:01:30Z"),
+        );
+
+        expect(waitingActions.some((a) => a.type === "merge")).toBe(false);
+        expect(item.state).toBe("merging");
+        expect(item.pendingFeedbackBatch).toEqual(expect.objectContaining({
+          deadline: "2026-03-29T00:02:00.000Z",
+        }));
+
+        const flushActions = orch.processTransitions(
+          snapshotWith([{
+            id: "X-1-1",
+            prState: "open",
+            ciStatus: "pass",
+            headSha: "merge-sha-1",
+          }]),
+          new Date("2026-03-29T00:02:30Z"),
+        );
+
+        expect(flushActions.some((a) => a.type === "merge")).toBe(false);
+        expect(flushActions.some((a) => a.type === "send-message")).toBe(true);
+        expect(item.pendingFeedbackBatch).toBeUndefined();
+        expect(item.reviewCompleted).toBe(false);
+        expect(item.state).toBe("review-pending");
+        expect(item.lastReviewedCommitSha).toBe("merge-sha-1");
+      });
+
+      it("reviewing waits for pending feedback before accepting an approve verdict", () => {
+        orch.addItem(makeWorkItem("X-1-2"));
+        const item = orch.getItem("X-1-2")!;
+        item.prNumber = 43;
+        item.reviewCompleted = false;
+        item.workspaceRef = "workspace:impl";
+        item.reviewWorkspaceRef = "workspace:review";
+        orch.hydrateState("X-1-2", "reviewing");
+
+        const waitingActions = orch.processTransitions(
+          snapshotWith([{
+            id: "X-1-2",
+            prState: "open",
+            ciStatus: "pass",
+            headSha: "review-sha-1",
+            reviewVerdict: {
+              verdict: "approve",
+              blockingCount: 0,
+              nonBlockingCount: 0,
+              summary: "Looks good.",
+            },
+            newComments: [{
+              id: 2234,
+              body: "Please fix this before merging.",
+              author: "reviewer",
+              createdAt: "2026-03-29T00:01:00Z",
+              commentType: "issue",
+            }],
+          }]),
+          new Date("2026-03-29T00:01:30Z"),
+        );
+
+        expect(waitingActions.some((a) => a.type === "merge")).toBe(false);
+        expect(waitingActions.some((a) => a.type === "post-review")).toBe(false);
+        expect(item.state).toBe("reviewing");
+        expect(item.pendingFeedbackBatch).toEqual(expect.objectContaining({
+          deadline: "2026-03-29T00:02:00.000Z",
+        }));
+
+        const flushActions = orch.processTransitions(
+          snapshotWith([{
+            id: "X-1-2",
+            prState: "open",
+            ciStatus: "pass",
+            headSha: "review-sha-1",
+            reviewVerdict: {
+              verdict: "approve",
+              blockingCount: 0,
+              nonBlockingCount: 0,
+              summary: "Looks good.",
+            },
+          }]),
+          new Date("2026-03-29T00:02:30Z"),
+        );
+
+        expect(flushActions.some((a) => a.type === "clean-review")).toBe(true);
+        expect(flushActions.some((a) => a.type === "send-message")).toBe(true);
+        expect(flushActions.some((a) => a.type === "merge")).toBe(false);
+        expect(flushActions.some((a) => a.type === "post-review")).toBe(false);
+        expect(item.state).toBe("review-pending");
+        expect(item.lastReviewedCommitSha).toBe("review-sha-1");
+      });
+
       it("stays merging with no actions during blind poll (no ciStatus)", () => {
         orch.addItem(makeWorkItem("X-1-1"));
         orch.getItem("X-1-1")!.reviewCompleted = true;
@@ -7470,6 +7581,90 @@ describe("Orchestrator", () => {
       );
       expect(commentActions).toHaveLength(0);
     });
+  });
+
+  describe("debounced human feedback batches", () => {
+    for (const mergeStrategy of ["auto", "bypass"] as const) {
+      it(`holds ${mergeStrategy} merge progression until the feedback batch resolves`, () => {
+        orch = new Orchestrator({ sessionLimit: 5, mergeStrategy, bypassEnabled: mergeStrategy === "bypass" });
+        const itemId = `H-BATCH-${mergeStrategy.toUpperCase()}`;
+        orch.addItem(makeWorkItem(itemId));
+        const item = orch.getItem(itemId)!;
+        item.reviewCompleted = true;
+        item.prNumber = 45;
+        item.workspaceRef = "workspace:batch";
+        item.lastReviewedCommitSha = "abc123";
+        orch.hydrateState(item.id, "ci-passed");
+
+        const waitActions = orch.processTransitions(
+          snapshotWith([
+            {
+              id: item.id,
+              workerAlive: true,
+              ciStatus: "pass",
+              prState: "open",
+              headSha: "abc123",
+              newComments: [{
+                id: 991,
+                body: "Please address the edge-case handling before merge.",
+                author: "reviewer",
+                createdAt: "2026-03-29T00:01:00Z",
+                commentType: "issue",
+              }],
+            },
+          ]),
+          new Date("2026-03-29T00:01:30Z"),
+        );
+
+        expect(waitActions.some((a) => a.type === "merge")).toBe(false);
+        expect(item.state).toBe("ci-passed");
+        expect(item.pendingFeedbackBatch).toEqual(expect.objectContaining({
+          deadline: "2026-03-29T00:02:00.000Z",
+        }));
+
+        const flushActions = orch.processTransitions(
+          snapshotWith([
+            {
+              id: item.id,
+              workerAlive: true,
+              ciStatus: "pass",
+              prState: "open",
+              headSha: "abc123",
+            },
+          ]),
+          new Date("2026-03-29T00:02:30Z"),
+        );
+
+        expect(flushActions.some((a) => a.type === "merge")).toBe(false);
+        expect(flushActions.some((a) => a.type === "send-message")).toBe(true);
+        expect(item.pendingFeedbackBatch).toBeUndefined();
+        expect(item.reviewCompleted).toBe(false);
+        expect(item.state).toBe("review-pending");
+        expect(item.pendingFeedbackMessage).toContain("edge-case handling");
+
+        const worktreePath = `${defaultCtx.worktreeDir}/ninthwave-${item.id}`;
+        mkdirSync(worktreePath, { recursive: true });
+        const sendAction = flushActions.find((a) => a.type === "send-message")!;
+        const deps = mockDeps({ io: { writeInbox: vi.fn() } });
+        const result = orch.executeAction(sendAction, defaultCtx, deps);
+        expect(result.success).toBe(true);
+
+        const followupActions = orch.processTransitions(
+          snapshotWith([
+            {
+              id: item.id,
+              workerAlive: true,
+              ciStatus: "pass",
+              prState: "open",
+              headSha: "abc123",
+            },
+          ]),
+          new Date("2026-03-29T00:03:00Z"),
+        );
+
+        expect(followupActions.some((a) => a.type === "send-message")).toBe(false);
+      });
+    }
   });
 
   // ── skipReview ─────────────────────────────────────────────────────────
