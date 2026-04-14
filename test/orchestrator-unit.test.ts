@@ -3627,12 +3627,14 @@ describe("processComments (via processTransitions)", () => {
     item.prNumber = 42;
     item.reviewCompleted = true;
     item.sessionParked = true;
+    item.lastReviewedCommitSha = null;
 
     const waitingActions = orch.processTransitions(
       snapshotWith([{
         id: "H-1-1",
         ciStatus: "pass",
         prState: "open",
+        headSha: "abc123",
         newComments: [
           { body: "Please tighten this wording.", author: "reviewer", createdAt: "2026-01-15T12:01:00Z" },
         ],
@@ -3650,6 +3652,7 @@ describe("processComments (via processTransitions)", () => {
         id: "H-1-1",
         ciStatus: "pass",
         prState: "open",
+        headSha: "abc123",
       }]),
       FEEDBACK_FLUSH_NOW,
     );
@@ -3659,6 +3662,7 @@ describe("processComments (via processTransitions)", () => {
     expect(item.state).toBe("launching");
     expect(item.sessionParked).toBe(false);
     expect(item.reviewCompleted).toBe(false);
+    expect(item.lastReviewedCommitSha).toBe("abc123");
     expect(item.needsFeedbackResponse).toBe(true);
     expect(item.pendingFeedbackMessage).toContain("Please tighten this wording.");
     expect(item.lastCommentCheck).toBe("2026-01-15T12:01:00Z");
@@ -6393,11 +6397,13 @@ describe("session parking (H-SP-2)", () => {
     item.prNumber = 42;
     item.reviewCompleted = true;
     item.sessionParked = true;
+    item.lastReviewedCommitSha = null;
 
     const waitingActions = orch.processTransitions(
       snapshotWith([{
         id: "H-1-1", ciStatus: "pass", prState: "open",
         reviewDecision: "CHANGES_REQUESTED",
+        headSha: "sha-parked-1",
         newComments: [
           { body: "Please cover the failed relaunch path.", author: "reviewer", createdAt: "2026-01-15T12:01:00Z" },
         ],
@@ -6412,6 +6418,7 @@ describe("session parking (H-SP-2)", () => {
       snapshotWith([{
         id: "H-1-1", ciStatus: "pass", prState: "open",
         reviewDecision: "CHANGES_REQUESTED",
+        headSha: "sha-parked-1",
       }]),
       FEEDBACK_FLUSH_NOW,
     );
@@ -6421,6 +6428,7 @@ describe("session parking (H-SP-2)", () => {
     expect(item.state).toBe("launching");
     expect(item.reviewCompleted).toBe(false);
     expect(item.needsFeedbackResponse).toBe(true);
+    expect(item.lastReviewedCommitSha).toBe("sha-parked-1");
     expect(item.pendingFeedbackMessage).toContain("Please cover the failed relaunch path.");
     expect(item.lastCommentCheck).toBe("2026-01-15T12:01:00Z");
   });

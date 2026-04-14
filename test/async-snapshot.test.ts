@@ -447,6 +447,34 @@ describe("buildSnapshotAsync", () => {
     expect(snapshot.items[0]!.newComments![0]!.body).toBe("LGTM");
   });
 
+  it("awaits async fetchComments while an item is merging", async () => {
+    const orch = new Orchestrator();
+    orch.addItem(makeWorkItem("BA-9-2"));
+    orch.getItem("BA-9-2")!.reviewCompleted = true;
+    orch.hydrateState("BA-9-2", "merging");
+    orch.getItem("BA-9-2")!.prNumber = 43;
+
+    const asyncCheckPr = async () => "BA-9-2\t43\tci-passed\tMERGEABLE\t2026-01-01T00:00:00Z";
+    const asyncFetchComments = async (_root: string, _pr: number, _since: string) => {
+      await new Promise((r) => setTimeout(r, 1));
+      return [{ body: "Please stop the merge.", author: "reviewer", authorAssociation: "OWNER", createdAt: "2026-01-15T12:00:00Z" }];
+    };
+
+    const snapshot = await buildSnapshotAsync(
+      orch,
+      "/project",
+      "/project/.ninthwave/.worktrees",
+      fakeMux,
+      () => null,
+      asyncCheckPr,
+      asyncFetchComments,
+    );
+
+    expect(snapshot.items).toHaveLength(1);
+    expect(snapshot.items[0]!.newComments).toHaveLength(1);
+    expect(snapshot.items[0]!.newComments![0]!.body).toBe("Please stop the merge.");
+  });
+
   it("awaits async checkCommitCI parameter for verifying state", async () => {
     const orch = new Orchestrator();
     orch.addItem(makeWorkItem("BA-10-1"));

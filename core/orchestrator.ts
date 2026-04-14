@@ -649,7 +649,7 @@ export class Orchestrator {
         break;
 
       case "merging":
-        actions = this.handleMerging(item, snap);
+        actions = this.handleMerging(item, snap, now);
         break;
 
       case "merged":
@@ -1041,6 +1041,7 @@ export class Orchestrator {
     item.pendingFeedbackBatch = undefined;
     const message = this.formatPendingFeedbackMessage(item, batch);
     const reactions = this.feedbackReactionActions(item, batch);
+    item.lastReviewedCommitSha = snap?.headSha ?? item.lastReviewedCommitSha ?? null;
 
     if (item.sessionParked) {
       return {
@@ -1051,8 +1052,7 @@ export class Orchestrator {
 
     if (item.reviewCompleted) {
       item.reviewCompleted = false;
-      item.lastReviewedCommitSha = snap?.headSha ?? item.lastReviewedCommitSha ?? null;
-      if (item.state === "ci-passed") {
+      if (item.state === "ci-passed" || item.state === "merging") {
         this.transition(item, "review-pending", snap?.eventTime);
       }
     }
@@ -1078,7 +1078,8 @@ export class Orchestrator {
     snap: ItemSnapshot | undefined,
   ): Action[] | null {
     if (!item.needsFeedbackResponse || !item.pendingFeedbackMessage) return null;
-    if (item.state === "ci-passed") {
+    item.lastReviewedCommitSha = snap?.headSha ?? item.lastReviewedCommitSha ?? null;
+    if (item.state === "ci-passed" || item.state === "merging") {
       item.reviewCompleted = false;
       this.transition(item, "review-pending", snap?.eventTime);
     }
@@ -1578,7 +1579,14 @@ export class Orchestrator {
   private handleMerging(
     item: OrchestratorItem,
     snap: ItemSnapshot | undefined,
+    now: Date,
   ): Action[] {
+    const pendingFeedbackHandoff = this.continuePendingFeedbackHandoff(item, snap);
+    if (pendingFeedbackHandoff) return pendingFeedbackHandoff;
+
+    const feedback = this.resolvePendingFeedbackBatch(item, snap, now);
+    if (feedback) return feedback.actions;
+
     // External merge handled by interceptor. Only handle non-merge close.
     if (snap?.prState === "closed") {
       this.transition(item, "stuck");

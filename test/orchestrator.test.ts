@@ -3469,6 +3469,54 @@ describe("Orchestrator", () => {
         expect(actions[0]!.itemId).toBe("X-1-1");
       });
 
+      it("pauses merging when trusted human feedback arrives before merge lands", () => {
+        orch.addItem(makeWorkItem("X-1-1"));
+        const item = orch.getItem("X-1-1")!;
+        item.reviewCompleted = true;
+        item.prNumber = 42;
+        orch.hydrateState("X-1-1", "merging");
+
+        const waitingActions = orch.processTransitions(
+          snapshotWith([{
+            id: "X-1-1",
+            prState: "open",
+            ciStatus: "pass",
+            headSha: "merge-sha-1",
+            newComments: [{
+              id: 1234,
+              body: "Please fix this before merge.",
+              author: "reviewer",
+              createdAt: "2026-03-29T00:01:00Z",
+              commentType: "issue",
+            }],
+          }]),
+          new Date("2026-03-29T00:01:30Z"),
+        );
+
+        expect(waitingActions.some((a) => a.type === "merge")).toBe(false);
+        expect(item.state).toBe("merging");
+        expect(item.pendingFeedbackBatch).toEqual(expect.objectContaining({
+          deadline: "2026-03-29T00:02:00.000Z",
+        }));
+
+        const flushActions = orch.processTransitions(
+          snapshotWith([{
+            id: "X-1-1",
+            prState: "open",
+            ciStatus: "pass",
+            headSha: "merge-sha-1",
+          }]),
+          new Date("2026-03-29T00:02:30Z"),
+        );
+
+        expect(flushActions.some((a) => a.type === "merge")).toBe(false);
+        expect(flushActions.some((a) => a.type === "send-message")).toBe(true);
+        expect(item.pendingFeedbackBatch).toBeUndefined();
+        expect(item.reviewCompleted).toBe(false);
+        expect(item.state).toBe("review-pending");
+        expect(item.lastReviewedCommitSha).toBe("merge-sha-1");
+      });
+
       it("stays merging with no actions during blind poll (no ciStatus)", () => {
         orch.addItem(makeWorkItem("X-1-1"));
         orch.getItem("X-1-1")!.reviewCompleted = true;

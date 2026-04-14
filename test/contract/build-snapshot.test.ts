@@ -824,6 +824,32 @@ describe("buildSnapshot contract", () => {
       expect(item!.newComments).toEqual(fakeComments);
     });
 
+    it("fetches comments while an item is merging", () => {
+      orch.addItem(makeWorkItem("CM-1B"));
+      orch.hydrateState("CM-1B", "merging");
+      const orchItem = orch.getItem("CM-1B")!;
+      orchItem.prNumber = 142;
+      orchItem.lastTransition = "2026-03-29T08:00:00Z";
+
+      fakeGh.createPR("ninthwave/CM-1B", "Item CM-1B");
+
+      const fakeComments = [
+        { body: "Please stop the merge.", author: "reviewer", createdAt: "2026-03-29T09:00:00Z" },
+      ];
+
+      const result = snap(orch, {
+        checkPr: fakeGh.checkPr,
+        fetchComments: (_repoRoot, prNumber, _since) => {
+          if (prNumber === 142) return fakeComments;
+          return [];
+        },
+      });
+
+      const item = findItem(result.items, "CM-1B");
+      expect(item).toBeDefined();
+      expect(item!.newComments).toEqual(fakeComments);
+    });
+
     it("does not fetch comments when fetchComments is not provided", () => {
       orch.addItem(makeWorkItem("CM-2"));
       orch.hydrateState("CM-2", "ci-pending");
