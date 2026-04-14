@@ -420,6 +420,43 @@ function buildLaunchOverrideCmd(
   return `${envPrefix} exec ${shQuote(override.command)}${args ? ` ${args}` : ""}`;
 }
 
+// ── Non-Claude idle contract ──────────────────────────────────────────────────
+//
+// Appended to the launch prompt for non-Claude tools (OpenCode, Codex, Copilot)
+// to reinforce the requirement to stay alive after implementation and PR creation.
+// Claude handles this via its native agent session model and does not need it.
+
+export const NON_CLAUDE_IDLE_CONTRACT = `
+
+# CRITICAL: Do Not Exit After Implementation
+
+Your session does NOT end when you finish implementing and creating the PR.
+You MUST remain alive to handle orchestrator follow-up messages (CI fixes,
+review feedback, rebase requests).
+
+## Mandatory Post-PR Behavior
+
+1. After creating the PR, immediately run: \`nw inbox --check YOUR_WORK_ITEM_ID\`
+2. Process any messages returned, then run: \`nw inbox --wait YOUR_WORK_ITEM_ID\`
+3. If \`nw inbox --wait\` exits, times out, or is cancelled WITHOUT printing a
+   real message, immediately re-run it. Silence is NOT permission to stop.
+4. Continue this drain-wait loop indefinitely until the orchestrator sends a
+   stop message.
+5. During active work (before tests, before commits), check for messages with:
+   \`nw inbox --check YOUR_WORK_ITEM_ID\`
+
+## What NOT To Do
+
+- Do NOT exit or end your session after creating the PR
+- Do NOT treat silence from \`nw inbox --wait\` as completion
+- Do NOT summarize your work and stop
+- Do NOT return to conversational mode after the PR is created
+- Do NOT interpret a timeout or empty wait result as "done"
+
+Your session lifecycle is controlled by the orchestrator. Stay alive until
+explicitly told to stop.
+`;
+
 // ── Profiles ──────────────────────────────────────────────────────────────────
 
 /** The canonical list of AI tool profiles -- one entry per supported tool. */
@@ -483,7 +520,8 @@ export const AI_TOOL_PROFILES: AiToolProfile[] = [
       // Per-agent auto-approval is set up by `nw init` via
       // .opencode/opencode.jsonc (see core/opencode-config.ts); no launch-time
       // env var is needed.
-      const promptDataFile = writePromptDataFile(opts, deps);
+      const promptContent = buildPromptDataContent(opts, deps) + NON_CLAUDE_IDLE_CONTRACT;
+      const promptDataFile = writePromptDataFile(opts, deps, promptContent);
       const cmd =
         `PROMPT=$(cat '${promptDataFile}')` +
         ` && rm -f '${promptDataFile}'` +
@@ -494,7 +532,8 @@ export const AI_TOOL_PROFILES: AiToolProfile[] = [
       const overrideCmd = buildLaunchOverrideCmd("opencode", "headless", opts);
       if (overrideCmd) return { cmd: overrideCmd, initialPrompt: "" };
 
-      const promptDataFile = writePromptDataFile(opts, deps);
+      const promptContent = buildPromptDataContent(opts, deps) + NON_CLAUDE_IDLE_CONTRACT;
+      const promptDataFile = writePromptDataFile(opts, deps, promptContent);
       const cmd =
         `PROMPT=$(cat '${promptDataFile}')` +
         ` && rm -f '${promptDataFile}'` +
@@ -516,7 +555,8 @@ export const AI_TOOL_PROFILES: AiToolProfile[] = [
       const overrideCmd = buildLaunchOverrideCmd("codex", "launch", opts);
       if (overrideCmd) return { cmd: overrideCmd, initialPrompt: "" };
 
-      const promptDataFile = writePromptDataFile(opts, deps, buildPromptDataContentWithAgent(opts, deps, "codex"));
+      const promptContent = buildPromptDataContentWithAgent(opts, deps, "codex") + NON_CLAUDE_IDLE_CONTRACT;
+      const promptDataFile = writePromptDataFile(opts, deps, promptContent);
       const cmd =
         `PROMPT=$(cat '${promptDataFile}')` +
         ` && rm -f '${promptDataFile}'` +
@@ -527,7 +567,8 @@ export const AI_TOOL_PROFILES: AiToolProfile[] = [
       const overrideCmd = buildLaunchOverrideCmd("codex", "headless", opts);
       if (overrideCmd) return { cmd: overrideCmd, initialPrompt: "" };
 
-      const promptDataFile = writePromptDataFile(opts, deps, buildPromptDataContentWithAgent(opts, deps, "codex"));
+      const promptContent = buildPromptDataContentWithAgent(opts, deps, "codex") + NON_CLAUDE_IDLE_CONTRACT;
+      const promptDataFile = writePromptDataFile(opts, deps, promptContent);
       const cmd =
         `PROMPT=$(cat '${promptDataFile}')` +
         ` && rm -f '${promptDataFile}'` +
@@ -552,7 +593,8 @@ export const AI_TOOL_PROFILES: AiToolProfile[] = [
       // Inline command pattern: write prompt to a plain-text data file, then
       // construct a shell command that reads it, cleans up, and execs the tool.
       // Avoids creating executable .sh scripts (which trigger EDR alerts).
-      const promptDataFile = writePromptDataFile(opts, deps);
+      const promptContent = buildPromptDataContent(opts, deps) + NON_CLAUDE_IDLE_CONTRACT;
+      const promptDataFile = writePromptDataFile(opts, deps, promptContent);
       const runtimeAgentName = runtimeAgentNameForTool("copilot", opts.agentName);
       const cmd =
         `PROMPT=$(cat '${promptDataFile}')` +
@@ -564,7 +606,8 @@ export const AI_TOOL_PROFILES: AiToolProfile[] = [
       const overrideCmd = buildLaunchOverrideCmd("copilot", "headless", opts);
       if (overrideCmd) return { cmd: overrideCmd, initialPrompt: "" };
 
-      const promptDataFile = writePromptDataFile(opts, deps);
+      const promptContent = buildPromptDataContent(opts, deps) + NON_CLAUDE_IDLE_CONTRACT;
+      const promptDataFile = writePromptDataFile(opts, deps, promptContent);
       const runtimeAgentName = runtimeAgentNameForTool("copilot", opts.agentName);
       const cmd =
         `PROMPT=$(cat '${promptDataFile}')` +

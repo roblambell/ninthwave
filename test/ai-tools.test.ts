@@ -14,6 +14,7 @@ import {
   runtimeAgentNameForTool,
   readSeededAgentInstructions,
   resolveBuiltInLaunchOverride,
+  NON_CLAUDE_IDLE_CONTRACT,
   type LaunchDeps,
   type LaunchOpts,
   type BuiltInAiToolOverrides,
@@ -905,5 +906,89 @@ describe("readSeededAgentInstructions", () => {
     const deps = { readFileSync: vi.fn(() => 'name = "test"\n') as any };
     expect(() => readSeededAgentInstructions("/wt", "codex", "ninthwave-implementer", deps))
       .toThrow(/missing developer_instructions/);
+  });
+});
+
+// ── NON_CLAUDE_IDLE_CONTRACT ─────────────────────────────────────────────────
+
+describe("NON_CLAUDE_IDLE_CONTRACT", () => {
+  it("contains the mandatory inbox --check instruction", () => {
+    expect(NON_CLAUDE_IDLE_CONTRACT).toContain("nw inbox --check YOUR_WORK_ITEM_ID");
+  });
+
+  it("contains the mandatory inbox --wait instruction", () => {
+    expect(NON_CLAUDE_IDLE_CONTRACT).toContain("nw inbox --wait YOUR_WORK_ITEM_ID");
+  });
+
+  it("instructs not to exit after creating the PR", () => {
+    expect(NON_CLAUDE_IDLE_CONTRACT).toContain("Do NOT exit or end your session after creating the PR");
+  });
+
+  it("instructs to re-run wait on silence", () => {
+    expect(NON_CLAUDE_IDLE_CONTRACT).toContain("immediately re-run it");
+    expect(NON_CLAUDE_IDLE_CONTRACT).toContain("Silence is NOT permission to stop");
+  });
+
+  it("instructs to stay alive until stop message", () => {
+    expect(NON_CLAUDE_IDLE_CONTRACT).toContain("Stay alive until");
+    expect(NON_CLAUDE_IDLE_CONTRACT).toContain("explicitly told to stop");
+  });
+});
+
+// ── Non-Claude idle contract in launch payloads ──────────────────────────────
+
+describe("non-Claude launch payloads include idle contract", () => {
+  const idleContractMarker = "CRITICAL: Do Not Exit After Implementation";
+
+  for (const toolId of ["opencode", "codex", "copilot"] as const) {
+    it(`${toolId} buildLaunchCmd prompt file contains the idle contract`, () => {
+      const profile = getToolProfile(toolId);
+      const deps = stubDeps("PROMPT_CONTENT");
+      profile.buildLaunchCmd(stubOpts({ id: `H-IDLE-${toolId}` }), deps);
+
+      const calls = (deps.writeFileSync as ReturnType<typeof vi.fn>).mock.calls;
+      expect(calls.length).toBeGreaterThan(0);
+      const written = calls[0]![1] as string;
+      expect(written).toContain(idleContractMarker);
+      expect(written).toContain("nw inbox --check YOUR_WORK_ITEM_ID");
+      expect(written).toContain("nw inbox --wait YOUR_WORK_ITEM_ID");
+      expect(written).toContain("Silence is NOT permission to stop");
+    });
+
+    it(`${toolId} buildHeadlessCmd prompt file contains the idle contract`, () => {
+      const profile = getToolProfile(toolId);
+      const deps = stubDeps("PROMPT_CONTENT");
+      profile.buildHeadlessCmd(stubOpts({ id: `H-IDLE-${toolId}-HL` }), deps);
+
+      const calls = (deps.writeFileSync as ReturnType<typeof vi.fn>).mock.calls;
+      expect(calls.length).toBeGreaterThan(0);
+      const written = calls[0]![1] as string;
+      expect(written).toContain(idleContractMarker);
+      expect(written).toContain("nw inbox --check YOUR_WORK_ITEM_ID");
+      expect(written).toContain("nw inbox --wait YOUR_WORK_ITEM_ID");
+      expect(written).toContain("Silence is NOT permission to stop");
+    });
+  }
+});
+
+describe("Claude launch payloads do NOT include idle contract", () => {
+  const idleContractMarker = "CRITICAL: Do Not Exit After Implementation";
+
+  it("claude buildLaunchCmd does not read or write prompt files", () => {
+    const profile = getToolProfile("claude");
+    const deps = stubDeps();
+    const result = profile.buildLaunchCmd(stubOpts(), deps);
+    expect(deps.readFileSync).not.toHaveBeenCalled();
+    expect(deps.writeFileSync).not.toHaveBeenCalled();
+    expect(result.cmd).not.toContain(idleContractMarker);
+  });
+
+  it("claude buildHeadlessCmd does not contain the idle contract", () => {
+    const profile = getToolProfile("claude");
+    const deps = stubDeps();
+    const result = profile.buildHeadlessCmd(stubOpts(), deps);
+    expect(deps.readFileSync).not.toHaveBeenCalled();
+    expect(deps.writeFileSync).not.toHaveBeenCalled();
+    expect(result.cmd).not.toContain(idleContractMarker);
   });
 });
