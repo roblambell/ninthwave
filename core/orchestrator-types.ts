@@ -131,6 +131,8 @@ export interface OrchestratorItem {
   needsFeedbackResponse?: boolean;
   /** Pending human PR feedback delivered to the next relaunched worker. Cleared after launch. */
   pendingFeedbackMessage?: string;
+  /** True only when the orchestrator has verified a live worker for one-shot feedback delivery. */
+  pendingFeedbackLiveDeliveryArmed?: boolean;
   /** Debounced trusted human PR comments waiting to be relayed as a single batch. */
   pendingFeedbackBatch?: PendingFeedbackBatch;
   /** Absolute path to the worktree directory. Preserved for stuck items so users can inspect partial work. */

@@ -942,6 +942,7 @@ export class Orchestrator {
     item.reviewCompleted = false;
     item.needsFeedbackResponse = true;
     item.pendingFeedbackMessage = message;
+    item.pendingFeedbackLiveDeliveryArmed = undefined;
     item.notAliveCount = 0;
     item.lastAliveAt = undefined;
     // Stash workspace ref for executeRetry, clear for session slot freeing
@@ -1042,6 +1043,7 @@ export class Orchestrator {
     const message = this.formatPendingFeedbackMessage(item, batch);
     const reactions = this.feedbackReactionActions(item, batch);
     item.lastReviewedCommitSha = snap?.headSha ?? item.lastReviewedCommitSha ?? null;
+    item.pendingFeedbackLiveDeliveryArmed = undefined;
 
     if (item.sessionParked) {
       return {
@@ -1059,6 +1061,9 @@ export class Orchestrator {
 
     item.needsFeedbackResponse = true;
     item.pendingFeedbackMessage = message;
+    if (item.workspaceRef && this.checkWorkerLiveness(item, snap) === "alive") {
+      item.pendingFeedbackLiveDeliveryArmed = true;
+    }
 
     return {
       hold: true,
@@ -1091,6 +1096,8 @@ export class Orchestrator {
     if (liveness === "dead") {
       return this.respawnForFeedback(item, item.pendingFeedbackMessage);
     }
+
+    item.pendingFeedbackLiveDeliveryArmed = true;
 
     return [{
       type: "send-message",

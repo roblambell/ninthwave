@@ -336,6 +336,7 @@ export function executeLaunch(
     if (hasFeedback) {
       item.needsFeedbackResponse = false;
       item.pendingFeedbackMessage = undefined;
+      item.pendingFeedbackLiveDeliveryArmed = undefined;
     }
 
     return { success: true };
@@ -913,6 +914,12 @@ export function executeSendMessage(
   const delivery = deliverToImplementerInbox(orch, item, "send-message", message, ctx, deps);
   if (!delivery.projectRoot) {
     return { success: false, error: `No safe worker inbox target available for ${item.id}` };
+  }
+
+  if (item.pendingFeedbackLiveDeliveryArmed && item.needsFeedbackResponse && item.pendingFeedbackMessage === message) {
+    item.needsFeedbackResponse = false;
+    item.pendingFeedbackMessage = undefined;
+    item.pendingFeedbackLiveDeliveryArmed = undefined;
   }
 
   return { success: true };

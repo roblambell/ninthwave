@@ -5480,7 +5480,7 @@ describe("implementer inbox delivery resolution", () => {
     expect(item.pendingFeedbackMessage).toContain("Fix this.");
   });
 
-  it("send-message preserves pending feedback even when workspaceRef is populated", () => {
+  it("send-message clears pending feedback after verified live delivery", () => {
     const hubRepo = setupTempRepo();
     const worktreeDir = join(hubRepo, ".ninthwave", ".worktrees");
     const worktreePath = join(worktreeDir, "ninthwave-H-1-1");
@@ -5495,6 +5495,7 @@ describe("implementer inbox delivery resolution", () => {
     item.workspaceRef = "workspace:1";
     item.needsFeedbackResponse = true;
     item.pendingFeedbackMessage = "[ORCHESTRATOR] Review Feedback: @reviewer commented:\n\nFix this.";
+    item.pendingFeedbackLiveDeliveryArmed = true;
 
     const writes: Array<{ targetRoot: string; itemId: string; message: string }> = [];
     const deps = makeMinimalDeps({ io: { writeInbox: (targetRoot, itemId, message) => {
@@ -5517,8 +5518,9 @@ describe("implementer inbox delivery resolution", () => {
     expect(writes).toEqual([
       { targetRoot: worktreePath, itemId: "H-1-1", message: "[ORCHESTRATOR] Review Feedback: @reviewer commented:\n\nFix this." },
     ]);
-    expect(item.needsFeedbackResponse).toBe(true);
-    expect(item.pendingFeedbackMessage).toContain("Fix this.");
+    expect(item.needsFeedbackResponse).toBe(false);
+    expect(item.pendingFeedbackMessage).toBeUndefined();
+    expect(item.pendingFeedbackLiveDeliveryArmed).toBeUndefined();
   });
 
   it("send-message preserves pending feedback for stale workspace metadata", () => {
@@ -5536,6 +5538,7 @@ describe("implementer inbox delivery resolution", () => {
     item.workspaceRef = "workspace:stale";
     item.needsFeedbackResponse = true;
     item.pendingFeedbackMessage = "[ORCHESTRATOR] Review Feedback: @reviewer commented:\n\nFix this.";
+    item.pendingFeedbackLiveDeliveryArmed = undefined;
 
     const writes: Array<{ targetRoot: string; itemId: string; message: string }> = [];
     const deps = makeMinimalDeps({ io: { writeInbox: (targetRoot, itemId, message) => {
@@ -5560,6 +5563,7 @@ describe("implementer inbox delivery resolution", () => {
     ]);
     expect(item.needsFeedbackResponse).toBe(true);
     expect(item.pendingFeedbackMessage).toContain("Fix this.");
+    expect(item.pendingFeedbackLiveDeliveryArmed).toBeUndefined();
   });
 
   it("send-message returns success:false when no worktree path exists at all", () => {

@@ -7641,6 +7641,28 @@ describe("Orchestrator", () => {
         expect(item.reviewCompleted).toBe(false);
         expect(item.state).toBe("review-pending");
         expect(item.pendingFeedbackMessage).toContain("edge-case handling");
+
+        const worktreePath = `${defaultCtx.worktreeDir}/ninthwave-${item.id}`;
+        mkdirSync(worktreePath, { recursive: true });
+        const sendAction = flushActions.find((a) => a.type === "send-message")!;
+        const deps = mockDeps({ io: { writeInbox: vi.fn() } });
+        const result = orch.executeAction(sendAction, defaultCtx, deps);
+        expect(result.success).toBe(true);
+
+        const followupActions = orch.processTransitions(
+          snapshotWith([
+            {
+              id: item.id,
+              workerAlive: true,
+              ciStatus: "pass",
+              prState: "open",
+              headSha: "abc123",
+            },
+          ]),
+          new Date("2026-03-29T00:03:00Z"),
+        );
+
+        expect(followupActions.some((a) => a.type === "send-message")).toBe(false);
       });
     }
   });
