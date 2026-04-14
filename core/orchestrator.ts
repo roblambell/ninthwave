@@ -1099,6 +1099,17 @@ export class Orchestrator {
     }];
   }
 
+  private reopenReviewingForFeedback(
+    item: OrchestratorItem,
+    snap: ItemSnapshot | undefined,
+    actions: Action[] = [],
+  ): Action[] {
+    item.reviewCompleted = false;
+    this.transition(item, "review-pending", snap?.eventTime);
+    const handoff = this.continuePendingFeedbackHandoff(item, snap) ?? [];
+    return [{ type: "clean-review", itemId: item.id }, ...actions, ...handoff];
+  }
+
   /** Handle ci-failed state: retry circuit breaker, recovery, notification, unresponsive detection. */
   private handleCiFailed(
     item: OrchestratorItem,
@@ -1419,6 +1430,20 @@ export class Orchestrator {
     const actions: Action[] = [];
     // External merge and rebase tracking handled by interceptors.
 
+    if (item.needsFeedbackResponse && item.pendingFeedbackMessage) {
+      return this.reopenReviewingForFeedback(item, snap);
+    }
+
+    const feedback = this.resolvePendingFeedbackBatch(item, snap, now);
+    if (feedback) {
+      if (feedback.actions.length === 0) return [];
+      return this.reopenReviewingForFeedback(
+        item,
+        snap,
+        feedback.actions.filter((action) => action.type !== "send-message"),
+      );
+    }
+
     // Drain: skipReview toggled on while item was in reviewing state.
     // reviewCompleted was set by setSkipReview(); clean up the review worker
     // and chain to evaluateMerge.
@@ -1529,9 +1554,6 @@ export class Orchestrator {
         return actions;
       }
     }
-
-    const feedback = this.resolvePendingFeedbackBatch(item, snap, now);
-    if (feedback) return feedback.actions;
 
     return actions;
   }

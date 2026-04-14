@@ -5480,7 +5480,7 @@ describe("implementer inbox delivery resolution", () => {
     expect(item.pendingFeedbackMessage).toContain("Fix this.");
   });
 
-  it("send-message clears pending feedback only for a live worker session", () => {
+  it("send-message preserves pending feedback even when workspaceRef is populated", () => {
     const hubRepo = setupTempRepo();
     const worktreeDir = join(hubRepo, ".ninthwave", ".worktrees");
     const worktreePath = join(worktreeDir, "ninthwave-H-1-1");
@@ -5517,8 +5517,49 @@ describe("implementer inbox delivery resolution", () => {
     expect(writes).toEqual([
       { targetRoot: worktreePath, itemId: "H-1-1", message: "[ORCHESTRATOR] Review Feedback: @reviewer commented:\n\nFix this." },
     ]);
-    expect(item.needsFeedbackResponse).toBe(false);
-    expect(item.pendingFeedbackMessage).toBeUndefined();
+    expect(item.needsFeedbackResponse).toBe(true);
+    expect(item.pendingFeedbackMessage).toContain("Fix this.");
+  });
+
+  it("send-message preserves pending feedback for stale workspace metadata", () => {
+    const hubRepo = setupTempRepo();
+    const worktreeDir = join(hubRepo, ".ninthwave", ".worktrees");
+    const worktreePath = join(worktreeDir, "ninthwave-H-1-1");
+    mkdirSync(worktreePath, { recursive: true });
+
+    const { orch } = createEventCollector();
+    orch.addItem(makeWorkItem("H-1-1"));
+    orch.getItem("H-1-1")!.reviewCompleted = true;
+    orch.hydrateState("H-1-1", "review-pending");
+    const item = orch.getItem("H-1-1")!;
+    item.prNumber = 42;
+    item.workspaceRef = "workspace:stale";
+    item.needsFeedbackResponse = true;
+    item.pendingFeedbackMessage = "[ORCHESTRATOR] Review Feedback: @reviewer commented:\n\nFix this.";
+
+    const writes: Array<{ targetRoot: string; itemId: string; message: string }> = [];
+    const deps = makeMinimalDeps({ io: { writeInbox: (targetRoot, itemId, message) => {
+      writes.push({ targetRoot, itemId, message });
+    } } });
+    const ctx: ExecutionContext = {
+      projectRoot: hubRepo,
+      worktreeDir,
+      workDir: join(hubRepo, ".ninthwave", "work"),
+      aiTool: "claude",
+    };
+
+    const result = orch.executeAction(
+      { type: "send-message", itemId: "H-1-1", message: "[ORCHESTRATOR] Review Feedback: @reviewer commented:\n\nFix this." },
+      ctx,
+      deps,
+    );
+
+    expect(result.success).toBe(true);
+    expect(writes).toEqual([
+      { targetRoot: worktreePath, itemId: "H-1-1", message: "[ORCHESTRATOR] Review Feedback: @reviewer commented:\n\nFix this." },
+    ]);
+    expect(item.needsFeedbackResponse).toBe(true);
+    expect(item.pendingFeedbackMessage).toContain("Fix this.");
   });
 
   it("send-message returns success:false when no worktree path exists at all", () => {

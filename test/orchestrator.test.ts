@@ -3517,6 +3517,69 @@ describe("Orchestrator", () => {
         expect(item.lastReviewedCommitSha).toBe("merge-sha-1");
       });
 
+      it("reviewing waits for pending feedback before accepting an approve verdict", () => {
+        orch.addItem(makeWorkItem("X-1-2"));
+        const item = orch.getItem("X-1-2")!;
+        item.prNumber = 43;
+        item.reviewCompleted = false;
+        item.workspaceRef = "workspace:impl";
+        item.reviewWorkspaceRef = "workspace:review";
+        orch.hydrateState("X-1-2", "reviewing");
+
+        const waitingActions = orch.processTransitions(
+          snapshotWith([{
+            id: "X-1-2",
+            prState: "open",
+            ciStatus: "pass",
+            headSha: "review-sha-1",
+            reviewVerdict: {
+              verdict: "approve",
+              blockingCount: 0,
+              nonBlockingCount: 0,
+              summary: "Looks good.",
+            },
+            newComments: [{
+              id: 2234,
+              body: "Please fix this before merging.",
+              author: "reviewer",
+              createdAt: "2026-03-29T00:01:00Z",
+              commentType: "issue",
+            }],
+          }]),
+          new Date("2026-03-29T00:01:30Z"),
+        );
+
+        expect(waitingActions.some((a) => a.type === "merge")).toBe(false);
+        expect(waitingActions.some((a) => a.type === "post-review")).toBe(false);
+        expect(item.state).toBe("reviewing");
+        expect(item.pendingFeedbackBatch).toEqual(expect.objectContaining({
+          deadline: "2026-03-29T00:02:00.000Z",
+        }));
+
+        const flushActions = orch.processTransitions(
+          snapshotWith([{
+            id: "X-1-2",
+            prState: "open",
+            ciStatus: "pass",
+            headSha: "review-sha-1",
+            reviewVerdict: {
+              verdict: "approve",
+              blockingCount: 0,
+              nonBlockingCount: 0,
+              summary: "Looks good.",
+            },
+          }]),
+          new Date("2026-03-29T00:02:30Z"),
+        );
+
+        expect(flushActions.some((a) => a.type === "clean-review")).toBe(true);
+        expect(flushActions.some((a) => a.type === "send-message")).toBe(true);
+        expect(flushActions.some((a) => a.type === "merge")).toBe(false);
+        expect(flushActions.some((a) => a.type === "post-review")).toBe(false);
+        expect(item.state).toBe("review-pending");
+        expect(item.lastReviewedCommitSha).toBe("review-sha-1");
+      });
+
       it("stays merging with no actions during blind poll (no ciStatus)", () => {
         orch.addItem(makeWorkItem("X-1-1"));
         orch.getItem("X-1-1")!.reviewCompleted = true;
