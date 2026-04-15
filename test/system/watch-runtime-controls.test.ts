@@ -193,7 +193,17 @@ describe("system: watch runtime controls", () => {
 
       expect(settledState.items.find((entry) => entry.id === "H-WRC-1")?.prNumber).toBe(1);
       expect(settledState.items.find((entry) => entry.id === "H-WRC-2")?.state).not.toBe("ready");
-      expect(readFakeAiState(harness.stateDir, run.runId).status).toBe("completed");
+      // The fake AI writes state.env right before exit. With auto-merge closing
+      // H-WRC-1's workspace quickly after merge, the orchestrator may SIGTERM
+      // the worker before the shell trap writes signaled state. Wait briefly
+      // for the latest worker to settle into either completed or signaled.
+      const fakeAiStatus = await waitFor(() => {
+        try {
+          const status = readFakeAiState(harness.stateDir, run.runId).status;
+          return status === "completed" || status === "signaled" ? status : false;
+        } catch { return false; }
+      }, { timeoutMs: 10_000, description: "fake AI terminal state" });
+      expect(["completed", "signaled"]).toContain(fakeAiStatus);
 
       const launches = await waitFor(() => {
         const records = readFakeAiLaunches(harness.stateDir, run.runId);
