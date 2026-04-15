@@ -19,28 +19,29 @@ describe("loadConfig", () => {
   it("returns defaults when config file is missing", () => {
     const repo = setupTempRepo();
     const config = loadConfig(repo);
-    expect(config.review_external).toBe(false);
+    expect(config).toEqual({});
     expect(config.crew_url).toBeUndefined();
   });
 
-  it("parses valid JSON with known keys and crew_url", () => {
+  it("parses valid JSON with crew_url", () => {
     const repo = setupTempRepo();
     const configDir = join(repo, ".ninthwave");
     mkdirSync(configDir, { recursive: true });
     writeFileSync(
       join(configDir, "config.json"),
       JSON.stringify({
-        review_external: true,
         crew_url: "wss://crew.example/ws",
       }),
     );
 
     const config = loadConfig(repo);
-    expect(config.review_external).toBe(true);
     expect(config.crew_url).toBe("wss://crew.example/ws");
   });
 
-  it("parses review_external when only that setting is set", () => {
+  it("ignores legacy review_external field", () => {
+    // review_external was removed in H-SUX-3. Loading an old config that
+    // still contains the key should not activate any behavior, and the
+    // returned ProjectConfig should not expose the field.
     const repo = setupTempRepo();
     const configDir = join(repo, ".ninthwave");
     mkdirSync(configDir, { recursive: true });
@@ -50,8 +51,7 @@ describe("loadConfig", () => {
     );
 
     const config = loadConfig(repo);
-    expect(config.review_external).toBe(true);
-    expect(config.crew_url).toBeUndefined();
+    expect(config).toEqual({});
   });
 
   it("returns defaults for malformed JSON", () => {
@@ -61,7 +61,7 @@ describe("loadConfig", () => {
     writeFileSync(join(configDir, "config.json"), "not valid json {{{");
 
     const config = loadConfig(repo);
-    expect(config.review_external).toBe(false);
+    expect(config).toEqual({});
   });
 
   it("returns defaults when JSON is an array", () => {
@@ -71,7 +71,7 @@ describe("loadConfig", () => {
     writeFileSync(join(configDir, "config.json"), "[1, 2, 3]");
 
     const config = loadConfig(repo);
-    expect(config.review_external).toBe(false);
+    expect(config).toEqual({});
   });
 
   it("returns defaults when JSON is null", () => {
@@ -81,7 +81,7 @@ describe("loadConfig", () => {
     writeFileSync(join(configDir, "config.json"), "null");
 
     const config = loadConfig(repo);
-    expect(config.review_external).toBe(false);
+    expect(config).toEqual({});
   });
 
   it("ignores unknown keys", () => {
@@ -91,16 +91,16 @@ describe("loadConfig", () => {
     writeFileSync(
       join(configDir, "config.json"),
       JSON.stringify({
-        review_external: true,
+        crew_url: "wss://crew.example/ws",
         unknown_key: "ignored",
         another_unknown: 42,
       }),
     );
 
     const config = loadConfig(repo);
-    expect(config.review_external).toBe(true);
+    expect(config.crew_url).toBe("wss://crew.example/ws");
     // Only known keys in the result
-    expect(Object.keys(config)).toEqual(["review_external"]);
+    expect(Object.keys(config)).toEqual(["crew_url"]);
   });
 
   it("returns undefined for invalid or absent crew_url values", () => {
@@ -124,20 +124,6 @@ describe("loadConfig", () => {
     }
   });
 
-  it("treats non-boolean review_external as false", () => {
-    const repo = setupTempRepo();
-    const configDir = join(repo, ".ninthwave");
-    mkdirSync(configDir, { recursive: true });
-    writeFileSync(
-      join(configDir, "config.json"),
-      JSON.stringify({ review_external: "true" }),
-    );
-
-    const config = loadConfig(repo);
-    // String "true" is not boolean true
-    expect(config.review_external).toBe(false);
-  });
-
   it("ignores ai_tools in project config", () => {
     const repo = setupTempRepo();
     const configDir = join(repo, ".ninthwave");
@@ -148,36 +134,34 @@ describe("loadConfig", () => {
     );
 
     const config = loadConfig(repo);
-    expect(config).toEqual({
-      review_external: false,
-    });
+    expect(config).toEqual({});
   });
 });
 
 describe("saveConfig", () => {
   it("creates config file when missing", () => {
     const repo = setupTempRepo();
-    saveConfig(repo, { review_external: true });
+    saveConfig(repo, { crew_url: "wss://crew.example/ws" });
 
     const configPath = join(repo, ".ninthwave", "config.json");
     expect(existsSync(configPath)).toBe(true);
     const content = JSON.parse(readFileSync(configPath, "utf-8"));
-    expect(content.review_external).toBe(true);
+    expect(content.crew_url).toBe("wss://crew.example/ws");
   });
 
-  it("merges stable settings into existing config without clobbering", () => {
+  it("merges crew_url into existing config without clobbering", () => {
     const repo = setupTempRepo();
     const configDir = join(repo, ".ninthwave");
     mkdirSync(configDir, { recursive: true });
     writeFileSync(
       join(configDir, "config.json"),
-      JSON.stringify({ review_external: true }),
+      JSON.stringify({ custom_key: "hello" }),
     );
 
     saveConfig(repo, { crew_url: "wss://crew.example/ws" });
 
     const content = JSON.parse(readFileSync(join(configDir, "config.json"), "utf-8"));
-    expect(content.review_external).toBe(true);
+    expect(content.custom_key).toBe("hello");
     expect(content.crew_url).toBe("wss://crew.example/ws");
   });
 
@@ -187,17 +171,20 @@ describe("saveConfig", () => {
     mkdirSync(configDir, { recursive: true });
     writeFileSync(
       join(configDir, "config.json"),
-      JSON.stringify({ custom_key: "hello", review_external: false }),
+      JSON.stringify({ custom_key: "hello" }),
     );
 
-    saveConfig(repo, { review_external: true });
+    saveConfig(repo, { crew_url: "ws://crew.example/socket" });
 
     const content = JSON.parse(readFileSync(join(configDir, "config.json"), "utf-8"));
     expect(content.custom_key).toBe("hello");
-    expect(content.review_external).toBe(true);
+    expect(content.crew_url).toBe("ws://crew.example/socket");
   });
 
-  it("merges crew_url into existing config without clobbering unrelated keys", () => {
+  it("preserves legacy keys that are no longer part of ProjectConfig", () => {
+    // A user upgrading from a version with `review_external` should see the
+    // key stay on disk (unknown-key passthrough) so manual cleanup is
+    // optional, but loadConfig will not expose it to callers.
     const repo = setupTempRepo();
     const configDir = join(repo, ".ninthwave");
     mkdirSync(configDir, { recursive: true });
@@ -214,31 +201,29 @@ describe("saveConfig", () => {
     expect(content.crew_url).toBe("ws://crew.example/socket");
   });
 
-  it("overwrites existing stable setting values", () => {
+  it("overwrites existing crew_url value", () => {
     const repo = setupTempRepo();
     const configDir = join(repo, ".ninthwave");
     mkdirSync(configDir, { recursive: true });
     writeFileSync(
       join(configDir, "config.json"),
-      JSON.stringify({ review_external: false }),
+      JSON.stringify({ crew_url: "ws://old.example/ws" }),
     );
 
-    saveConfig(repo, { review_external: true });
+    saveConfig(repo, { crew_url: "ws://new.example/ws" });
 
     const content = JSON.parse(readFileSync(join(configDir, "config.json"), "utf-8"));
-    expect(content.review_external).toBe(true);
+    expect(content.crew_url).toBe("ws://new.example/ws");
   });
 
   it("round-trips with loadConfig", () => {
     const repo = setupTempRepo();
     saveConfig(repo, {
-      review_external: true,
       crew_url: "wss://crew.example/ws",
     });
 
     const config = loadConfig(repo);
     expect(config).toEqual({
-      review_external: true,
       crew_url: "wss://crew.example/ws",
     });
   });

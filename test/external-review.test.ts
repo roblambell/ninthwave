@@ -14,8 +14,8 @@ import {
 import {
   processExternalReviews,
   type ExternalReviewDeps,
-  type LogEntry,
-} from "../core/commands/orchestrate.ts";
+} from "../core/external-review.ts";
+import type { LogEntry } from "../core/types.ts";
 
 // ── Helpers ──────────────────────────────────────────────────────────
 

@@ -528,11 +528,8 @@ export function generateConfig(
   existingConfig?: { crew_url?: string },
 ): string {
   const config: {
-    review_external: boolean;
     crew_url?: string;
-  } = {
-    review_external: false,
-  };
+  } = {};
   if (existingConfig?.crew_url) {
     config.crew_url = existingConfig.crew_url;
   }

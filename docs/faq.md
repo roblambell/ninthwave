@@ -359,7 +359,7 @@ Precedence is `.ninthwave/config.local.json` > `.ninthwave/config.json` > `~/.ni
 
 The same pattern works for any tool (`opencode`, `codex`, `copilot`) and any env variable -- `CLAUDE_CONFIG_DIR` is just the first real consumer.
 
-**Where to put what:** `ai_tool_overrides` belongs in `.ninthwave/config.local.json` (gitignored by the deny-by-default `.ninthwave/.gitignore` that `nw init` writes) whenever the values are user-specific -- which absolute local paths almost always are. `.ninthwave/config.json` is for project-shared settings you want committed (e.g. `review_external`, `crew_url`). Use `~/.ninthwave/config.json` for defaults that should follow your user across every repo.
+**Where to put what:** `ai_tool_overrides` belongs in `.ninthwave/config.local.json` (gitignored by the deny-by-default `.ninthwave/.gitignore` that `nw init` writes) whenever the values are user-specific -- which absolute local paths almost always are. `.ninthwave/config.json` is for project-shared settings you want committed (e.g. `crew_url`). Use `~/.ninthwave/config.json` for defaults that should follow your user across every repo.
 
 ---
 
