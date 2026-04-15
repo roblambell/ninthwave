@@ -36,8 +36,6 @@ I always start in plan mode and run several harnesses in parallel. Once a plan i
 
 For greenfield and rapid prototyping I leave Ninthwave in auto mode and let it run. On existing projects I stay in manual mode: I review PRs as they open, leave feedback inline, and Ninthwave actions it from there. Once I am happy with a PR I merge it manually. Dropping into a worker session is a last resort for when something is genuinely stuck.
 
-Claude Code on Opus 4.6 runs end to end without intervention. Copilot CLI on Opus 4.6, and Codex and OpenCode on gpt-5.4 high, follow the work spec fine but sometimes stumble on Ninthwave's harness scaffolding -- heartbeats, inbox polling, and the end-of-session wait for inbox messages -- so those sessions occasionally need a nudge.
-
 ## How it works
 
 `Plan -> /decompose -> parallel native sessions -> stacked PRs -> review + feedback loop -> checks -> merge`
