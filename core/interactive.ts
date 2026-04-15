@@ -74,6 +74,8 @@ export interface InteractiveDeps {
 export interface StartupPersistenceOptions {
   savedToolIds?: string[];
   defaults?: TuiSettingsDefaults;
+  /** Resolved default session limit (from user config or computeDefaultSessionLimit). */
+  defaultSessionLimit?: number;
 }
 
 // ── Default prompt using readline ────────────────────────────────────
@@ -478,7 +480,11 @@ export function buildStartupPersistenceUpdates(
   if (result.reviewMode !== defaults?.reviewMode) {
     updates.review_mode = result.reviewMode;
   }
-  if (result.sessionLimit !== undefined) {
+  if (
+    result.sessionLimit !== undefined &&
+    options.defaultSessionLimit !== undefined &&
+    result.sessionLimit !== options.defaultSessionLimit
+  ) {
     updates.session_limit = result.sessionLimit;
   }
   if (collaborationMode !== defaults?.collaborationMode) {
@@ -585,10 +591,10 @@ async function runReadlineFlow(
   const itemResult = await promptItems(todos, prompt);
   if (itemResult.ids.length === 0) return null;
 
-  // Local-first defaults -- no prompts for these
+  // Startup defaults -- merge/session are not asked here, reviews default to on.
   const mergeStrategy: MergeStrategy = "manual";
   const sessionLimit = defaultSessionLimit;
-  const reviewMode: ReviewMode = "off";
+  const reviewMode: ReviewMode = "on";
   let connectionAction: ConnectionAction | null = null;
 
   // Step 2: AI tool (conditional, multi-select)
