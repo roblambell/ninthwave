@@ -17,7 +17,6 @@ export interface ParsedWatchArgs {
   clickupListId?: string;
   remoteFlag: boolean;
   reviewAutoFix?: "off" | "direct" | "pr";
-  reviewExternal: boolean;
   reviewSessionLimit?: number;
   fixForward: boolean;
   skipReview: boolean;
@@ -48,7 +47,6 @@ export function parseWatchArgs(args: string[]): ParsedWatchArgs {
   let clickupListId: string | undefined;
   let remoteFlag = false;
   let reviewAutoFix: "off" | "direct" | "pr" | undefined;
-  let reviewExternal = false;
   let reviewSessionLimit: number | undefined;
   let fixForward = true;
   let skipReview = false;
@@ -133,7 +131,8 @@ export function parseWatchArgs(args: string[]): ParsedWatchArgs {
         break;
       }
       case "--review-external":
-        reviewExternal = true;
+        // Deprecated: external PR review has been removed. Accepted silently
+        // for backward compatibility with forked daemon args and user scripts.
         i += 1;
         break;
       case "--review-session-limit":
@@ -226,7 +225,7 @@ export function parseWatchArgs(args: string[]): ParsedWatchArgs {
   return {
     itemIds, mergeStrategy, sessionLimitOverride, pollIntervalOverride, frictionDir,
     daemonMode, isDaemonChild, isInteractiveEngineChild, clickupListId, remoteFlag,
-    reviewAutoFix, reviewExternal, reviewSessionLimit,
+    reviewAutoFix, reviewSessionLimit,
     fixForward, skipReview, watchMode, futureOnlyStartup, noWatch, watchIntervalSecs,
     jsonFlag, skipPreflight, crewCode, connectMode, crewPort, crewUrl, crewName,
     bypassEnabled, toolOverride,

@@ -22,7 +22,6 @@ import {
 
 /** Project config shape. */
 export interface ProjectConfig {
-  review_external: boolean;
   crew_url?: string;
   /**
    * Per-tool launch overrides. User-specific; belongs in
@@ -89,7 +88,6 @@ export function loadMergedProjectConfig(projectRoot: string): ProjectConfig {
   const shared = loadConfig(projectRoot);
   const local = loadLocalConfig(projectRoot);
   const merged: ProjectConfig = { ...shared };
-  if (local.review_external !== undefined) merged.review_external = local.review_external;
   if (local.crew_url !== undefined) merged.crew_url = local.crew_url;
   const overrides = mergeToolOverrides(shared.ai_tool_overrides, local.ai_tool_overrides);
   if (overrides) merged.ai_tool_overrides = overrides;
@@ -100,7 +98,7 @@ function loadProjectConfigFile<T extends boolean>(
   configPath: string,
   withDefaults: T,
 ): T extends true ? ProjectConfig : Partial<ProjectConfig> {
-  const defaults: ProjectConfig = { review_external: false };
+  const defaults: ProjectConfig = {};
   const empty: Partial<ProjectConfig> = {};
   const fallback = (withDefaults ? defaults : empty) as T extends true ? ProjectConfig : Partial<ProjectConfig>;
 
@@ -114,9 +112,6 @@ function loadProjectConfigFile<T extends boolean>(
     }
 
     const result: Partial<ProjectConfig> = withDefaults ? { ...defaults } : {};
-    if (withDefaults || parsed.review_external !== undefined) {
-      result.review_external = parsed.review_external === true;
-    }
     const crewUrl = parseProjectCrewUrl(parsed.crew_url);
     if (crewUrl !== undefined) result.crew_url = crewUrl;
     const overrides = parseBuiltInAiToolOverrides(parsed.ai_tool_overrides);

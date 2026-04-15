@@ -28,8 +28,6 @@ import { collectRunMetrics, parseWorkerTelemetry } from "./analytics.ts";
 import { parseAgentModel, readAgentFileContent } from "./agent-files.ts";
 import { getBundleDir } from "./paths.ts";
 import { readLatestTokenUsage } from "./token-usage.ts";
-import { readExternalReviews, writeExternalReviews, type ExternalReviewItem } from "./daemon.ts";
-import { processExternalReviews, type ExternalReviewDeps } from "./external-review.ts";
 import { AuthorCache } from "./git-author.ts";
 import { getAvailableMemory } from "./memory.ts";
 import {
@@ -634,8 +632,6 @@ export interface OrchestrateLoopDeps {
   onPollComplete?: (items: OrchestratorItem[], snapshot: PollSnapshot, pollIntervalMs?: number, interactiveTiming?: InteractiveWatchTiming) => void;
   /** Sync cmux sidebar display for active workers after each poll cycle. */
   syncDisplay?: (orch: Orchestrator, snapshot: PollSnapshot) => void;
-  /** Dependencies for external PR review processing. When present and reviewExternal is enabled, external PRs are scanned and reviewed. */
-  externalReviewDeps?: ExternalReviewDeps;
   /** Scan for work item files. Required for watch mode -- re-scans the work directory to discover new items. */
   scanWorkItems?: () => WorkItem[];
   /** Crew coordination broker. When present, crew mode is active -- claim before launch, complete after merge. */
@@ -674,8 +670,6 @@ export interface OrchestrateLoopConfig {
    * Undefined = no limit (production). Tests should always set a finite cap.
    */
   maxIterations?: number;
-  /** When true, scan for non-ninthwave PRs and spawn review workers for them. */
-  reviewExternal?: boolean;
   /** When true, daemon stays running after all items reach terminal state, watching for new work items. */
   watch?: boolean;
   /** Polling interval (milliseconds) for watch mode. Default: 30000 (30 seconds). */
@@ -812,20 +806,6 @@ export async function orchestrateLoop(
         ...data,
       } as LogEntry);
     };
-  }
-
-  // Initialize external review state from persisted file
-  let externalReviews: ExternalReviewItem[] = [];
-  if (config.reviewExternal && deps.externalReviewDeps) {
-    externalReviews = readExternalReviews(ctx.projectRoot);
-    if (externalReviews.length > 0) {
-      log({
-        ts: new Date().toISOString(),
-        level: "info",
-        event: "external_reviews_restored",
-        count: externalReviews.length,
-      });
-    }
   }
 
   // Author cache for resolving git author of work item files during sync.
@@ -1335,29 +1315,6 @@ export async function orchestrateLoop(
       states[item.state]!.push(item.id);
     }
     log({ ts: new Date().toISOString(), level: "debug", event: "state_summary", states });
-
-    // ── External PR review processing ───────────────────────────
-      if (config.reviewExternal && deps.externalReviewDeps) {
-      try {
-        externalReviews = processExternalReviews(
-          ctx.projectRoot,
-          externalReviews,
-          orch.availableSessionSlots,
-          deps.externalReviewDeps,
-        );
-        // Persist external review state
-        writeExternalReviews(ctx.projectRoot, externalReviews);
-      } catch (e: unknown) {
-        // Non-fatal -- external review failure shouldn't block work item processing
-        const msg = e instanceof Error ? e.message : String(e);
-        log({
-          ts: new Date().toISOString(),
-          level: "warn",
-          event: "external_review_error",
-          error: msg,
-        });
-      }
-    }
 
     // Sleep -- use adaptive interval; queue handles per-request throttling
       const interval = config.pollIntervalMs ?? adaptivePollInterval(orch);

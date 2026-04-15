@@ -469,7 +469,7 @@ describe("detectTestCommand", () => {
 // --- generateConfig ---
 
 describe("generateConfig", () => {
-  it("outputs valid JSON with the supported config keys", () => {
+  it("outputs an empty JSON object when no overrides are supplied", () => {
     const detection: DetectionResult = {
       ci: "github-actions",
       testCommand: "bun test",
@@ -483,7 +483,7 @@ describe("generateConfig", () => {
     const config = generateConfig(detection);
     const parsed = JSON.parse(config);
 
-    expect(parsed.review_external).toBe(false);
+    expect(parsed).toEqual({});
   });
 
   it("does not include dead config keys", () => {
@@ -508,9 +508,11 @@ describe("generateConfig", () => {
     expect(parsed).not.toHaveProperty("AI_TOOLS");
     expect(parsed).not.toHaveProperty("LOC_EXTENSIONS");
     expect(parsed).not.toHaveProperty("github_token");
+    // review_external was removed in H-SUX-3
+    expect(parsed).not.toHaveProperty("review_external");
 
-    // Only known keys
-    expect(Object.keys(parsed)).toEqual(["review_external"]);
+    // Fresh init writes no keys by default.
+    expect(Object.keys(parsed)).toEqual([]);
   });
 
   it("includes an existing valid crew_url override when provided", () => {
@@ -530,10 +532,7 @@ describe("generateConfig", () => {
     const parsed = JSON.parse(config);
 
     expect(parsed.crew_url).toBe("wss://crew.example/ws");
-    expect(Object.keys(parsed)).toEqual([
-      "review_external",
-      "crew_url",
-    ]);
+    expect(Object.keys(parsed)).toEqual(["crew_url"]);
   });
 
   it("produces pretty-printed JSON ending with newline", () => {
@@ -547,9 +546,11 @@ describe("generateConfig", () => {
       workspace: null,
     };
 
-    const config = generateConfig(detection);
+    const config = generateConfig(detection, {
+      crew_url: "wss://crew.example/ws",
+    });
 
-    // Pretty-printed with 2-space indent
+    // Pretty-printed with 2-space indent when there are keys to indent.
     expect(config).toContain("  ");
     // Ends with newline
     expect(config.endsWith("\n")).toBe(true);
@@ -691,9 +692,9 @@ describe("initProject", () => {
       "utf-8",
     );
     const parsed = JSON.parse(config);
-    expect(parsed.review_external).toBe(false);
+    expect(parsed).not.toHaveProperty("review_external");
     expect(parsed).not.toHaveProperty("ai_tools");
-    expect(Object.keys(parsed)).toEqual(["review_external"]);
+    expect(Object.keys(parsed)).toEqual([]);
   });
 
   it("creates a full working setup on a fresh repo", () => {
@@ -825,8 +826,9 @@ describe("initProject", () => {
       join(projectDir, ".ninthwave/config.json"),
       "utf-8",
     ));
-    // Should reflect fresh defaults (init always writes defaults)
-    expect(config.review_external).toBe(false);
+    // Should reflect fresh defaults (init always writes defaults).
+    // review_external was removed in H-SUX-3; init does not write it.
+    expect(config).not.toHaveProperty("review_external");
     expect(config.crew_url).toBe("wss://crew.example/ws");
   });
 
@@ -1419,7 +1421,7 @@ describe("initProject config.json", () => {
     expect(existsSync(configJsonPath)).toBe(true);
 
     const configJson = JSON.parse(readFileSync(configJsonPath, "utf-8"));
-    expect(configJson.review_external).toBe(false);
+    expect(configJson).not.toHaveProperty("review_external");
     expect(configJson).not.toHaveProperty("ai_tools");
     // No workspace data in config.json
     expect(configJson).not.toHaveProperty("workspace");
@@ -1475,7 +1477,7 @@ describe("initProject config.json", () => {
     );
     // Workspace data is no longer written to config.json
     expect(configJson).not.toHaveProperty("workspace");
-    expect(Object.keys(configJson)).toEqual(["review_external"]);
+    expect(Object.keys(configJson)).toEqual([]);
   });
 
   it("fresh init does not invent crew_url", () => {
@@ -1494,7 +1496,7 @@ describe("initProject config.json", () => {
     );
 
     expect(configJson).not.toHaveProperty("crew_url");
-    expect(Object.keys(configJson)).toEqual(["review_external"]);
+    expect(Object.keys(configJson)).toEqual([]);
   });
 });
 

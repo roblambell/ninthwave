@@ -39,6 +39,7 @@ import {
   runInteractiveWatchOperatorSession,
   runTUI,
   spawnInteractiveEngineChild,
+  buildInteractiveEngineChildArgs,
   createWatchEngineRunner,
   createDetachedDaemonEngineRunner,
   createInteractiveChildEngineRunner,
@@ -551,6 +552,40 @@ describe("orchestrateLoop", () => {
       byKind: { auth: 2 },
       primaryKind: "auth",
     });
+  });
+
+  it("never emits external-review lifecycle events (external review removed in H-SUX-3)", async () => {
+    const orch = new Orchestrator({ sessionLimit: 1, mergeStrategy: "auto" });
+    orch.addItem(makeWorkItem("T-EXT-1"));
+    orch.getItem("T-EXT-1")!.reviewCompleted = true;
+    orch.hydrateState("T-EXT-1", "implementing");
+
+    const logs: LogEntry[] = [];
+    const buildSnapshot = (): PollSnapshot => ({
+      items: [{ id: "T-EXT-1" }],
+      readyIds: [],
+    });
+
+    const deps: OrchestrateLoopDeps = {
+      buildSnapshot,
+      sleep: () => Promise.resolve(),
+      log: (entry) => logs.push(entry),
+      actionDeps: mockActionDeps(),
+    };
+
+    await orchestrateLoop(orch, defaultCtx, deps, { maxIterations: 3 });
+
+    // External PR review processing is removed. The loop must never surface
+    // these events regardless of state, and the config field is gone.
+    const externalEvents = logs.filter((l) =>
+      typeof l.event === "string"
+      && (l.event === "review_external_enabled"
+        || l.event === "external_reviews_restored"
+        || l.event === "external_review_error"
+        || l.event === "external_pr_detected"
+        || l.event === "external_review_launched"),
+    );
+    expect(externalEvents).toEqual([]);
   });
 
   it("processes items through full lifecycle (single item, auto strategy)", async () => {
@@ -6020,7 +6055,7 @@ describe("resolveInteractiveStartupConfig", () => {
 
   it("keeps persisted merge, review, and collaboration defaults", () => {
     const result = resolveInteractiveStartupConfig(
-      { review_external: false, ai_tools: ["claude"] } as any,
+      { ai_tools: ["claude"] } as any,
       {
         ai_tools: ["opencode", "copilot"],
         merge_strategy: "auto",
@@ -6040,7 +6075,7 @@ describe("resolveInteractiveStartupConfig", () => {
 
   it("falls back to manual/on/local when persisted defaults are absent", () => {
     const result = resolveInteractiveStartupConfig(
-      { review_external: true } as any,
+      {} as any,
       {},
       projectRoot,
     );
@@ -6055,7 +6090,7 @@ describe("resolveInteractiveStartupConfig", () => {
 
   it("honors explicit tool override while keeping resolved startup defaults", () => {
     const result = resolveInteractiveStartupConfig(
-      { review_external: true } as any,
+      {} as any,
       { review_mode: "on" },
       projectRoot,
       "claude",
@@ -6066,7 +6101,7 @@ describe("resolveInteractiveStartupConfig", () => {
 
   it("builds full durable startup updates while keeping join codes runtime-only", () => {
     const startupConfig = resolveInteractiveStartupConfig(
-      { review_external: false } as any,
+      {} as any,
       {
         ai_tools: ["opencode", "copilot"],
         merge_strategy: "auto",
@@ -8503,6 +8538,14 @@ describe("parseWatchArgs", () => {
     expect(result.skipReview).toBe(false);
   });
 
+  it("accepts --review-external as a deprecated no-op", () => {
+    // External PR review was removed in H-SUX-3. The flag is still accepted
+    // to avoid breaking forked-daemon args and legacy user scripts, but it
+    // no longer surfaces as a parsed field and does not activate behavior.
+    const result = parseWatchArgs(["--items", "A-1", "--review-external"]);
+    expect(result).not.toHaveProperty("reviewExternal");
+  });
+
   it("parses --tool flag", () => {
     const result = parseWatchArgs(["--items", "H-FOO-1", "--tool", "opencode"]);
     expect(result.toolOverride).toBe("opencode");
@@ -8515,6 +8558,38 @@ describe("parseWatchArgs", () => {
   it("defaults toolOverride to undefined when --tool not passed", () => {
     const result = parseWatchArgs(["--items", "H-FOO-1"]);
     expect(result.toolOverride).toBeUndefined();
+  });
+});
+
+// ── buildInteractiveEngineChildArgs ────────────────────────────────────
+
+describe("buildInteractiveEngineChildArgs", () => {
+  const resolved = {
+    itemIds: ["H-1"],
+    mergeStrategy: "auto" as const,
+    sessionLimit: 2,
+    skipReview: false,
+    reviewMode: "on" as const,
+    watchMode: false,
+    futureOnlyStartup: false,
+    connectMode: false,
+    bypassEnabled: false,
+  };
+
+  it("never emits --review-external even when the deprecated flag is parsed", () => {
+    // External PR review was removed in H-SUX-3. The parsed flag is tolerated
+    // as a deprecated compatibility surface, but it must never propagate to
+    // child daemon arg vectors -- that would re-activate the removed behavior
+    // in a forked child.
+    const parsed = parseWatchArgs(["--items", "H-1", "--review-external"]);
+    const childArgs = buildInteractiveEngineChildArgs(parsed, resolved);
+    expect(childArgs).not.toContain("--review-external");
+  });
+
+  it("never emits --review-external on the default startup path", () => {
+    const parsed = parseWatchArgs(["--items", "H-1"]);
+    const childArgs = buildInteractiveEngineChildArgs(parsed, resolved);
+    expect(childArgs).not.toContain("--review-external");
   });
 });
 

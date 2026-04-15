@@ -26,7 +26,6 @@ import {
   type OrchestratorItemState,
 } from "../orchestrator.ts";
 import { parseWorkItems } from "../parser.ts";
-import { scanExternalPRs } from "./pr-monitor.ts";
 import { launchSingleItem, launchReviewWorker, launchRebaserWorker, launchForwardFixerWorker, validatePickupCandidate } from "./launch.ts";
 import { cleanStaleBranchForReuse } from "../branch-cleanup.ts";
 import { selectAiTools, detectInstalledAITools, validateAgentFiles } from "../tool-select.ts";
@@ -78,8 +77,6 @@ import {
   serializeOrchestratorState,
   writeStateFile,
   readStateFile,
-  readExternalReviews,
-  writeExternalReviews,
   forkDaemon,
   logFilePath,
   stateFilePath,
@@ -90,7 +87,6 @@ import {
    type DaemonState,
    type DaemonStateItem,
   type DaemonCrewStatus,
-  type ExternalReviewItem,
   type WorkerProgress,
 } from "../daemon.ts";
 import type { TokenUsage } from "../crew.ts";
@@ -132,7 +128,6 @@ import {
   type TuiState,
   type LogLevelFilter,
 } from "../tui-keyboard.ts";
-import { processExternalReviews, type ExternalReviewDeps } from "../external-review.ts";
 import { syncStackComments as syncStackCommentsForRepo } from "../stack-comments.ts";
 import {
   createWatchEngineRunner,
@@ -220,7 +215,6 @@ export {
 } from "../startup-items.ts";
 export { parseWatchArgs, validateItemIds, type ParsedWatchArgs } from "./watch-args.ts";
 export { setupKeyboardShortcuts, applyRuntimeSnapshotToTuiState, isTuiPaused, filterLogsByLevel, pushLogBuffer, applyLogFollowMode, LOG_BUFFER_MAX, REVIEW_MODE_CYCLE, COLLABORATION_MODE_CYCLE, type TuiState, type TuiRuntimeSnapshot, type LogLevelFilter, type CollaborationMode, type ReviewMode } from "../tui-keyboard.ts";
-export { processExternalReviews, type ExternalReviewDeps } from "../external-review.ts";
 export { forkDaemon } from "../daemon.ts";
 export {
   createWatchEngineRunner,
@@ -667,7 +661,6 @@ export function buildInteractiveEngineChildArgs(
   }
   if (parsed.clickupListId) childArgs.push("--clickup-list", parsed.clickupListId);
   if (parsed.reviewAutoFix) childArgs.push("--review-auto-fix", parsed.reviewAutoFix);
-  if (parsed.reviewExternal) childArgs.push("--review-external");
   if (parsed.reviewSessionLimit !== undefined) childArgs.push("--review-session-limit", String(parsed.reviewSessionLimit));
   childArgs.push(resolved.skipReview ? "--no-review" : "--review");
   childArgs.push(parsed.fixForward ? "--fix-forward" : "--no-fix-forward");
@@ -1378,7 +1371,7 @@ export async function cmdOrchestrate(
   const {
     sessionLimitOverride, pollIntervalOverride, frictionDir,
     daemonMode, isDaemonChild, isInteractiveEngineChild, clickupListId, remoteFlag,
-    reviewAutoFix, reviewExternal: parsedReviewExternal, reviewSessionLimit,
+    reviewAutoFix, reviewSessionLimit,
     fixForward, skipReview: cliSkipReview, noWatch, watchIntervalSecs,
     jsonFlag, skipPreflight, crewName,
     bypassEnabled, toolOverride: parsedToolOverride,
@@ -1978,15 +1971,6 @@ export async function cmdOrchestrate(
   };
   process.on("SIGTERM", sigtermHandler);
 
-  // Resolve config-file flags
-  const projectConfig = loadConfig(projectRoot);
-  // --review-session-limit 0 explicitly disables reviews, overriding config
-  const reviewExternalEnabled = reviewSessionLimit === 0
-    ? false
-    : interactiveReviewMode === "off"
-      ? false
-      : (parsedReviewExternal || projectConfig.review_external);
-
   // State persistence: serialize state each poll cycle so the status pane can display all items.
   // Written in both daemon and interactive mode -- the status pane reads this file to show
   // the full queue including queued items that don't have worktrees yet.
@@ -2238,38 +2222,6 @@ export async function cmdOrchestrate(
     });
   }
 
-  // Build external review deps when review_external is enabled
-  const externalReviewDeps: ExternalReviewDeps | undefined = reviewExternalEnabled
-    ? {
-        scanExternalPRs: (root) => scanExternalPRs(root),
-        launchReview: (prNumber, repoRoot) => {
-          const autoFix = orch.config.reviewAutoFix;
-          const extItemId = `ext-${prNumber}`;
-          const result = launchReviewWorker(prNumber, extItemId, autoFix, repoRoot, aiTool, mux, {
-            reviewType: "external",
-            hubRepoNwo,
-            projectRoot,
-            resolveMux: resolveLaunchMux,
-          });
-          if (!result) return null;
-          return { workspaceRef: result.workspaceRef };
-        },
-        cleanReview: (reviewWorkspaceRef) => {
-          try { muxForWorkspaceRef(reviewWorkspaceRef).closeWorkspace(reviewWorkspaceRef); } catch { /* best-effort */ }
-          return true;
-        },
-        log,
-      }
-    : undefined;
-
-  if (reviewExternalEnabled) {
-    log({
-      ts: new Date().toISOString(),
-      level: "info",
-      event: "review_external_enabled",
-    });
-  }
-
   const requestQueue = new RequestQueue({ log });
 
   const loopDeps: OrchestrateLoopDeps = {
@@ -2286,7 +2238,6 @@ export async function cmdOrchestrate(
       tuiState.viewOptions.apiErrorSummary = snap.apiErrorSummary;
       tuiState.viewOptions.rateLimitBackoffDescription = snap.rateLimitBackoffDescription;
     },
-    externalReviewDeps,
     ...(watchMode ? { scanWorkItems: () => {
       return loadDiscoveryWorkItems("watch-scan");
     } } : {}),
@@ -2353,7 +2304,6 @@ export async function cmdOrchestrate(
     ...(pollIntervalOverride ? { pollIntervalMs: pollIntervalOverride } : {}),
     ...(repoUrl ? { repoUrl } : {}),
     aiTool,
-    ...(reviewExternalEnabled ? { reviewExternal: true } : {}),
     ...(watchMode ? { watch: true } : {}),
     ...(watchIntervalSecs !== undefined ? { watchIntervalMs: watchIntervalSecs * 1000 } : {}),
     ...(tuiMode ? { tuiMode: true } : {}),
