@@ -198,7 +198,7 @@ export class HeadlessAdapter implements Multiplexer {
     }
   }
 
-  closeWorkspace(ref: string): boolean {
+  closeWorkspace(ref: string, _workItemId?: string): boolean {
     const pidPath = headlessPidFilePath(this.projectRoot, ref);
     try {
       if (!this.deps.io.existsSync(pidPath)) return false;

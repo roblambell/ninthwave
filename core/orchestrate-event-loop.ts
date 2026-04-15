@@ -280,7 +280,7 @@ export function handleRunComplete(
     try {
       // Close workspace before worktree cleanup (prevents orphaned workspaces)
       if (item.workspaceRef) {
-        deps.actionDeps.mux.closeWorkspace(item.workspaceRef);
+        deps.actionDeps.mux.closeWorkspace(item.workspaceRef, item.id);
       }
       // Preserve worktrees for stuck items -- users can inspect partial work
       // and clean manually with `nw clean <ID>` when done.
@@ -982,7 +982,7 @@ export async function orchestrateLoop(
           for (const item of allItems) {
             if (item.state !== "done") continue;
             try {
-              if (item.workspaceRef) deps.actionDeps.mux.closeWorkspace(item.workspaceRef);
+              if (item.workspaceRef) deps.actionDeps.mux.closeWorkspace(item.workspaceRef, item.id);
               deps.actionDeps.cleanup.cleanSingleWorktree(item.id, ctx.worktreeDir, ctx.projectRoot);
             } catch { /* best-effort */ }
           }

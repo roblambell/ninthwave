@@ -64,9 +64,9 @@ describe("CmuxAdapter", () => {
 
   it("delegates closeWorkspace to cmux.closeWorkspace", () => {
     const adapter = new CmuxAdapter();
-    const result = adapter.closeWorkspace("workspace:1");
+    const result = adapter.closeWorkspace("workspace:1", "T-1");
     expect(result).toBe(true);
-    expect(cmux.closeWorkspace).toHaveBeenCalledWith("workspace:1");
+    expect(cmux.closeWorkspace).toHaveBeenCalledWith("workspace:1", "T-1");
   });
 
   it("delegates readScreen to cmux.readScreen", () => {

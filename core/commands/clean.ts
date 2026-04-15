@@ -73,7 +73,7 @@ export function closeWorkspacesForIds(
       const wsRef = wsMatch[0]!;
       const itemId = idMatch[1]!;
       info(`Closing workspace ${wsRef} (${itemId})`);
-      if (mux.closeWorkspace(wsRef)) {
+      if (mux.closeWorkspace(wsRef, itemId)) {
         closed++;
       } else {
         warn(`Failed to close ${wsRef}`);
@@ -86,7 +86,7 @@ export function closeWorkspacesForIds(
       if (trimmed.includes(id)) {
         const wsRef = extractWorkspaceRef(trimmed);
         info(`Closing workspace ${wsRef} (${id})`);
-        if (mux.closeWorkspace(wsRef)) {
+        if (mux.closeWorkspace(wsRef, id)) {
           closed++;
         } else {
           warn(`Failed to close ${wsRef}`);
@@ -120,7 +120,7 @@ export function cmdCloseWorkspaces(mux: Multiplexer = getMux()): void {
     if (itemId) {
       const wsRef = extractWorkspaceRef(trimmed);
       info(`Closing workspace ${wsRef} (${itemId})`);
-      if (!mux.closeWorkspace(wsRef)) {
+      if (!mux.closeWorkspace(wsRef, itemId)) {
         warn(`Failed to close ${wsRef}`);
       }
       closed++;
@@ -147,7 +147,7 @@ export function cmdCloseWorkspace(targetId: string, mux: Multiplexer = getMux())
     if (trimmed.includes(targetId)) {
       const wsRef = extractWorkspaceRef(trimmed);
       info(`Closing workspace ${wsRef} for ${targetId}`);
-      if (!mux.closeWorkspace(wsRef)) {
+      if (!mux.closeWorkspace(wsRef, targetId)) {
         warn(`Failed to close ${wsRef}`);
       }
       return;

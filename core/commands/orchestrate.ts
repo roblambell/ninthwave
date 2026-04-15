@@ -1339,7 +1339,7 @@ async function runInteractiveOperatorParentSession(
           if (item.state !== "done") continue;
           try {
             if (item.workspaceRef) {
-              createMux(muxTypeForWorkspaceRef(item.workspaceRef), opts.projectRoot).closeWorkspace(item.workspaceRef);
+              createMux(muxTypeForWorkspaceRef(item.workspaceRef), opts.projectRoot).closeWorkspace(item.workspaceRef, item.id);
             }
             cleanSingleWorktree(item.id, join(opts.projectRoot, ".ninthwave", ".worktrees"), opts.projectRoot);
           } catch {
@@ -1736,7 +1736,7 @@ export async function cmdOrchestrate(
       for (const line of list.split("\n")) {
         const trimmed = line.trim();
         if (!trimmed || !trimmed.includes(itemId)) continue;
-        mux.closeWorkspace(trimmed.split(/\s+/, 1)[0] ?? trimmed);
+        mux.closeWorkspace(trimmed.split(/\s+/, 1)[0] ?? trimmed, itemId);
         return;
       }
     },
@@ -1800,7 +1800,7 @@ export async function cmdOrchestrate(
         upsertOrchestratorComment(repoRoot, prNumber, itemId, eventLine),
     },
     mux: {
-      closeWorkspace: (ref) => muxForWorkspaceRef(ref).closeWorkspace(ref),
+      closeWorkspace: (ref, workItemId) => muxForWorkspaceRef(ref).closeWorkspace(ref, workItemId),
       readScreen: (ref, lines) => muxForWorkspaceRef(ref).readScreen(ref, lines),
     },
     workers: {
@@ -2635,7 +2635,7 @@ export async function cmdOrchestrate(
           for (const item of operatorLastSnapshot.daemonState.items) {
             if (item.state !== "done") continue;
             try {
-              if (item.workspaceRef) muxForWorkspaceRef(item.workspaceRef).closeWorkspace(item.workspaceRef);
+              if (item.workspaceRef) muxForWorkspaceRef(item.workspaceRef).closeWorkspace(item.workspaceRef, item.id);
               cleanSingleWorktree(item.id, ctx.worktreeDir, ctx.projectRoot);
             } catch {
               // Best-effort cleanup.
@@ -2711,7 +2711,7 @@ export async function cmdOrchestrate(
       for (const item of orch.getAllItems()) {
         if (terminalStates.has(item.state) && item.workspaceRef) {
           try {
-            muxForWorkspaceRef(item.workspaceRef).closeWorkspace(item.workspaceRef);
+            muxForWorkspaceRef(item.workspaceRef).closeWorkspace(item.workspaceRef, item.id);
             closedWorkspaces.push(item.id);
           } catch {
             // Non-fatal -- best-effort cleanup

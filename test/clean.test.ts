@@ -118,7 +118,7 @@ describe("cmdCloseWorkspace", () => {
     );
 
     captureOutput(() => cmdCloseWorkspace("H-CI-2", mockMux));
-    expect(mockMux.closeWorkspace).toHaveBeenCalledWith("workspace:1");
+    expect(mockMux.closeWorkspace).toHaveBeenCalledWith("workspace:1", "H-CI-2");
     expect(mockMux.closeWorkspace).toHaveBeenCalledTimes(1);
   });
 });
@@ -451,7 +451,7 @@ describe("cmdClean", () => {
 
     // Should only close workspace:1 (H-1), not workspace:2 or workspace:3
     expect(mockMux.closeWorkspace).toHaveBeenCalledTimes(1);
-    expect(mockMux.closeWorkspace).toHaveBeenCalledWith("workspace:1");
+    expect(mockMux.closeWorkspace).toHaveBeenCalledWith("workspace:1", "H-1");
   });
 
   it("closes workspaces only for merged items when no target ID is specified", () => {
@@ -494,7 +494,7 @@ describe("cmdClean", () => {
 
     // Should only close workspace:1 (H-CI-1 is merged), NOT workspace:2
     expect(mockMux.closeWorkspace).toHaveBeenCalledTimes(1);
-    expect(mockMux.closeWorkspace).toHaveBeenCalledWith("workspace:1");
+    expect(mockMux.closeWorkspace).toHaveBeenCalledWith("workspace:1", "H-CI-1");
     // Worktree removal should only happen for the merged item
     expect(deps.removeWorktree).toHaveBeenCalledTimes(1);
   });

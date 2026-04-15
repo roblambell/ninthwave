@@ -332,7 +332,7 @@ describe("executeRetry auto-save", () => {
     expect(autoSave).toHaveBeenCalledWith(
       join(worktreeDir, "ninthwave-H-TEST-1"),
     );
-    expect(closeWorkspace).toHaveBeenCalledWith("workspace:5");
+    expect(closeWorkspace).toHaveBeenCalledWith("workspace:5", "H-TEST-1");
 
     // Verify call order: autoSave before closeWorkspace
     const autoSaveOrder = autoSave.mock.invocationCallOrder[0];
@@ -421,7 +421,7 @@ describe("executeRetry auto-save", () => {
     // Retry should still succeed despite auto-save failure
     expect(result.success).toBe(true);
     // Workspace should still be closed
-    expect(deps.mux.closeWorkspace).toHaveBeenCalledWith("workspace:5");
+    expect(deps.mux.closeWorkspace).toHaveBeenCalledWith("workspace:5", "H-TEST-1");
   });
 
   it("does not block retry when auto-save returns false", () => {
@@ -444,7 +444,7 @@ describe("executeRetry auto-save", () => {
     const result = executeRetry(item, ctx, deps);
 
     expect(result.success).toBe(true);
-    expect(deps.mux.closeWorkspace).toHaveBeenCalledWith("workspace:5");
+    expect(deps.mux.closeWorkspace).toHaveBeenCalledWith("workspace:5", "H-TEST-1");
   });
 
   it("uses item.worktreePath when available", () => {

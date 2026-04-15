@@ -27,8 +27,14 @@ export interface Multiplexer {
   readScreen(ref: string, lines?: number): string;
   /** List all workspaces. Returns raw output string. */
   listWorkspaces(): string;
-  /** Close a workspace. Returns true on success. */
-  closeWorkspace(ref: string): boolean;
+  /**
+   * Close a workspace. Returns true on success.
+   *
+   * `workItemId` lets adapters scope a pre-close cleanup sweep (e.g. killing
+   * lingering `nw inbox --wait <id>` bun processes that survived their
+   * parent shell). Optional so external/test callers can omit it.
+   */
+  closeWorkspace(ref: string, workItemId?: string): boolean;
   /** Set status text, icon, and color for a workspace. Best-effort -- returns boolean success. */
   setStatus(ref: string, key: string, text: string, icon: string, color: string): boolean;
   /** Set progress value (0.0–1.0) and optional label for a workspace. Best-effort -- returns boolean success. */
@@ -58,8 +64,8 @@ export class CmuxAdapter implements Multiplexer {
   listWorkspaces(): string {
     return cmux.listWorkspaces();
   }
-  closeWorkspace(ref: string): boolean {
-    return cmux.closeWorkspace(ref);
+  closeWorkspace(ref: string, workItemId?: string): boolean {
+    return cmux.closeWorkspace(ref, workItemId);
   }
   setStatus(ref: string, key: string, text: string, icon: string, color: string): boolean {
     return cmux.setStatus(ref, key, text, icon, color);

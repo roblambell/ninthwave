@@ -6,6 +6,9 @@ import type { RunResult } from "./types.ts";
 /** Shell runner signature for dependency injection. */
 export type ShellRunner = (cmd: string, args: string[]) => RunResult;
 
+/** Process-kill signature for dependency injection. */
+export type ProcessKiller = (pid: number, signal: NodeJS.Signals | number) => void;
+
 /** Resolved cmux binary path (cached at module load). */
 let _cmuxBin: string | null | undefined;
 function cmuxBin(): string {
@@ -62,14 +65,93 @@ export function listWorkspaces(): string {
   return result.stdout;
 }
 
-/** Close a cmux workspace. Returns true on success. */
-export function closeWorkspace(workspaceRef: string): boolean {
-  const result = run(cmuxBin(), [
+/**
+ * Close a cmux workspace. Returns true on success.
+ *
+ * When `workItemId` is provided, first SIGKILL any lingering
+ * `bun run <…>/core/cli.ts inbox --wait <workItemId>` processes. cmux's
+ * own teardown does not reliably reap inbox-wait Bun processes whose
+ * parent Claude Code Bash-tool shell got detached from the claude agent
+ * (dogfooding has leaked hundreds of these bun pollers -- see
+ * `core/commands/inbox.ts:waitForInbox`, an infinite `while(true) {
+ * check; Bun.sleepSync(1000); }` loop that never yields to the event
+ * loop, so its SIGINT/SIGTERM handlers also never fire). SIGKILL is
+ * mandatory here -- SIGTERM is silently swallowed.
+ */
+export function closeWorkspace(workspaceRef: string, workItemId?: string): boolean {
+  return closeWorkspaceImpl(
+    workspaceRef,
+    workItemId,
+    (cmd, args) => run(cmd, args),
+    (pid, signal) => process.kill(pid, signal),
+  );
+}
+
+/**
+ * Injectable implementation -- testable without real subprocesses.
+ * @internal Exported for testing only.
+ */
+export function closeWorkspaceImpl(
+  workspaceRef: string,
+  workItemId: string | undefined,
+  runner: ShellRunner,
+  kill: ProcessKiller,
+): boolean {
+  if (workItemId) {
+    killStrandedInboxWaiters(workItemId, runner, kill);
+  }
+  const result = runner(cmuxBin(), [
     "close-workspace",
     "--workspace",
     workspaceRef,
   ]);
   return result.exitCode === 0;
+}
+
+/**
+ * SIGKILL any `bun run <…>/core/cli.ts inbox --wait <workItemId>` process
+ * visible in `ps`. Best-effort: kills that fail (already exited, no
+ * permission, etc.) are swallowed.
+ *
+ * SIGKILL not SIGTERM: the inbox-wait loop's signal handlers cannot fire
+ * because `Bun.sleepSync` blocks the event loop. See comment on
+ * `closeWorkspace`.
+ *
+ * @internal Exported for testing only.
+ */
+export function killStrandedInboxWaiters(
+  workItemId: string,
+  runner: ShellRunner,
+  kill: ProcessKiller,
+): number {
+  const result = runner("ps", ["-A", "-o", "pid=,command="]);
+  if (result.exitCode !== 0) return 0;
+
+  // Escape regex metacharacters in the item id (item ids are generally
+  // [A-Z0-9-], but be defensive).
+  const idEscape = workItemId.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  // Require trailing boundary so `H-CF-4` does not match `H-CF-40`.
+  const pattern = new RegExp(
+    `bun\\s+run\\s+\\S*core/cli\\.ts\\s+inbox\\s+--wait\\s+${idEscape}(?:\\s|$)`,
+  );
+
+  let killed = 0;
+  for (const line of result.stdout.split("\n")) {
+    const trimmed = line.trim();
+    if (!trimmed) continue;
+    const match = trimmed.match(/^(\d+)\s+(.*)$/);
+    if (!match) continue;
+    const pid = parseInt(match[1]!, 10);
+    if (!Number.isFinite(pid) || pid <= 1) continue;
+    if (!pattern.test(match[2]!)) continue;
+    try {
+      kill(pid, "SIGKILL");
+      killed++;
+    } catch {
+      // Process already exited, or we lack permission. Best-effort.
+    }
+  }
+  return killed;
 }
 
 /**

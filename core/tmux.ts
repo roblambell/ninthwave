@@ -347,7 +347,7 @@ export class TmuxAdapter implements Multiplexer {
       .join("\n");
   }
 
-  closeWorkspace(ref: string): boolean {
+  closeWorkspace(ref: string, _workItemId?: string): boolean {
     if (ref.startsWith("%")) {
       const result = this.deps.runner("tmux", ["kill-pane", "-t", ref]);
       return result.exitCode === 0;

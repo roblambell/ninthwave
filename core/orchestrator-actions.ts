@@ -389,7 +389,7 @@ export function executeMerge(
       // PR was already merged externally. Transition directly to merged.
       orch.transition(item, "merged");
       if (item.workspaceRef) {
-        deps.mux.closeWorkspace(item.workspaceRef);
+        deps.mux.closeWorkspace(item.workspaceRef, item.id);
         item.workspaceRef = undefined;
       }
       try {
@@ -597,7 +597,7 @@ export function executeMerge(
   // activeSessionCount is workspace-based, so clearing workspaceRef is
   // required to let queued items launch in the same cycle.
   if (item.workspaceRef) {
-    deps.mux.closeWorkspace(item.workspaceRef);
+    deps.mux.closeWorkspace(item.workspaceRef, item.id);
     item.workspaceRef = undefined;
   }
 
@@ -835,7 +835,7 @@ export function executeClean(
   }
 
   const workspaceClosed = item.workspaceRef
-    ? deps.mux.closeWorkspace(item.workspaceRef)
+    ? deps.mux.closeWorkspace(item.workspaceRef, item.id)
     : null; // null = not attempted (no workspace to close)
   // Clear workspace ref after closing so the session slot is freed
   // (activeSessionCount is workspace-based). Also clears the ref for
@@ -895,7 +895,7 @@ export function executeWorkspaceClose(
 
   // Close workspace but do NOT remove worktree -- preserve for manual inspection
   if (item.workspaceRef) {
-    const closed = deps.mux.closeWorkspace(item.workspaceRef);
+    const closed = deps.mux.closeWorkspace(item.workspaceRef, item.id);
     if (!closed) {
       return { success: false, error: `Failed to close workspace for ${item.id}` };
     }
@@ -1133,7 +1133,7 @@ export function executeRetry(
   // Close the old workspace if it exists -- must complete before relaunch to
   // guarantee no two workers operate on the same branch simultaneously.
   if (wsRef) {
-    const closed = deps.mux.closeWorkspace(wsRef);
+    const closed = deps.mux.closeWorkspace(wsRef, item.id);
     if (!closed) {
       deps.io.warn?.(`[${item.id}] WARNING: failed to close workspace ${wsRef} before retry`);
     }

@@ -2096,7 +2096,7 @@ describe("Orchestrator", () => {
       const result = orch.executeAction({ type: "clean", itemId: "H-1-1" }, defaultCtx, deps);
 
       expect(result.success).toBe(true);
-      expect(deps.mux.closeWorkspace).toHaveBeenCalledWith("workspace:1");
+      expect(deps.mux.closeWorkspace).toHaveBeenCalledWith("workspace:1", "H-1-1");
       expect(deps.cleanup.cleanSingleWorktree).toHaveBeenCalledWith(
         "H-1-1",
         defaultCtx.worktreeDir,
@@ -2131,7 +2131,7 @@ describe("Orchestrator", () => {
       const result = orch.executeAction({ type: "clean", itemId: "H-1-1" }, defaultCtx, deps);
 
       expect(result.success).toBe(true);
-      expect(deps.mux.closeWorkspace).toHaveBeenCalledWith("workspace:1");
+      expect(deps.mux.closeWorkspace).toHaveBeenCalledWith("workspace:1", "H-1-1");
       expect(deps.cleanup.cleanSingleWorktree).toHaveBeenCalled();
     });
 
@@ -2145,7 +2145,7 @@ describe("Orchestrator", () => {
       const result = orch.executeAction({ type: "clean", itemId: "H-1-1" }, defaultCtx, deps);
 
       expect(result.success).toBe(true);
-      expect(deps.mux.closeWorkspace).toHaveBeenCalledWith("workspace:1");
+      expect(deps.mux.closeWorkspace).toHaveBeenCalledWith("workspace:1", "H-1-1");
       expect(deps.cleanup.cleanSingleWorktree).toHaveBeenCalled();
     });
 
@@ -2194,7 +2194,7 @@ describe("Orchestrator", () => {
       );
 
       expect(result.success).toBe(true);
-      expect(deps.mux.closeWorkspace).toHaveBeenCalledWith("workspace:1");
+      expect(deps.mux.closeWorkspace).toHaveBeenCalledWith("workspace:1", "H-1-1");
       // Worktree is preserved so the retried worker picks up existing edits
       expect(deps.cleanup.cleanSingleWorktree).not.toHaveBeenCalled();
       // workspaceRef should be cleared for the fresh launch
@@ -4782,7 +4782,7 @@ describe("Orchestrator", () => {
       const retryAction = actions.find((a) => a.type === "retry")!;
       const retryResult = orch.executeAction(retryAction, defaultCtx, deps);
       expect(retryResult.success).toBe(true);
-      expect(deps.mux.closeWorkspace).toHaveBeenCalledWith("workspace:1");
+      expect(deps.mux.closeWorkspace).toHaveBeenCalledWith("workspace:1", "R-1-1");
       expect(deps.cleanup.cleanSingleWorktree).not.toHaveBeenCalled();
       expect(orch.getItem("R-1-1")!.workspaceRef).toBeUndefined();
 
@@ -7413,7 +7413,7 @@ describe("Orchestrator", () => {
       expect(deps.mux.readScreen).toHaveBeenCalledWith("workspace:5", 50);
       expect(orch.getItem("WP-1-2")!.lastScreenOutput).toBe("Error: Worker crashed");
       // Workspace should be closed
-      expect(deps.mux.closeWorkspace).toHaveBeenCalledWith("workspace:5");
+      expect(deps.mux.closeWorkspace).toHaveBeenCalledWith("workspace:5", "WP-1-2");
       // Worktree should NOT be cleaned
       expect(deps.cleanup.cleanSingleWorktree).not.toHaveBeenCalled();
     });
@@ -7449,7 +7449,7 @@ describe("Orchestrator", () => {
       );
 
       expect(result.success).toBe(true);
-      expect(deps.mux.closeWorkspace).toHaveBeenCalledWith("workspace:6");
+      expect(deps.mux.closeWorkspace).toHaveBeenCalledWith("workspace:6", "WP-1-3");
       expect(deps.cleanup.cleanSingleWorktree).toHaveBeenCalledWith(
         "WP-1-3",
         defaultCtx.worktreeDir,

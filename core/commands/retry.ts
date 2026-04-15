@@ -26,7 +26,11 @@ import { createMux, muxTypeForWorkspaceRef } from "../mux.ts";
 export interface RetryDeps {
   io: DaemonIO;
   check: ProcessExistsCheck;
-  closeWorkspace: (workspaceRef: string, projectRoot: string) => boolean;
+  closeWorkspace: (
+    workspaceRef: string,
+    projectRoot: string,
+    workItemId?: string,
+  ) => boolean;
   cleanWorktree: (id: string, worktreeDir: string, projectRoot: string) => boolean;
   log: (msg: string) => void;
   logError: (msg: string) => void;
@@ -35,8 +39,11 @@ export interface RetryDeps {
 const defaultDeps: RetryDeps = {
   io: { writeFileSync, readFileSync, unlinkSync, existsSync, mkdirSync },
   check: processExists,
-  closeWorkspace: (workspaceRef: string, projectRoot: string) =>
-    createMux(muxTypeForWorkspaceRef(workspaceRef), projectRoot).closeWorkspace(workspaceRef),
+  closeWorkspace: (workspaceRef, projectRoot, workItemId) =>
+    createMux(muxTypeForWorkspaceRef(workspaceRef), projectRoot).closeWorkspace(
+      workspaceRef,
+      workItemId,
+    ),
   cleanWorktree: cleanSingleWorktree,
   log: (msg) => console.log(msg),
   logError: (msg) => console.error(msg),
@@ -116,7 +123,7 @@ export function cmdRetry(
     // Live parked sessions must be closed before resetting state, otherwise a
     // retried item could relaunch while the original worker is still running.
     if (item.sessionParked && item.workspaceRef) {
-      const closed = deps.closeWorkspace(item.workspaceRef, projectRoot);
+      const closed = deps.closeWorkspace(item.workspaceRef, projectRoot, item.id);
       if (!closed) {
         deps.logError(
           `${id}: cannot retry -- failed to close live parked workspace ${item.workspaceRef}`,

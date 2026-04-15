@@ -1003,7 +1003,7 @@ describe("Daemon lifecycle: cleanup after merge", () => {
     );
 
     expect(result.success).toBe(true);
-    expect(deps.mux.closeWorkspace).toHaveBeenCalledWith("workspace:6");
+    expect(deps.mux.closeWorkspace).toHaveBeenCalledWith("workspace:6", "CLN-2");
     expect(deps.cleanup.cleanSingleWorktree).toHaveBeenCalled();
     // No warning about remote branch delete
     expect(warnFn).not.toHaveBeenCalled();

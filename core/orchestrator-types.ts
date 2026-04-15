@@ -536,7 +536,7 @@ export interface GhDeps {
 export interface MuxDeps {
   /** Legacy direct-message hook retained for older tests/backward compatibility. */
   sendMessage?: (workspaceRef: string, message: string) => boolean;
-  closeWorkspace: (workspaceRef: string) => boolean;
+  closeWorkspace: (workspaceRef: string, workItemId?: string) => boolean;
   /** Read the last N lines of a worker's terminal screen for diagnostics. */
   readScreen?: (workspaceRef: string, lines?: number) => string;
 }
