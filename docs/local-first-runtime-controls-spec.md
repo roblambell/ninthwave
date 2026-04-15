@@ -18,7 +18,7 @@ The product center of gravity is local orchestration. `ninthwave.sh` is thin act
 
 1. Make plain `nw` feel immediate, local, and understandable.
 2. Replace follow-up prompts and delays with a single startup settings screen.
-3. Let users choose collaboration and AI reviews from that startup screen.
+3. Let users choose collaboration, AI reviews, and backend from that startup screen.
 4. Keep merge strategy, collaboration, reviews, and session limit adjustable from the live status page after startup.
 5. Keep CLI flags as explicit per-run overrides for power users and scripts.
 6. Reframe `ninthwave.sh` around active coordination rather than delivery metrics.
