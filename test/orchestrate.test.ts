@@ -6721,7 +6721,7 @@ describe("watch engine runner", () => {
       "collaboration_mode_changed",
       "session_limit_changed",
     ]);
-    expect(snapshots).toHaveLength(2);
+    expect(snapshots).toHaveLength(3);
     expect(snapshots[0]!.runtime).toEqual({
       paused: false,
       mergeStrategy: "manual",
@@ -6730,6 +6730,13 @@ describe("watch engine runner", () => {
       collaborationMode: "local",
     });
     expect(snapshots[1]!.runtime).toEqual({
+      paused: true,
+      mergeStrategy: "manual",
+      sessionLimit: 4,
+      reviewMode: "off",
+      collaborationMode: "connected",
+    });
+    expect(snapshots[2]!.runtime).toEqual({
       paused: true,
       mergeStrategy: "auto",
       sessionLimit: 4,
@@ -6932,6 +6939,13 @@ describe("shared engine wrappers", () => {
       },
       {
         paused: true,
+        mergeStrategy: "manual",
+        sessionLimit: 4,
+        reviewMode: "off",
+        collaborationMode: "connected",
+      },
+      {
+        paused: true,
         mergeStrategy: "auto",
         sessionLimit: 4,
         reviewMode: "off",
@@ -6958,8 +6972,9 @@ describe("shared engine wrappers", () => {
         totalBlocking: 2_500,
       },
       null,
+      null,
     ]);
-    expect(detached.snapshotPollIntervals).toEqual([1200, 800]);
+    expect(detached.snapshotPollIntervals).toEqual([1200, null, 800]);
   });
 });
 

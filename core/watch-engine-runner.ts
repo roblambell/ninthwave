@@ -265,6 +265,7 @@ export function createWatchEngineRunner(
           newLimit,
           source: command.source ?? "runtime-control",
         });
+        emitSnapshot();
         return;
       }
       case "set-review-mode": {

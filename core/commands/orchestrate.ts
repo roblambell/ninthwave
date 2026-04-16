@@ -817,9 +817,10 @@ export async function runInteractiveWatchOperatorSession(
 
   const write = (chunk: string) => stdout.write(chunk);
   const render = () => {
+    const effectiveLimit = opts.tuiState.pendingSessionLimit ?? lastSnapshot.runtime.sessionLimit;
     renderFrame(
       daemonStateToStatusItems(lastSnapshot.daemonState),
-      lastSnapshot.runtime.sessionLimit,
+      effectiveLimit,
       opts.tuiState,
       write,
       daemonStateToDetailSnapshots(lastSnapshot.daemonState),
