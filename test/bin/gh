@@ -177,19 +177,60 @@ function handleRepoView(): void {
 
 function handlePrList(): void {
   const state = loadState();
-  const head = args[args.indexOf("--head") + 1] ?? "";
+  const headIdx = args.indexOf("--head");
   const desiredState = args[args.indexOf("--state") + 1] ?? "open";
-  const record = autoCreatePrs
-    ? ensurePrRecord(state, head)
-    : state.prs.find((entry) => entry.branch === head);
-  saveState(state);
 
-  if (!record || record.state !== desiredState) {
-    printJson([]);
+  if (headIdx !== -1) {
+    // Per-item query: single branch lookup
+    const head = args[headIdx + 1] ?? "";
+    const record = autoCreatePrs
+      ? ensurePrRecord(state, head)
+      : state.prs.find((entry) => entry.branch === head);
+    saveState(state);
+
+    if (!record || record.state !== desiredState) {
+      printJson([]);
+      return;
+    }
+    printJson([{ number: record.number, title: record.title, body: record.body }]);
     return;
   }
 
-  printJson([{ number: record.number, title: record.title, body: record.body }]);
+  // Bulk query (no --head): return all PRs matching state with requested fields
+  if (autoCreatePrs) {
+    const branchOutput = git("for-each-ref", "--format=%(refname:short)", "refs/heads/ninthwave/");
+    for (const branch of branchOutput.split("\n").filter(Boolean)) {
+      ensurePrRecord(state, branch);
+    }
+  }
+  saveState(state);
+
+  const jsonFields = (args[args.indexOf("--json") + 1] ?? "").split(",").filter(Boolean);
+  const matching = state.prs.filter((r) => r.state === desiredState);
+  const results = matching.map((record) => {
+    const obj: Record<string, unknown> = {};
+    for (const field of jsonFields) {
+      switch (field) {
+        case "number": obj.number = record.number; break;
+        case "title": obj.title = record.title; break;
+        case "body": obj.body = record.body; break;
+        case "headRefName": obj.headRefName = record.branch; break;
+        case "reviewDecision": obj.reviewDecision = record.reviewDecision; break;
+        case "mergeable": obj.mergeable = record.mergeable; break;
+        case "updatedAt": obj.updatedAt = record.updatedAt; break;
+        case "createdAt": obj.createdAt = record.createdAt; break;
+        case "statusCheckRollup":
+          obj.statusCheckRollup = (record.checks ?? []).map((c) => ({
+            state: c.state,
+            name: c.name,
+            completedAt: c.completedAt,
+          }));
+          break;
+      }
+    }
+    return obj;
+  });
+  printJson(results);
 }
 
 function handlePrView(): void {
