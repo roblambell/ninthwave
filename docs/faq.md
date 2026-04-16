@@ -235,6 +235,8 @@ The max-inflight limit (`--max-inflight`) controls how many work items are in fl
 nw --items H-AUTH-1,H-AUTH-2 --max-inflight 3
 ```
 
+The older `--session-limit` flag and the `session_limit` config key are accepted as deprecated aliases so existing scripts and config files keep working; new code should prefer `--max-inflight` and `max_inflight`.
+
 ### What happens when I run `nw`?
 
 After you pick work items (and choose an AI tool if more than one is configured), `nw` shows one startup settings screen before the live status UI. That screen lets you confirm review mode, collaboration mode, and backend selection.
@@ -242,6 +244,19 @@ After you pick work items (and choose an AI tool if more than one is configured)
 Merge strategy and max-inflight are not on the startup screen. Startup begins in manual merge mode with a max-inflight of `1` (or your persisted preference if you have one). Both stay adjustable from the live status UI -- open the runtime controls overlay to change merge strategy, and press `+`/`-` to change the max-inflight limit.
 
 There is no separate arming step after that screen. Once you confirm the startup settings, orchestration starts and the live status UI takes over.
+
+### How do I pause new launches without interrupting in-flight work?
+
+Press `p` on the live status page to toggle drain mode (`acceptingWork`). When drain mode is on:
+
+- No new items are launched -- ready items stay queued instead of advancing into the implementation pipeline.
+- In-flight items continue through their full lifecycle (implementing, CI, review, rebase, fix-forward, merge) normally.
+- `+` and `-` still adjust max-inflight while draining, so the cap is ready the moment intake resumes.
+- The queue header shows a yellow `not accepting` badge and the mode line shows `NOT ACCEPTING` so drain mode is unambiguous at a glance.
+
+Press `p` again to resume accepting work. Launches resume immediately against the current max-inflight.
+
+Drain mode is **runtime-only**: every new `nw` session starts with `acceptingWork = true`. It is an in-session flow control, not a persisted preference. Use it when you want the orchestrator to finish what it already started without taking on anything new -- for example, before you step away from the machine, or while you are triaging a surprise CI failure.
 
 ### When should I choose `Auto`, `tmux`, `cmux`, or `headless`?
 

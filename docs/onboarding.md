@@ -94,7 +94,7 @@ sequenceDiagram
     Note over O,S: Step 4: Startup confirmation
     O->>S: runInteractiveFlow()
     S->>U: Confirm the item/tool summary
-    Note over S: Reviews default to on, collaboration to local, merge to manual, session limit to 1.<br/>All four can be changed from the live status UI after startup.
+    Note over S: Reviews default to on, collaboration to local, merge to manual, max inflight to 1.<br/>All four can be changed from the live status UI after startup. The runtime-only drain toggle (acceptingWork) is reached with 'p' from the live UI.
     Note over S: Backend is auto-detected from session env ($TMUX, $CMUX_WORKSPACE_ID)
     Note over S: NINTHWAVE_MUX env var can override for a single launch
 
