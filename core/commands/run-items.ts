@@ -2,12 +2,10 @@
 
 import { mkdirSync } from "fs";
 import { join } from "path";
-import { getAvailableMemory } from "../memory.ts";
 import { parseWorkItems } from "../parser.ts";
 import { die, warn, info, GREEN, BOLD, DIM, RESET } from "../output.ts";
 import { splitIds } from "../work-item-files.ts";
 import { computeBatches, CircularDependencyError } from "./batch-order.ts";
-import { calculateMemorySessionLimit } from "../orchestrator.ts";
 import { computeDefaultSessionLimit } from "./orchestrate.ts";
 import { loadUserConfig } from "../config.ts";
 import { type Multiplexer, getMux } from "../mux.ts";
@@ -109,17 +107,15 @@ export async function cmdRunItems(
     });
     console.log(`  Batch ${b}: ${labels.join(", ")}`);
   }
-  // Compute session limit: explicit override honored directly, otherwise RAM-calculated
+  // Compute session limit: explicit override honored directly, otherwise use config/default
   // Precedence: CLI --session-limit > persisted user preference > computed default
-  let effectiveSessionLimit: number;
+  let sessionLimit: number;
   if (sessionLimitOverride !== undefined) {
-    effectiveSessionLimit = sessionLimitOverride;
-    info(`Session limit: ${effectiveSessionLimit} concurrent session(s) (explicit override)`);
+    sessionLimit = sessionLimitOverride;
+    info(`Session limit: ${sessionLimit} concurrent session(s) (explicit override)`);
   } else {
-    const configuredLimit = loadUserConfig().session_limit ?? computeDefaultSessionLimit();
-    effectiveSessionLimit = calculateMemorySessionLimit(configuredLimit, getAvailableMemory());
-    const freeGB = Math.round(getAvailableMemory() / (1024 ** 3));
-    info(`Session limit: ${effectiveSessionLimit} concurrent session(s) (${freeGB}GB free)`);
+    sessionLimit = loadUserConfig().session_limit ?? computeDefaultSessionLimit();
+    info(`Session limit: ${sessionLimit} concurrent session(s)`);
   }
   console.log();
 
@@ -149,7 +145,7 @@ export async function cmdRunItems(
     const batchItems = ids.filter((id) => batchAssignments.get(id) === b);
 
     for (const id of batchItems) {
-      if (launched.length >= effectiveSessionLimit) {
+      if (launched.length >= sessionLimit) {
         sessionLimitReached = true;
         // Collect all remaining items as skipped
         const remainingInBatch = batchItems.slice(batchItems.indexOf(id));
@@ -190,7 +186,7 @@ export async function cmdRunItems(
   if (skipped.length > 0) {
     console.log();
     warn(
-      `Session limit reached (${effectiveSessionLimit}). ${skipped.length} item(s) skipped:`,
+      `Session limit reached (${sessionLimit}). ${skipped.length} item(s) skipped:`,
     );
     for (const id of skipped) {
       const item = itemMap.get(id)!;
@@ -287,18 +283,16 @@ export async function cmdStart(
   const partitionDir = join(worktreeDir, ".partitions");
   cleanupStalePartitions(partitionDir, worktreeDir);
 
-  // Compute session limit: persisted user preference > computed default, then RAM-capped
-  const configuredLimit = loadUserConfig().session_limit ?? computeDefaultSessionLimit();
-  const effectiveSessionLimit = calculateMemorySessionLimit(configuredLimit, getAvailableMemory());
-  const freeGB = Math.round(getAvailableMemory() / (1024 ** 3));
-  info(`Session limit: ${effectiveSessionLimit} concurrent session(s) (${freeGB}GB free)`);
+  // Compute session limit: persisted user preference > computed default
+  const sessionLimit = loadUserConfig().session_limit ?? computeDefaultSessionLimit();
+  info(`Session limit: ${sessionLimit} concurrent session(s)`);
 
   const mux = muxEarly;
   const launched: string[] = [];
   const skipped: string[] = [];
 
   for (const id of ids) {
-    if (launched.length >= effectiveSessionLimit) {
+    if (launched.length >= sessionLimit) {
       skipped.push(...ids.slice(ids.indexOf(id)));
       break;
     }
@@ -328,7 +322,7 @@ export async function cmdStart(
   if (skipped.length > 0) {
     console.log();
     warn(
-      `Session limit reached (${effectiveSessionLimit}). ${skipped.length} item(s) skipped:`,
+      `Session limit reached (${sessionLimit}). ${skipped.length} item(s) skipped:`,
     );
     for (const id of skipped) {
       const item = itemMap.get(id)!;
@@ -338,4 +332,3 @@ export async function cmdStart(
     info(`Use 'nw' to process all items with automatic queue management.`);
   }
 }
-

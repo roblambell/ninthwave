@@ -2,10 +2,8 @@
 // orphaned worktree cleanup, action execution, and run completion handling.
 
 import { existsSync, readdirSync } from "fs";
-import { freemem } from "os";
 import {
   Orchestrator,
-  calculateMemorySessionLimit,
   statusDisplayForState,
   TERMINAL_STATES,
   type Action,
@@ -29,7 +27,6 @@ import { parseAgentModel, readAgentFileContent } from "./agent-files.ts";
 import { getBundleDir } from "./paths.ts";
 import { readLatestTokenUsage } from "./token-usage.ts";
 import { AuthorCache } from "./git-author.ts";
-import { getAvailableMemory } from "./memory.ts";
 import {
   createEventLoopLagSampler,
   createInteractiveWatchTiming,
@@ -43,9 +40,6 @@ import {
   muxForWorkspaceRef,
 } from "./orchestrate-tui-render.ts";
 import { ghFailureKindLabel, queryRateLimitAsync as ghQueryRateLimitAsync } from "./gh.ts";
-
-// Re-export getAvailableMemory for backward compatibility
-export { getAvailableMemory } from "./memory.ts";
 
 // ── Sidebar display sync ──────────────────────────────────────────
 
@@ -623,8 +617,6 @@ export interface OrchestrateLoopDeps {
   sleep: (ms: number) => Promise<void>;
   log: (entry: LogEntry) => void;
   actionDeps: OrchestratorDeps;
-  /** Get available free memory in bytes. Defaults to os.freemem(). Injectable for testing. */
-  getFreeMem?: () => number;
   /** Reconcile work item files with GitHub state after merge actions. */
   reconcile?: (workDir: string, worktreeDir: string, projectRoot: string) => void;
   /** Read screen content from a worker workspace for telemetry capture. */
@@ -995,22 +987,6 @@ export async function orchestrateLoop(
     for (const item of allItems) {
       prevStates.set(item.id, item.state);
     }
-
-    // Memory-aware session limit: adjust effective limit based on available free memory
-      const freeMemBytes = (deps.getFreeMem ?? freemem)();
-      const memorySessionLimit = calculateMemorySessionLimit(orch.config.sessionLimit, freeMemBytes);
-      orch.setEffectiveSessionLimit(memorySessionLimit);
-
-      if (memorySessionLimit < orch.config.sessionLimit) {
-        log({
-          ts: new Date().toISOString(),
-          level: "info",
-          event: "session_limit_reduced_memory",
-          configuredSessionLimit: orch.config.sessionLimit,
-          effectiveSessionLimit: memorySessionLimit,
-          freeMemMB: Math.round(freeMemBytes / (1024 * 1024)),
-        });
-      }
 
     // Crew mode: sync active items to broker (fire-and-forget, before snapshot)
     // Clear author cache each cycle to avoid stale data across syncs.

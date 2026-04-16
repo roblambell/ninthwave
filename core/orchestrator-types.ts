@@ -674,30 +674,6 @@ export const DEFAULT_CONFIG: OrchestratorConfig = {
   maxTimeoutExtensions: 3,
 };
 
-// ── Memory-aware session limit ──────────────────────────────────────
-
-/** Estimated memory consumption per worker (Claude Code + language server + worktree). */
-export const BYTES_PER_WORKER = 1 * 1024 * 1024 * 1024; // 1 GB
-
-/**
- * Calculate the memory-aware session limit based on available free memory.
- * Returns floor(freeMemBytes / memPerWorkerBytes), clamped to [1, configuredLimit].
- * Returns 0 only when configuredLimit is 0 (used in tests to prevent auto-launch).
- *
- * @param configuredLimit - The user-configured or default session limit (upper bound)
- * @param freeMemBytes - Available free memory in bytes (e.g., from os.freemem())
- * @param memPerWorkerBytes - Memory per worker in bytes (default: 2.5 GB)
- */
-export function calculateMemorySessionLimit(
-  configuredLimit: number,
-  freeMemBytes: number,
-  memPerWorkerBytes: number = BYTES_PER_WORKER,
-): number {
-  if (configuredLimit <= 0) return 0;
-  const memorySlots = Math.floor(freeMemBytes / memPerWorkerBytes);
-  return Math.max(1, Math.min(memorySlots, configuredLimit));
-}
-
 // ── Orchestrator timeouts ────────────────────────────────────────────
 // All timeout and grace period constants grouped by concern.
 // Each value has JSDoc explaining its rationale and which guards consume it.

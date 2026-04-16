@@ -5580,7 +5580,6 @@ describe("orchestrateLoop crew mode", () => {
         log: () => {},
         actionDeps: mockActionDeps(),
         crewBroker: broker,
-        getFreeMem: () => 16 * 1024 ** 3,
       };
 
       await orchestrateLoop(orch, ctx, deps, { maxIterations: 2 });
@@ -5659,7 +5658,6 @@ describe("orchestrateLoop crew mode", () => {
       log: (e) => logs.push(e),
       actionDeps: actionDepsOverride,
       crewBroker: broker,
-      getFreeMem: () => 16 * 1024 ** 3, // 16GB -- prevent memory-based session limit reduction
     };
 
     await orchestrateLoop(orch, defaultCtx, deps, { maxIterations: 2 });
@@ -5690,7 +5688,6 @@ describe("orchestrateLoop crew mode", () => {
       log: () => {},
       actionDeps: mockActionDeps(),
       crewBroker: broker,
-      getFreeMem: () => 16 * 1024 ** 3,
     };
 
     await orchestrateLoop(orch, defaultCtx, deps, { maxIterations: 1 });
@@ -5721,7 +5718,6 @@ describe("orchestrateLoop crew mode", () => {
       log: (e) => logs.push(e),
       actionDeps: mockActionDeps(),
       crewBroker: broker,
-      getFreeMem: () => 16 * 1024 ** 3,
     };
 
     await orchestrateLoop(orch, defaultCtx, deps, { maxIterations: 3 });
@@ -5752,7 +5748,6 @@ describe("orchestrateLoop crew mode", () => {
       log: () => {},
       actionDeps: mockActionDeps(),
       crewBroker: broker,
-      getFreeMem: () => 16 * 1024 ** 3,
     };
 
     await orchestrateLoop(orch, defaultCtx, deps, { maxIterations: 4 });
@@ -5776,7 +5771,6 @@ describe("orchestrateLoop crew mode", () => {
       log: () => {},
       actionDeps: mockActionDeps(),
       crewBroker: broker,
-      getFreeMem: () => 16 * 1024 ** 3,
     };
 
     await orchestrateLoop(orch, defaultCtx, deps, { maxIterations: 2 });
@@ -5804,7 +5798,6 @@ describe("orchestrateLoop crew mode", () => {
         log: () => {},
         actionDeps: mockActionDeps(),
         crewBroker: broker,
-        getFreeMem: () => 16 * 1024 ** 3,
         readTokenUsage: () => ({ inputTokens: 100, outputTokens: 40, cacheTokens: 10 }),
       };
 
@@ -5880,7 +5873,6 @@ describe("orchestrateLoop crew mode", () => {
       log: () => {},
       actionDeps: mockActionDeps(),
       crewBroker: broker,
-      getFreeMem: () => 16 * 1024 ** 3,
     };
 
     await orchestrateLoop(orch, defaultCtx, deps, { maxIterations: 20 });
@@ -8551,8 +8543,8 @@ describe("cmdOrchestrate passthrough path", () => {
     // In cmdOrchestrate: sessionLimit = sessionLimitOverride ?? computedSessionLimit
     // When sessionLimitOverride is set, it takes precedence over computedSessionLimit
     const computedSessionLimit = 5; // simulate any computed default
-    const effectiveSessionLimit = parsed.sessionLimitOverride ?? computedSessionLimit;
-    expect(effectiveSessionLimit).toBe(3);
+    const resolvedSessionLimit = parsed.sessionLimitOverride ?? computedSessionLimit;
+    expect(resolvedSessionLimit).toBe(3);
   });
 
   it("unknown item ID would be caught by validation", () => {
@@ -9518,7 +9510,6 @@ describe("orchestrateLoop claims gating", () => {
           launchCalls.push(workItem.id);
           return { worktreePath: "/tmp/test", workspaceRef: `ws:${workItem.id}` };
         }) } }),
-      getFreeMem: () => 16 * 1024 ** 3,
     };
 
     // lint-ignore: no-unbounded-orchestrate-loop
@@ -9558,7 +9549,6 @@ describe("orchestrateLoop claims gating", () => {
           launchCalls.push(workItem.id);
           return { worktreePath: "/tmp/test", workspaceRef: `ws:${workItem.id}` };
         }) } }),
-      getFreeMem: () => 16 * 1024 ** 3,
     };
 
     // Gate claims for 0ms (effectively no gating -- already expired)
@@ -9613,7 +9603,6 @@ describe("orchestrateLoop claims gating", () => {
           return { worktreePath: "/tmp/test", workspaceRef: `ws:${workItem.id}` };
         }) } }),
       crewBroker: broker,
-      getFreeMem: () => 16 * 1024 ** 3,
     };
 
     // No claimsGatedMs -- crew mode uses broker connectivity for gating
@@ -9625,4 +9614,3 @@ describe("orchestrateLoop claims gating", () => {
     expect(launchCalls).toContain("T-JOIN-1");
   });
 });
-

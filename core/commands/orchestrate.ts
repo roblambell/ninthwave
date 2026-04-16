@@ -5,15 +5,13 @@
 
 import { existsSync, mkdirSync, readdirSync, appendFileSync, readFileSync } from "fs";
 import { join } from "path";
-import { totalmem, freemem, hostname } from "os";
+import { totalmem, hostname } from "os";
 import { randomUUID } from "crypto";
 import { execSync, spawn } from "node:child_process";
-import { getAvailableMemory } from "../memory.ts";
 import {
   Orchestrator,
   DEFAULT_CONFIG,
   RESTART_RECOVERY_HOLD_REASON,
-  calculateMemorySessionLimit,
   statusDisplayForState,
   TERMINAL_STATES,
   type Action,
@@ -319,7 +317,6 @@ export {
   computeDefaultSessionLimit,
   listWorktreeIds,
   listOpenItemIds,
-  getAvailableMemory,
   type CleanOrphanedDeps,
   type OrchestrateLoopDeps,
   type OrchestrateLoopConfig,
@@ -2169,7 +2166,6 @@ export async function cmdOrchestrate(
     sleep: (ms) => interruptibleSleep(ms, abortController.signal),
     log,
     actionDeps,
-    getFreeMem: getAvailableMemory,
     reconcile,
     readScreen: (ref, lines) => muxForWorkspaceRef(ref).readScreen(ref, lines),
     syncDisplay: (o, snap) => {

@@ -426,7 +426,10 @@ describe("system: watch secondary workers", () => {
     );
 
     try {
-      const reviewing = await waitForItemState(harness, "H-SWW-1", "reviewing", 30_000);
+      const reviewing = await harness.waitForOrchestratorState((state) => {
+        const item = state.items.find((entry) => entry.id === "H-SWW-1");
+        return item?.state === "reviewing" && item.reviewWorkspaceRef ? item : false;
+      }, 30_000);
       expect(reviewing.prNumber).toBeGreaterThan(0);
       expect(reviewing.reviewWorkspaceRef).toBeDefined();
 

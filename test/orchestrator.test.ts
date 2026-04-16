@@ -6,8 +6,6 @@ import { describe, it, expect, beforeEach, vi } from "vitest";
 import {
   Orchestrator,
   DEFAULT_CONFIG,
-  BYTES_PER_WORKER,
-  calculateMemorySessionLimit,
   type OrchestratorItem,
   type OrchestratorItemState,
   type PollSnapshot,
@@ -4595,122 +4593,6 @@ describe("Orchestrator", () => {
       expect(orch2.getItem("B-1-1")!.state).toBe("launching");
       expect(actions.some((a) => a.type === "merge" && a.itemId === "A-1-2")).toBe(true);
       expect(actions.some((a) => a.type === "launch" && a.itemId === "B-1-1")).toBe(true);
-    });
-  });
-
-  // ── Memory-aware session limits ───────────────────────────────────────
-
-  describe("calculateMemorySessionLimit", () => {
-    const GB = 1024 * 1024 * 1024;
-
-    it("returns correct session limit for various memory scenarios", () => {
-      // 10 GB free → floor(10/1) = 10, but configured limit is 5 → 5
-      expect(calculateMemorySessionLimit(5, 10 * GB)).toBe(5);
-
-      // 3 GB free → floor(3/1) = 3
-      expect(calculateMemorySessionLimit(5, 3 * GB)).toBe(3);
-
-      // 2 GB free → floor(2/1) = 2
-      expect(calculateMemorySessionLimit(5, 2 * GB)).toBe(2);
-
-      // 1 GB free → floor(1/1) = 1
-      expect(calculateMemorySessionLimit(5, 1 * GB)).toBe(1);
-    });
-
-    it("never drops below 1 when configured limit is positive", () => {
-      // 500 MB free → floor(0.5/1) = 0, but minimum is 1
-      expect(calculateMemorySessionLimit(5, 500 * 1024 * 1024)).toBe(1);
-
-      // 100 MB free → floor(0.1/1) = 0, but minimum is 1
-      expect(calculateMemorySessionLimit(3, 100 * 1024 * 1024)).toBe(1);
-    });
-
-    it("handles 0 free memory (still allows 1 worker)", () => {
-      expect(calculateMemorySessionLimit(5, 0)).toBe(1);
-      expect(calculateMemorySessionLimit(1, 0)).toBe(1);
-    });
-
-    it("respects configured maximum even when memory allows more", () => {
-      // 100 GB free → floor(100/1) = 100, but configured limit is 3 → 3
-      expect(calculateMemorySessionLimit(3, 100 * GB)).toBe(3);
-
-      // 50 GB free → floor(50/1) = 50, but configured limit is 1 → 1
-      expect(calculateMemorySessionLimit(1, 50 * GB)).toBe(1);
-    });
-
-    it("returns 0 when configured limit is 0 (test helper)", () => {
-      // configuredLimit=0 is used in tests to prevent auto-launch
-      expect(calculateMemorySessionLimit(0, 10 * GB)).toBe(0);
-      expect(calculateMemorySessionLimit(0, 0)).toBe(0);
-    });
-
-    it("accepts custom memPerWorkerBytes", () => {
-      const workerSize = 1 * GB; // 1 GB per worker
-      // 5 GB free / 1 GB per worker = 5, capped by configured limit of 3
-      expect(calculateMemorySessionLimit(3, 5 * GB, workerSize)).toBe(3);
-
-      // 2 GB free / 1 GB per worker = 2, configured limit is 5
-      expect(calculateMemorySessionLimit(5, 2 * GB, workerSize)).toBe(2);
-    });
-
-    it("BYTES_PER_WORKER is 1 GB", () => {
-      expect(BYTES_PER_WORKER).toBe(1 * GB);
-    });
-  });
-
-  describe("effectiveSessionLimit", () => {
-    it("defaults to config.sessionLimit when not set", () => {
-      orch = new Orchestrator({ sessionLimit: 5 });
-      expect(orch.effectiveSessionLimit).toBe(5);
-    });
-
-    it("uses setEffectiveSessionLimit override", () => {
-      orch = new Orchestrator({ sessionLimit: 5 });
-      orch.setEffectiveSessionLimit(2);
-      expect(orch.effectiveSessionLimit).toBe(2);
-    });
-
-    it("availableSessionSlots uses effectiveSessionLimit", () => {
-      orch = new Orchestrator({ sessionLimit: 5 });
-      orch.addItem(makeWorkItem("H-1-1"));
-      orch.getItem("H-1-1")!.reviewCompleted = true;
-      orch.hydrateState("H-1-1", "implementing"); // 1 active session
-      orch.getItem("H-1-1")!.workspaceRef = "workspace:1";
-
-      // Without memory adjustment: 5 - 1 = 4 slots
-      expect(orch.availableSessionSlots).toBe(4);
-
-      // With memory adjustment: effective is 2, so 2 - 1 = 1 slot
-      orch.setEffectiveSessionLimit(2);
-      expect(orch.availableSessionSlots).toBe(1);
-    });
-
-    it("memory-constrained session limit queues items instead of launching", () => {
-      orch = new Orchestrator({ sessionLimit: 5 });
-
-      // Add 3 items and make them all ready
-      orch.addItem(makeWorkItem("H-1-1"));
-      orch.getItem("H-1-1")!.reviewCompleted = true;
-      orch.addItem(makeWorkItem("H-1-2"));
-      orch.getItem("H-1-2")!.reviewCompleted = true;
-      orch.addItem(makeWorkItem("H-1-3"));
-      orch.getItem("H-1-3")!.reviewCompleted = true;
-
-      // Simulate memory pressure: only 1 slot available
-      orch.setEffectiveSessionLimit(1);
-
-      const actions = orch.processTransitions(
-        emptySnapshot(["H-1-1", "H-1-2", "H-1-3"]),
-      );
-
-      // Only 1 item should launch (the rest stay ready/queued)
-      const launchActions = actions.filter((a) => a.type === "launch");
-      expect(launchActions).toHaveLength(1);
-
-      // Verify: 1 launching, 2 ready
-      expect(orch.getItem("H-1-1")!.state).toBe("launching");
-      expect(orch.getItem("H-1-2")!.state).toBe("ready");
-      expect(orch.getItem("H-1-3")!.state).toBe("ready");
     });
   });
 

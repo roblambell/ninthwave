@@ -823,15 +823,6 @@ describe("setSessionLimit", () => {
     expect(orch.config.sessionLimit).toBe(4);
   });
 
-  it("clears memory-adjusted effective limit", () => {
-    const orch = new Orchestrator({ sessionLimit: 5 });
-    orch.setEffectiveSessionLimit(2); // simulate memory pressure
-    expect(orch.effectiveSessionLimit).toBe(2);
-    orch.setSessionLimit(4);
-    // After setSessionLimit, effectiveSessionLimit should reflect the new configured value
-    expect(orch.effectiveSessionLimit).toBe(4);
-  });
-
   it("updates availableSessionSlots calculation immediately", () => {
     const orch = new Orchestrator({ sessionLimit: 2 });
     orch.addItem(makeWorkItem("H-1-1"));

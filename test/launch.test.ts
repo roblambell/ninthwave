@@ -10,6 +10,7 @@ import { runtimeAgentNameForTool, agentTargetDirs, renderAgentArtifact } from ".
 import { type LaunchGitDeps, launchSingleItem, launchAiSession, launchReviewWorker, launchRebaserWorker, launchForwardFixerWorker, sanitizeTitle, extractItemText, validatePickupCandidate } from "../core/commands/launch.ts";
 import { cmdStart, cmdRunItems, WORK_ITEM_ID_CLI_PATTERN } from "../core/commands/run-items.ts";
 import { cleanStaleBranchForReuse } from "../core/branch-cleanup.ts";
+import * as configModule from "../core/config.ts";
 import { parseWorkItems } from "../core/parser.ts";
 import { checkInbox, writeInbox } from "../core/commands/inbox.ts";
 
@@ -2954,6 +2955,27 @@ describe("cmdRunItems", () => {
     expect(output).toContain("Launch plan:");
     expect(output).toContain("Batch 1:");
     expect(output).toContain("M-CI-1");
+  });
+
+  it("uses configured session limit directly when no CLI override is provided", async () => {
+    const mockMux = createMockMux();
+    const repo = setupTempRepo();
+    const workDir = setupWorkItemsDir(repo);
+    const worktreeDir = join(repo, ".ninthwave", ".worktrees");
+    const loadUserConfigSpy = vi.spyOn(configModule, "loadUserConfig").mockReturnValue({ session_limit: 1 });
+
+    try {
+      const output = await captureOutput(() =>
+        cmdRunItems(["M-CI-1", "C-UO-1"], workDir, worktreeDir, repo, mockMux, undefined, "claude"),
+      );
+
+      expect(output).toContain("Session limit: 1 concurrent session(s)");
+      expect(output).not.toContain("GB free");
+      expect(output).toContain("Launched 1 session(s)");
+      expect(output).toContain("Session limit reached (1). 1 item(s) skipped");
+    } finally {
+      loadUserConfigSpy.mockRestore();
+    }
   });
 
   it("dies early when mux is unavailable (before any worktree creation)", async () => {

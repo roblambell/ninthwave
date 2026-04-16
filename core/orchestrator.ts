@@ -127,8 +127,6 @@ function hasNinthwaveHtmlCommentMarker(body: string): boolean {
 export class Orchestrator {
   readonly config: OrchestratorConfig;
   private items: Map<string, OrchestratorItem> = new Map();
-  /** Memory-adjusted session limit. When set, takes precedence over config.sessionLimit for slot calculation. */
-  private _effectiveSessionLimit?: number;
   /** One-shot flag: re-run evaluateMerge for review-pending items on the next poll. */
   private forceReviewPendingReevaluation = false;
 
@@ -137,29 +135,13 @@ export class Orchestrator {
   }
 
   /**
-   * Set the effective session limit after memory adjustment.
-   * Call this each poll cycle with the result of calculateMemorySessionLimit().
-   */
-  setEffectiveSessionLimit(limit: number): void {
-    this._effectiveSessionLimit = limit;
-  }
-
-  /** Get the effective session limit (memory-adjusted when set, otherwise configured). */
-  get effectiveSessionLimit(): number {
-    return this._effectiveSessionLimit ?? this.config.sessionLimit;
-  }
-
-  /**
    * Change the configured session limit at runtime.
-   * Updates config.sessionLimit so that slot calculations (including memory-adjusted
-   * effective limit) use the new value immediately. Minimum 1.
+   * Updates config.sessionLimit so slot calculations use the new value immediately.
+   * Minimum 1.
    */
   setSessionLimit(limit: number): void {
     const clamped = Math.max(1, Math.floor(limit));
     (this.config as { sessionLimit: number }).sessionLimit = clamped;
-    // Clear memory-adjusted override so the new configured limit takes effect
-    // immediately. The next poll cycle will re-evaluate memory pressure.
-    this._effectiveSessionLimit = undefined;
   }
 
   /**
@@ -257,9 +239,9 @@ export class Orchestrator {
     ).length;
   }
 
-  /** How many more items can be launched without exceeding the effective session limit. */
+  /** How many more items can be launched without exceeding config.sessionLimit. */
   get availableSessionSlots(): number {
-    return Math.max(0, this.effectiveSessionLimit - this.activeSessionCount);
+    return Math.max(0, this.config.sessionLimit - this.activeSessionCount);
   }
 
   /**

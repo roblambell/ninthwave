@@ -113,7 +113,6 @@ export function buildLoopDeps(
     sleep: () => Promise.resolve(),
     log: (entry) => logs.push(entry),
     actionDeps,
-    getFreeMem: () => 8 * 1024 * 1024 * 1024,
     __logs: logs,
   } as ScenarioLoopDeps;
 }
