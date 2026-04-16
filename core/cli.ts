@@ -9,20 +9,18 @@ import { lookupCommand, printHelp, printHelpAll, printCommandHelp } from "./help
 import { cmdNoArgs } from "./commands/onboard.ts";
 import { WORK_ITEM_ID_CLI_PATTERN, cmdRunItems } from "./commands/run-items.ts";
 import { ensureMuxInteractiveOrDie } from "./mux.ts";
-import { loadOrGenerateProjectIdentity } from "./config.ts";
+import { ensureProjectId } from "./config.ts";
 
 /**
- * Backfill the project identity when an existing repo predates those fields.
- * `project_id` lands in committed `.ninthwave/config.json`; `broker_secret`
- * lands in gitignored `.ninthwave/config.local.json`. Safe no-op for
- * projects that have not yet been initialized (no `.ninthwave/` directory).
- * Never fatal -- identity generation is best-effort and should not block
- * the CLI.
+ * Backfill the committed `project_id` when an existing repo predates that
+ * field. Safe no-op for projects that have not yet been initialized
+ * (no `.ninthwave/` directory). Never fatal -- identity generation is
+ * best-effort and should not block the CLI.
  */
 function ensureProjectIdentity(projectRoot: string): void {
   if (!existsSync(join(projectRoot, ".ninthwave"))) return;
   try {
-    loadOrGenerateProjectIdentity(projectRoot);
+    ensureProjectId(projectRoot);
   } catch {
     // Best-effort; missing identity will simply block broker features later.
   }

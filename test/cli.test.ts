@@ -1,14 +1,27 @@
 // Tests for the command registry, CLI dispatch, and help output.
 
-import { describe, it, expect } from "vitest";
+import { describe, it, expect, afterEach } from "vitest";
 import { spawnSync } from "child_process";
 import { join } from "path";
+import { existsSync, mkdirSync, readFileSync } from "fs";
 import { COMMAND_REGISTRY, lookupCommand } from "../core/help.ts";
+import { cleanupTempRepos, setupTempRepo } from "./helpers.ts";
 
 const CLI_PATH = join(import.meta.dirname, "..", "core", "cli.ts");
+const UUID_V4_PATTERN =
+  /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/;
+
+afterEach(() => {
+  cleanupTempRepos();
+});
 
 function runCli(...args: string[]) {
+  return runCliIn(process.cwd(), ...args);
+}
+
+function runCliIn(cwd: string, ...args: string[]) {
   const result = spawnSync("bun", ["run", CLI_PATH, ...args], {
+    cwd,
     encoding: "utf-8",
     stdio: ["pipe", "pipe", "pipe"],
     timeout: 10_000,
@@ -172,6 +185,24 @@ describe("CLI dispatch", () => {
     expect(combined).toContain("Could not detect how this ninthwave install was managed");
     expect(combined).toContain("brew upgrade ninthwave");
     expect(combined).toContain("curl -fsSL https://ninthwave.sh/install | bash");
+  });
+
+  it("backfills project_id without creating config.local.json on normal commands", () => {
+    const repo = setupTempRepo();
+    mkdirSync(join(repo, ".ninthwave", "work"), { recursive: true });
+    mkdirSync(join(repo, ".ninthwave", ".worktrees"), { recursive: true });
+
+    const result = runCliIn(repo, "list");
+
+    expect(result.exitCode).toBe(0);
+    const sharedPath = join(repo, ".ninthwave", "config.json");
+    const localPath = join(repo, ".ninthwave", "config.local.json");
+    expect(existsSync(sharedPath)).toBe(true);
+    expect(existsSync(localPath)).toBe(false);
+
+    const shared = JSON.parse(readFileSync(sharedPath, "utf-8"));
+    expect(shared.project_id).toMatch(UUID_V4_PATTERN);
+    expect(shared).not.toHaveProperty("broker_secret");
   });
 });
 

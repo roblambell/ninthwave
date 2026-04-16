@@ -107,7 +107,7 @@ describe("broker_secret override via config.local.json", () => {
     expect(merged.broker_secret).toBe(THIRTY_TWO_EIGHTS_SECRET);
   });
 
-  it("generates broker_secret into config.local.json and leaves config.json secret-free", () => {
+  it("explicit identity generation writes broker_secret into config.local.json and leaves config.json secret-free", () => {
     const repo = setupTempRepo();
     const configDir = join(repo, ".ninthwave");
     mkdirSync(configDir, { recursive: true });

@@ -4,6 +4,7 @@ import { describe, it, expect, afterEach, vi } from "vitest";
 import { join } from "path";
 import { mkdirSync, writeFileSync, readFileSync, existsSync } from "fs";
 import {
+  ensureProjectId,
   generateProjectIdentity,
   loadConfig,
   loadLocalConfig,
@@ -261,6 +262,62 @@ describe("generateProjectIdentity", () => {
     const second = generateProjectIdentity();
     expect(first.project_id).not.toBe(second.project_id);
     expect(first.broker_secret).not.toBe(second.broker_secret);
+  });
+});
+
+describe("ensureProjectId", () => {
+  it("writes a project_id into config.json when missing and preserves unrelated keys", () => {
+    const repo = setupTempRepo();
+    const configDir = join(repo, ".ninthwave");
+    mkdirSync(configDir, { recursive: true });
+    writeFileSync(
+      join(configDir, "config.json"),
+      JSON.stringify({ crew_url: "wss://crew.example/ws", custom_key: "hello" }),
+    );
+
+    const projectId = ensureProjectId(repo);
+
+    expect(projectId).toMatch(UUID_V4_PATTERN);
+    const sharedOnDisk = JSON.parse(
+      readFileSync(join(configDir, "config.json"), "utf-8"),
+    );
+    expect(sharedOnDisk.crew_url).toBe("wss://crew.example/ws");
+    expect(sharedOnDisk.custom_key).toBe("hello");
+    expect(sharedOnDisk.project_id).toBe(projectId);
+  });
+
+  it("is a no-op when config.json already has a project_id", () => {
+    const repo = setupTempRepo();
+    const configDir = join(repo, ".ninthwave");
+    mkdirSync(configDir, { recursive: true });
+    const sharedWritten = { project_id: SAMPLE_UUID_A, custom_key: "hello" };
+    writeFileSync(
+      join(configDir, "config.json"),
+      JSON.stringify(sharedWritten),
+    );
+
+    const projectId = ensureProjectId(repo);
+
+    expect(projectId).toBe(SAMPLE_UUID_A);
+    expect(readFileSync(join(configDir, "config.json"), "utf-8")).toBe(
+      JSON.stringify(sharedWritten),
+    );
+  });
+
+  it("never writes broker_secret into config.local.json", () => {
+    const repo = setupTempRepo();
+    const configDir = join(repo, ".ninthwave");
+    mkdirSync(configDir, { recursive: true });
+
+    const projectId = ensureProjectId(repo);
+
+    expect(projectId).toMatch(UUID_V4_PATTERN);
+    expect(existsSync(join(configDir, "config.local.json"))).toBe(false);
+    const sharedOnDisk = JSON.parse(
+      readFileSync(join(configDir, "config.json"), "utf-8"),
+    );
+    expect(sharedOnDisk.project_id).toBe(projectId);
+    expect(sharedOnDisk).not.toHaveProperty("broker_secret");
   });
 });
 

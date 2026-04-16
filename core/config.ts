@@ -121,6 +121,29 @@ export function generateProjectIdentity(): { project_id: string; broker_secret: 
 }
 
 /**
+ * Ensure the project has a committed `project_id`. Missing values are
+ * generated into `.ninthwave/config.json` only; this narrower helper never
+ * provisions or mutates `broker_secret`.
+ *
+ * A `project_id` already present in either config file counts as satisfying
+ * the requirement so local fork overrides do not get copied into the shared
+ * config file.
+ */
+export function ensureProjectId(projectRoot: string): string {
+  const shared = loadConfig(projectRoot);
+  const local = loadLocalConfig(projectRoot);
+  const effectiveProjectId = local.project_id ?? shared.project_id;
+
+  if (effectiveProjectId !== undefined) {
+    return effectiveProjectId;
+  }
+
+  const projectId = crypto.randomUUID();
+  saveConfig(projectRoot, { project_id: projectId });
+  return projectId;
+}
+
+/**
  * Ensure the project has a `project_id` and a `broker_secret`. Missing
  * fields are generated with `generateProjectIdentity` and written to the
  * appropriate file: `project_id` (public) lands in committed
