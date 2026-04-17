@@ -547,9 +547,11 @@ export function detectAll(
  * references; our loader uses `stripJsonComments` before `JSON.parse`.
  */
 const CONFIG_JSON_HEADER = `// Ninthwave project config (JSONC).
-// broker_secret lives in .ninthwave/config.local.json (gitignored). To
-// share a broker namespace, pass the secret to teammates out of band and
-// have them paste it into their own config.local.json.
+// broker_secret lives in .ninthwave/config.local.json (gitignored). Share
+// the secret with teammates out of band (password manager, secure chat);
+// they can save it via \`nw crew join <secret>\` or
+// \`nw init --broker-secret <secret>\`. Run \`nw crew\` to inspect or
+// rotate the project's crew connection.
 `;
 
 /**

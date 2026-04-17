@@ -104,19 +104,19 @@ export const COMMAND_REGISTRY: ReadonlyArray<CommandEntry> = [
     name: "init",
     usage:
       "init [--global] [--yes] [--broker-secret <value>] [--skip-broker]",
-    description: "Auto-detect and initialize ninthwave",
+    description: "Auto-detect and initialize ninthwave (prompts for broker secret)",
     group: "workflow",
     needsRoot: false,
     needsWork: false,
     handler: async (ctx) => { await cmdInit(ctx.args); },
     flags: {
       "--global": "Install global shell alias and config",
-      "--yes": "Skip confirmation prompts",
-      "-y": "Skip confirmation prompts",
+      "--yes": "Skip confirmation prompts (auto-generates a broker secret)",
+      "-y": "Skip confirmation prompts (auto-generates a broker secret)",
       "--broker-secret":
-        "Use the given 32-byte base64 secret (team onboarding). Mutually exclusive with --skip-broker.",
+        "Save the given 32-byte base64 secret as this project's broker_secret (team onboarding). Mutually exclusive with --skip-broker.",
       "--skip-broker":
-        "Skip broker secret provisioning (local-only setup). Mutually exclusive with --broker-secret.",
+        "Skip broker secret provisioning and stay local-only. Mutually exclusive with --broker-secret.",
     },
     examples: [
       "nw init",
@@ -408,7 +408,7 @@ export const COMMAND_REGISTRY: ReadonlyArray<CommandEntry> = [
   {
     name: "crew",
     usage: "crew [status|create|join <secret>|disconnect]",
-    description: "Manage the project's crew connection (broker secret, URL)",
+    description: "Manage the project's crew connection (broker_secret and crew_url)",
     group: "advanced",
     needsRoot: true,
     needsWork: false,
