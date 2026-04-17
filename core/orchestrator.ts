@@ -1512,23 +1512,30 @@ export class Orchestrator {
         : "ci-failed: CI checks failed";
       this.emitCiFailureEvent(item);
 
-      // Fast-path: parked items have no live workspace, so skip the
-      // notification/ack-timeout cycle and respawn a CI-fix worker directly.
-      if (wasParked) {
-        return this.respawnCiFixWorker(item, "parked-ci-failure");
-      }
-
+      // Merge conflicts take priority over the parked fast-path. A parked PR
+      // whose base branch advanced (e.g., after a stacked dependency merged)
+      // still needs a rebase nudge before CI can turn green -- skipping straight
+      // to a CI-fix respawn would leave the conflict unresolved. planRebaseConflictAction
+      // emits a daemon-rebase action, which executeDaemonRebase handles safely
+      // for parked items (daemon-side rebase first, then rebaser worker fallback).
       if (isMergeConflict) {
         actions.push(...this.planRebaseConflictAction(
           item,
           now,
           "[ORCHESTRATOR] Rebase Request: CI failed due to merge conflicts with main. Please rebase onto latest main.",
         ));
-      } else {
-        actions.push(this.emitCiFailureNotification(
-          item, now, "[ORCHESTRATOR] CI Fix Request: CI failed -- please investigate and fix.",
-        ));
+        return actions;
       }
+
+      // Fast-path: parked items have no live workspace, so skip the
+      // notification/ack-timeout cycle and respawn a CI-fix worker directly.
+      if (wasParked) {
+        return this.respawnCiFixWorker(item, "parked-ci-failure");
+      }
+
+      actions.push(this.emitCiFailureNotification(
+        item, now, "[ORCHESTRATOR] CI Fix Request: CI failed -- please investigate and fix.",
+      ));
       return actions;
     }
 

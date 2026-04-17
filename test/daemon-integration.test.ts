@@ -1551,3 +1551,117 @@ describe("Daemon lifecycle: launch failure handling", () => {
     expect(orch.getItem("LF-3")!.failureReason).toContain("repo not found");
   });
 });
+
+// -- 10. Parked review-pending: rebase nudges vs CI-fix fast-path -----
+
+describe("Daemon lifecycle: parked review-pending CI failures", () => {
+  // Regression guard (H-ORCH-12): a parked PR whose base branch advanced
+  // after a stacked dependency merged may come back with isMergeable=false.
+  // The review-pending handler used to hit the parked fast-path first and
+  // respawn a CI-fix worker, leaving the merge conflict unresolved. Merge
+  // conflicts must now dispatch a rebase nudge regardless of parked status.
+  it("parked PR with merge conflict dispatches daemon-rebase instead of CI-fix respawn", () => {
+    const orch = new Orchestrator({ mergeStrategy: "manual", maxCiRetries: 5 });
+    orch.addItem(makeWorkItem("PARK-REBASE"));
+    orch.hydrateState("PARK-REBASE", "review-pending");
+    const item = orch.getItem("PARK-REBASE")!;
+    item.prNumber = 77;
+    item.reviewCompleted = true;
+    item.sessionParked = true;
+
+    const actions = orch.processTransitions(
+      snapshotWith([{
+        id: "PARK-REBASE",
+        ciStatus: "fail",
+        prState: "open",
+        isMergeable: false,
+      }]),
+    );
+
+    // Rebase nudge is dispatched for the conflict.
+    const rebaseAction = actions.find((a) => a.type === "daemon-rebase" && a.itemId === "PARK-REBASE");
+    expect(rebaseAction).toBeDefined();
+    expect((rebaseAction as Extract<Action, { type: "daemon-rebase" }>).message).toContain("merge conflicts");
+
+    // No CI-fix respawn: retry action is NOT emitted, state stays ci-failed,
+    // sessionParked is cleared (by transition) but we do not jump back to ready.
+    expect(actions.some((a) => a.type === "retry" && a.itemId === "PARK-REBASE")).toBe(false);
+    expect(item.state).toBe("ci-failed");
+    expect(item.rebaseRequested).toBe(true);
+    expect(item.failureReason).toContain("merge conflicts with main");
+  });
+
+  it("parked PR without merge conflict still takes CI-fix respawn fast-path", () => {
+    const orch = new Orchestrator({ mergeStrategy: "manual", maxCiRetries: 5 });
+    orch.addItem(makeWorkItem("PARK-CIFIX"));
+    orch.hydrateState("PARK-CIFIX", "review-pending");
+    const item = orch.getItem("PARK-CIFIX")!;
+    item.prNumber = 78;
+    item.reviewCompleted = true;
+    item.sessionParked = true;
+
+    const actions = orch.processTransitions(
+      snapshotWith([{
+        id: "PARK-CIFIX",
+        ciStatus: "fail",
+        prState: "open",
+        isMergeable: true,
+      }]),
+    );
+
+    // Fast-path: CI-fix retry is scheduled, no rebase action is emitted.
+    expect(actions.some((a) => a.type === "retry" && a.itemId === "PARK-CIFIX")).toBe(true);
+    expect(actions.some((a) => a.type === "daemon-rebase" && a.itemId === "PARK-CIFIX")).toBe(false);
+    expect(item.needsCiFix).toBe(true);
+    // respawnCiFixWorker transitions the item to `ready`; the same cycle's
+    // queue drain may then advance it to `launching`. Either is the fast-path.
+    expect(item.state === "ready" || item.state === "launching").toBe(true);
+    expect(item.rebaseRequested).toBe(false);
+  });
+
+  it("stacked parked PR: dependency merge retargets base, conflict triggers rebase nudge", () => {
+    // End-to-end scenario from the friction log: stacked PR is parked after
+    // exhausting CI retries while its dependency is still in flight. The
+    // dependency then merges and GitHub retargets the stacked PR onto main,
+    // which surfaces a merge conflict on the next poll. Orchestrator must
+    // dispatch a rebase nudge even though sessionParked is still true.
+    const orch = new Orchestrator({ mergeStrategy: "manual", maxCiRetries: 5 });
+    orch.addItem(makeWorkItem("STACK-PARK"));
+    orch.hydrateState("STACK-PARK", "review-pending");
+    const item = orch.getItem("STACK-PARK")!;
+    item.prNumber = 401;
+    item.reviewCompleted = true;
+    item.sessionParked = true;
+    item.baseBranch = "ninthwave/STACK-DEP"; // stacked on a dependency
+
+    // First poll: stacked dep still in flight, base branch unchanged, CI green.
+    // No feedback, parked stays parked.
+    const greenActions = orch.processTransitions(
+      snapshotWith([{
+        id: "STACK-PARK",
+        ciStatus: "pass",
+        prState: "open",
+        isMergeable: true,
+      }]),
+    );
+    expect(greenActions.some((a) => a.type === "daemon-rebase")).toBe(false);
+    expect(item.sessionParked).toBe(true);
+
+    // Dependency merges; GitHub retargets PR onto main; next poll observes
+    // isMergeable=false and CI fail. Rebase nudge must fire.
+    const rebaseActions = orch.processTransitions(
+      snapshotWith([{
+        id: "STACK-PARK",
+        ciStatus: "fail",
+        prState: "open",
+        isMergeable: false,
+      }]),
+    );
+
+    const rebaseAction = rebaseActions.find((a) => a.type === "daemon-rebase" && a.itemId === "STACK-PARK");
+    expect(rebaseAction).toBeDefined();
+    expect(rebaseActions.some((a) => a.type === "retry")).toBe(false);
+    expect(item.state).toBe("ci-failed");
+    expect(item.rebaseRequested).toBe(true);
+  });
+});
