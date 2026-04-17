@@ -197,19 +197,23 @@ Format: `[CHML]-<feature_code>-<seq>`
 - Feature code from Phase 1
 - Incrementing sequence
 
-**Reserved IDs -- check merged PR history BEFORE assigning numbers.** Work item IDs become git branch names (`ninthwave/<ID>`). If you mint an ID that a prior, now-merged PR already used, `nw` will refuse to launch the item because the lineage tokens don't match, and the entire dependency chain behind it stalls. Re-decomposing a feature after a previous pass has shipped some of its items is the common trigger -- the open `.ninthwave/work/` queue looks empty, but merged history still owns those IDs.
+**Reserved IDs -- check git history of `.ninthwave/work/` BEFORE assigning numbers.** Work item IDs become git branch names (`ninthwave/<ID>`). If you mint an ID that any prior work item already used, `nw` will refuse to launch the new item because the lineage tokens don't match the existing branch, and the entire dependency chain behind it stalls. Re-decomposing a feature after a previous pass has shipped or abandoned items is the common trigger -- the open `.ninthwave/work/` queue looks empty, but git history still records every ID ever used.
+
+Use git history of the work dir (not `gh pr list`): work item filenames follow the convention `{priority_num}-{domain_slug}--{ID}.md`, so the ID is always present in the filename. PR titles are free prose and drift. Git history also catches decomposed-then-abandoned items that never got a PR.
 
 Before assigning any new sequence numbers:
 
-1. For each feature code you're about to use, list reserved IDs:
+1. List every ID ever added, modified, renamed, or deleted under `.ninthwave/work/` across all branches:
    ```bash
-   gh pr list --state all --limit 200 --search "in:title <feature_code>" \
-     --json number,title,state,headRefName
+   git log --all --name-only --pretty=format: -- .ninthwave/work/ \
+     | grep -oE '[CHML]-[A-Z]+-[0-9]+\.md' \
+     | sed 's/\.md$//' \
+     | sort -u
    ```
-   Extract every `[CHML]-<feature_code>-<N>` mentioned in titles or `ninthwave/*` branch names. Include merged, closed, AND open PRs -- all three reserve the branch name.
-2. Union that set with the IDs already in `.ninthwave/work/` (existing queue).
-3. Assign new numbers from the first integer strictly greater than the maximum in the union. Do not attempt to reclaim gaps -- the branch names for abandoned IDs may still exist on origin or in local clones, and reusing a gap is as risky as reusing the tail.
-4. If `gh` is not authenticated or unreachable, STOP and ask the user to authenticate before continuing. Do not fall back to the local-only check -- the silent fallback is exactly what produces ID collisions.
+   Filter to the feature code you're assigning. No `--diff-filter=A` -- renames only show the new name with `A`, so filtering that way would miss half of a `git mv` pair.
+2. Union that set with the IDs already in `.ninthwave/work/` (current queue).
+3. Assign new numbers from the first integer strictly greater than the maximum in the union. Do not reclaim gaps -- the branch names for abandoned IDs may still exist on origin or in local clones, and reusing a gap is as risky as reusing the tail.
+4. If the repo is a shallow clone (`git rev-parse --is-shallow-repository` returns `true`), STOP and run `git fetch --unshallow` first. The check is only sound against full history.
 
 ---
 
@@ -301,4 +305,4 @@ Explicitly remind the user that the files you just wrote are now the live queue.
 - **File conflict awareness:** Items in the same batch should not modify the same files
 - **No VERSION/CHANGELOG:** work items should not mention modifying these files
 - **Portable references:** All paths in work items (Source, description, Key files) must be repo-relative. Workers clone from remote into isolated worktrees -- absolute paths and external files (home directories, tool config directories) are inaccessible. Referencing plan documentation for context is encouraged, but referenced files must be committed to the repo. If the source spec is external, internalize it during INTAKE.
-- **Idempotent:** Before writing any work item, verify its ID is unused in BOTH `.ninthwave/work/` (open queue) AND the merged/closed/open PR history on origin (`gh pr list --state all --search "in:title <feature_code>"`). Reusing an ID that a merged PR already owns will stall launch with a `launch-blocked` lineage-mismatch error -- see the "Reserved IDs" step in Phase 4.
+- **Idempotent:** Before writing any work item, verify its ID is unused in BOTH `.ninthwave/work/` (current queue) AND the git history of that directory (`git log --all --name-only -- .ninthwave/work/`). Reusing an ID that any prior work item already owned will stall launch with a `launch-blocked` lineage-mismatch error -- see the "Reserved IDs" step in Phase 4.
