@@ -423,6 +423,15 @@ Notable removals: `core/rate-limit-backoff.ts` -- reactive rate limit backoff, r
 
 The broker coordinates work-item scheduling across multiple `nw` daemons in a crew. The protocol surface (sync, claim, complete, heartbeat, schedule-claim) is defined once in shared modules and consumed by two runtimes.
 
+### Connection Flow
+
+Crew membership is gated by a shared `broker_secret` (32 bytes, base64). The secret is opt-in, and the daemon only connects to a broker when one is configured.
+
+1. **Init-time provisioning (`nw init`).** The init flow prompts for how the broker secret should be provisioned: `g` generate a fresh secret, `e` enter an existing team secret, or `s` skip (local-only). `--yes` and non-TTY runs default to `generate`. Scripts can force a decision with `nw init --broker-secret <value>` or `nw init --skip-broker`. An existing secret in the shared or local config is never rotated -- re-running `nw init` preserves it.
+2. **Secret location.** `project_id` lives in committed `.ninthwave/config.json`; `broker_secret` lives in gitignored `.ninthwave/config.local.json` so it never enters a PR. Teammates receive the secret out of band (password manager, secure chat) and paste it in via `nw crew join <secret>`.
+3. **Auto-connect at startup.** When `broker_secret` is present in project config, `nw` auto-connects to the crew. `--local` opts out for one session; `--connect` forces auto-connect even when no secret is configured (for scripted onboarding). Without a secret and without `--connect`, the daemon runs in local-only mode.
+4. **Ongoing management (`nw crew`).** `nw crew` (or `nw crew status`) reports whether a secret and `crew_url` are configured. `nw crew create` generates and saves a new secret (confirming before overwrite). `nw crew join <secret>` validates and saves a teammate-provided secret. `nw crew disconnect` removes the secret from `.ninthwave/config.local.json`.
+
 ### Broker-Core + Runtime Split
 
 | Module | Role |
