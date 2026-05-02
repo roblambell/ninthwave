@@ -12,7 +12,7 @@ import { pickRotatedEnv, type RotationDeps } from "./rotation.ts";
 // ── Types ─────────────────────────────────────────────────────────────────────
 
 /** Supported AI tool identifiers. */
-export type AiToolId = "claude" | "opencode" | "codex" | "copilot";
+export type AiToolId = "claude" | "opencode" | "codex" | "copilot" | "kimi";
 
 /**
  * Injectable dependencies for launch command builders.
@@ -218,6 +218,7 @@ export function agentTargetFilename(source: string, target: Pick<AgentTarget, "s
   const baseName = source.replace(/\.md$/, "");
   if (target.suffix === ".agent.md") return `ninthwave-${baseName}.agent.md`;
   if (target.suffix === ".toml") return `ninthwave-${baseName}.toml`;
+  if (target.suffix === ".yaml") return `ninthwave-${baseName}.yaml`;
   return source;
 }
 
@@ -228,18 +229,42 @@ export function renderAgentArtifact(
   target: Pick<AgentTarget, "suffix">,
 ): RenderedAgentArtifact {
   const filename = agentTargetFilename(source, target);
-  if (target.suffix !== ".toml") {
-    return { filename, content: sourceContent };
+
+  if (target.suffix === ".toml") {
+    const parsed = parseAgentSource(source, sourceContent);
+    const lines = [
+      `name = ${JSON.stringify(parsed.name)}`,
+      `description = ${JSON.stringify(parsed.description)}`,
+      `developer_instructions = ${JSON.stringify(parsed.developerInstructions)}`,
+    ];
+    return { filename, content: `${lines.join("\n")}\n` };
   }
 
-  const parsed = parseAgentSource(source, sourceContent);
-  const lines = [
-    `name = ${JSON.stringify(parsed.name)}`,
-    `description = ${JSON.stringify(parsed.description)}`,
-    `developer_instructions = ${JSON.stringify(parsed.developerInstructions)}`,
-  ];
+  if (target.suffix === ".yaml") {
+    const parsed = parseAgentSource(source, sourceContent);
+    // Kimi loads agents via `--agent-file <path.yaml>`. Each agent extends
+    // kimi's built-in `default` so workers inherit the standard tool set,
+    // and our persona instructions ride along as system_prompt_args.ROLE_ADDITIONAL
+    // (interpolated into the default system prompt's ${ROLE_ADDITIONAL} slot).
+    // exclude_tools turns off subagents and plan-mode -- workers run a single
+    // agent against a single work item, no nested handoffs.
+    const lines = [
+      `version: 1`,
+      `agent:`,
+      `  extend: default`,
+      `  name: ${JSON.stringify(parsed.name)}`,
+      `  when_to_use: ${JSON.stringify(parsed.description)}`,
+      `  system_prompt_args:`,
+      `    ROLE_ADDITIONAL: ${JSON.stringify(parsed.developerInstructions)}`,
+      `  exclude_tools:`,
+      `    - "kimi_cli.tools.agent:Agent"`,
+      `    - "kimi_cli.tools.plan.enter:EnterPlanMode"`,
+      `    - "kimi_cli.tools.plan:ExitPlanMode"`,
+    ];
+    return { filename, content: `${lines.join("\n")}\n` };
+  }
 
-  return { filename, content: `${lines.join("\n")}\n` };
+  return { filename, content: sourceContent };
 }
 
 /** Extract the runtime agent identifier from a generated target filename. */
@@ -290,10 +315,10 @@ export function readSeededAgentInstructions(
 
   // Try seeded artifact in the worktree first.
   let content: string | null = null;
-  let usedToml = false;
+  let usedSuffix: string | null = null;
   try {
     content = deps.readFileSync(artifactPath, "utf-8");
-    usedToml = profile.suffix === ".toml";
+    usedSuffix = profile.suffix;
   } catch {
     // Fall back to canonical agents/<source>.md in the project root.
     if (projectRoot) {
@@ -310,11 +335,23 @@ export function readSeededAgentInstructions(
     );
   }
 
-  if (usedToml) {
+  if (usedSuffix === ".toml") {
     // Extract developer_instructions = "..." from the rendered TOML.
     const match = content.match(/^developer_instructions\s*=\s*(".*")\s*$/m);
     if (!match?.[1]) {
       throw new Error(`Agent artifact at ${artifactPath} missing developer_instructions field`);
+    }
+    const instructions = JSON.parse(match[1]) as string;
+    return instructions.trim();
+  }
+
+  if (usedSuffix === ".yaml") {
+    // Extract `ROLE_ADDITIONAL: "<json-encoded>"` from the rendered kimi YAML.
+    // We render this field as a JSON-quoted string (JSON is valid YAML), so
+    // the same JSON.parse round-trips it back to the original persona body.
+    const match = content.match(/^\s*ROLE_ADDITIONAL:\s*(".*")\s*$/m);
+    if (!match?.[1]) {
+      throw new Error(`Agent artifact at ${artifactPath} missing ROLE_ADDITIONAL field`);
     }
     const instructions = JSON.parse(match[1]) as string;
     return instructions.trim();
@@ -576,6 +613,28 @@ Your session lifecycle is controlled by the orchestrator. Stay alive until
 explicitly told to stop.
 `;
 
+/**
+ * Resolve the relative path passed to `kimi --agent-file`. Workers cd into the
+ * worktree before launch, so a path relative to the worktree root is safe.
+ */
+function kimiAgentFilePath(agentName: string): string {
+  const source = STANDARD_AGENT_SOURCES_BY_NAME[agentName];
+  const profile = getKimiProfile();
+  if (!source) {
+    return `${profile.targetDir}/${agentName}.yaml`;
+  }
+  const filename = agentTargetFilename(source, profile);
+  return `${profile.targetDir}/${filename}`;
+}
+
+/**
+ * Lookup-by-suffix instead of by id to avoid a chicken-and-egg with the
+ * AI_TOOL_PROFILES initializer. Always returns a kimi-shaped target descriptor.
+ */
+function getKimiProfile(): { targetDir: string; suffix: string } {
+  return { targetDir: ".kimi/agents", suffix: ".yaml" };
+}
+
 // ── Profiles ──────────────────────────────────────────────────────────────────
 
 /** The canonical list of AI tool profiles -- one entry per supported tool. */
@@ -693,6 +752,49 @@ export const AI_TOOL_PROFILES: AiToolProfile[] = [
         ` && rm -f '${promptDataFile}'` +
         ` && exec codex exec --dangerously-bypass-approvals-and-sandbox "$PROMPT"`;
       return { cmd: applyEnvPrefix(cmd, opts, "codex"), initialPrompt: "" };
+    },
+  },
+  {
+    id: "kimi",
+    displayName: "Kimi Code",
+    command: "kimi",
+    description: "Moonshot AI's coding agent",
+    installCmd: "uv tool install kimi-cli",
+    targetDir: ".kimi/agents",
+    suffix: ".yaml",
+    projectIndicators: [".kimi", ".kimi/AGENTS.md"],
+    processNames: ["kimi"],
+    buildLaunchCmd(opts, deps): LaunchCmdResult {
+      const overrideCmd = buildLaunchOverrideCmd("kimi", "launch", opts);
+      if (overrideCmd) return { cmd: overrideCmd, initialPrompt: "" };
+
+      const promptContent = buildPromptDataContent(opts, deps) + NON_CLAUDE_IDLE_CONTRACT;
+      const promptDataFile = writePromptDataFile(opts, deps, promptContent);
+      const agentFilePath = kimiAgentFilePath(opts.agentName);
+      // --afk auto-approves all tool calls AND auto-dismisses AskUserQuestion;
+      // -p prefills the user prompt without forcing print mode (the shell UI
+      // still launches so the worker can keep handling orchestrator messages).
+      const cmd =
+        `PROMPT=$(cat '${promptDataFile}')` +
+        ` && rm -f '${promptDataFile}'` +
+        ` && exec kimi --work-dir '${opts.worktreePath}' --afk` +
+        ` --agent-file '${agentFilePath}' -p "$PROMPT"`;
+      return { cmd: applyEnvPrefix(cmd, opts, "kimi"), initialPrompt: "" };
+    },
+    buildHeadlessCmd(opts, deps): LaunchCmdResult {
+      const overrideCmd = buildLaunchOverrideCmd("kimi", "headless", opts);
+      if (overrideCmd) return { cmd: overrideCmd, initialPrompt: "" };
+
+      const promptContent = buildPromptDataContent(opts, deps) + NON_CLAUDE_IDLE_CONTRACT;
+      const promptDataFile = writePromptDataFile(opts, deps, promptContent);
+      const agentFilePath = kimiAgentFilePath(opts.agentName);
+      // --quiet implies --print + text + final-message-only and auto-enables --afk.
+      const cmd =
+        `PROMPT=$(cat '${promptDataFile}')` +
+        ` && rm -f '${promptDataFile}'` +
+        ` && exec kimi --quiet --work-dir '${opts.worktreePath}'` +
+        ` --agent-file '${agentFilePath}' -p "$PROMPT"`;
+      return { cmd: applyEnvPrefix(cmd, opts, "kimi"), initialPrompt: "" };
     },
   },
   {

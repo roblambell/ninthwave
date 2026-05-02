@@ -42,6 +42,22 @@ const IMPLEMENTER_TOML_SOURCE =
     "designed for ninthwave orchestration (`nw`) and stop.",
   )}\n`;
 
+const IMPLEMENTER_KIMI_YAML_SOURCE =
+  `version: 1\n` +
+  `agent:\n` +
+  `  extend: default\n` +
+  `  name: "ninthwave-implementer"\n` +
+  `  when_to_use: "ninthwave orchestration agent"\n` +
+  `  system_prompt_args:\n` +
+  `    ROLE_ADDITIONAL: ${JSON.stringify(
+    "If no ninthwave work item context is available to you (no item ID,\n" +
+    "no item specification, no work item details), you were not launched\n" +
+    "by the ninthwave orchestrator. Inform the user this agent is\n" +
+    "designed for ninthwave orchestration (`nw`) and stop.",
+  )}\n` +
+  `  exclude_tools:\n` +
+  `    - "kimi_cli.tools.agent:Agent"\n`;
+
 // ── Stub helpers ──────────────────────────────────────────────────────────────
 
 function stubDeps(promptContent = "PROMPT_CONTENT"): LaunchDeps & {
@@ -53,6 +69,7 @@ function stubDeps(promptContent = "PROMPT_CONTENT"): LaunchDeps & {
     readFileSync: vi.fn((path: string, _enc: BufferEncoding) => {
       // Return the appropriate agent artifact based on the file path
       if (path.includes(".codex/agents/") && path.endsWith(".toml")) return IMPLEMENTER_TOML_SOURCE;
+      if (path.includes(".kimi/agents/") && path.endsWith(".yaml")) return IMPLEMENTER_KIMI_YAML_SOURCE;
       if (path.includes("/agents/") && path.endsWith(".md")) return IMPLEMENTER_AGENT_SOURCE;
       return promptContent;
     }) as any,
@@ -106,6 +123,13 @@ describe("getToolProfile", () => {
     expect(profile.suffix).toBe(".toml");
   });
 
+  it("returns the kimi profile for 'kimi'", () => {
+    const profile = getToolProfile("kimi");
+    expect(profile.id).toBe("kimi");
+    expect(profile.targetDir).toBe(".kimi/agents");
+    expect(profile.suffix).toBe(".yaml");
+  });
+
   it("throws for an unknown tool ID", () => {
     expect(() => getToolProfile("unknown")).toThrow("Unknown AI tool: unknown");
   });
@@ -118,8 +142,8 @@ describe("getToolProfile", () => {
 // ── allToolIds ────────────────────────────────────────────────────────────────
 
 describe("allToolIds", () => {
-  it("returns exactly [claude, opencode, codex, copilot] in profile order", () => {
-    expect(allToolIds()).toEqual(["claude", "opencode", "codex", "copilot"]);
+  it("returns the registered tool ids in profile order", () => {
+    expect(allToolIds()).toEqual(["claude", "opencode", "codex", "kimi", "copilot"]);
   });
 });
 
@@ -142,6 +166,10 @@ describe("isAiToolId", () => {
     expect(isAiToolId("codex")).toBe(true);
   });
 
+  it("returns true for 'kimi'", () => {
+    expect(isAiToolId("kimi")).toBe(true);
+  });
+
   it("returns false for 'cursor'", () => {
     expect(isAiToolId("cursor")).toBe(false);
   });
@@ -160,7 +188,7 @@ describe("isAiToolId", () => {
 describe("agentTargetDirs", () => {
   it("returns one target dir entry per tool, in profile order", () => {
     const dirs = agentTargetDirs();
-    expect(dirs).toHaveLength(4);
+    expect(dirs).toHaveLength(5);
   });
 
   it("has the claude entry first with correct dir and suffix", () => {
@@ -178,9 +206,14 @@ describe("agentTargetDirs", () => {
     expect(dirs[2]).toEqual({ dir: ".codex/agents", suffix: ".toml" });
   });
 
-  it("has the copilot entry fourth with correct dir and suffix", () => {
+  it("has the kimi entry fourth with correct dir and suffix", () => {
     const dirs = agentTargetDirs();
-    expect(dirs[3]).toEqual({ dir: ".github/agents", suffix: ".agent.md" });
+    expect(dirs[3]).toEqual({ dir: ".kimi/agents", suffix: ".yaml" });
+  });
+
+  it("has the copilot entry last with correct dir and suffix", () => {
+    const dirs = agentTargetDirs();
+    expect(dirs[4]).toEqual({ dir: ".github/agents", suffix: ".agent.md" });
   });
 
   it("matches the full expected structure", () => {
@@ -188,6 +221,7 @@ describe("agentTargetDirs", () => {
       { dir: ".claude/agents", suffix: ".md" },
       { dir: ".opencode/agents", suffix: ".md" },
       { dir: ".codex/agents", suffix: ".toml" },
+      { dir: ".kimi/agents", suffix: ".yaml" },
       { dir: ".github/agents", suffix: ".agent.md" },
     ]);
   });
@@ -201,18 +235,19 @@ describe("agentFileTargets", () => {
     expect(entries).toHaveLength(1);
   });
 
-  it("maps implementer.md to correct source and 4 targets", () => {
+  it("maps implementer.md to correct source and one target per tool", () => {
     const entries = agentFileTargets(["implementer.md"]);
     expect(entries[0]!.source).toBe("implementer.md");
-    expect(entries[0]!.targets).toHaveLength(4);
+    expect(entries[0]!.targets).toHaveLength(5);
   });
 
-  it("maps implementer.md targets correctly for all 4 tools", () => {
+  it("maps implementer.md targets correctly for all tools", () => {
     const entries = agentFileTargets(["implementer.md"]);
     expect(entries[0]!.targets).toEqual([
       { dir: ".claude/agents", suffix: ".md" },
       { dir: ".opencode/agents", suffix: ".md" },
       { dir: ".codex/agents", suffix: ".toml" },
+      { dir: ".kimi/agents", suffix: ".yaml" },
       { dir: ".github/agents", suffix: ".agent.md" },
     ]);
   });
@@ -248,6 +283,12 @@ describe("tool-owned agent artifact helpers", () => {
     );
   });
 
+  it("builds ninthwave-prefixed Kimi filenames from source files", () => {
+    expect(agentTargetFilename("implementer.md", { suffix: ".yaml" })).toBe(
+      "ninthwave-implementer.yaml",
+    );
+  });
+
   it("keeps Claude/OpenCode filenames equal to the source filename", () => {
     expect(agentTargetFilename("implementer.md", { suffix: ".md" })).toBe("implementer.md");
   });
@@ -262,6 +303,22 @@ describe("tool-owned agent artifact helpers", () => {
     );
     expect(artifact.content).toContain('developer_instructions = ');
     expect(artifact.content).toContain("If no ninthwave work item context is available to you");
+  });
+
+  it("renders Kimi artifacts as YAML extending default with ROLE_ADDITIONAL set", () => {
+    const artifact = renderAgentArtifact("implementer.md", IMPLEMENTER_AGENT_SOURCE, { suffix: ".yaml" });
+
+    expect(artifact.filename).toBe("ninthwave-implementer.yaml");
+    expect(artifact.content).toContain("version: 1");
+    expect(artifact.content).toContain("extend: default");
+    expect(artifact.content).toContain('name: "ninthwave-implementer"');
+    expect(artifact.content).toContain("ROLE_ADDITIONAL:");
+    expect(artifact.content).toContain("ninthwave orchestrator");
+    expect(artifact.content).toContain('exclude_tools:');
+    // Workers must not spawn nested kimi subagents and must not enter plan mode.
+    expect(artifact.content).toContain('"kimi_cli.tools.agent:Agent"');
+    expect(artifact.content).toContain('"kimi_cli.tools.plan.enter:EnterPlanMode"');
+    expect(artifact.content).toContain('"kimi_cli.tools.plan:ExitPlanMode"');
   });
 
   it("keeps non-Codex artifact contents unchanged", () => {
@@ -624,6 +681,138 @@ describe("codex profile buildHeadlessCmd", () => {
   });
 });
 
+// ── buildLaunchCmd: kimi ──────────────────────────────────────────────────────
+
+describe("kimi profile buildLaunchCmd", () => {
+  it("returns an inline shell command (no .sh script file)", () => {
+    const profile = getToolProfile("kimi");
+    const result = profile.buildLaunchCmd(stubOpts({ id: "H-X-KIMI" }), stubDeps());
+    expect(result.cmd).not.toMatch(/\.sh$/);
+    expect(result.cmd).toContain("exec kimi");
+  });
+
+  it("uses --afk for interactive auto-approval", () => {
+    const profile = getToolProfile("kimi");
+    const result = profile.buildLaunchCmd(stubOpts(), stubDeps());
+    expect(result.cmd).toContain("--afk");
+    // --quiet is for headless only -- interactive launch keeps the shell UI.
+    expect(result.cmd).not.toContain("--quiet");
+    expect(result.cmd).not.toContain("--print");
+  });
+
+  it("passes the worktree path via --work-dir", () => {
+    const profile = getToolProfile("kimi");
+    const result = profile.buildLaunchCmd(stubOpts({ worktreePath: "/some/wt" }), stubDeps());
+    expect(result.cmd).toContain("--work-dir '/some/wt'");
+  });
+
+  it("loads the agent via --agent-file pointing at the seeded YAML wrapper", () => {
+    const profile = getToolProfile("kimi");
+    const result = profile.buildLaunchCmd(
+      stubOpts({ agentName: "ninthwave-implementer" }),
+      stubDeps(),
+    );
+    expect(result.cmd).toContain("--agent-file '.kimi/agents/ninthwave-implementer.yaml'");
+  });
+
+  it("prefills the user prompt via -p (no interactive prompt)", () => {
+    const profile = getToolProfile("kimi");
+    const result = profile.buildLaunchCmd(stubOpts(), stubDeps());
+    expect(result.cmd).toContain('-p "$PROMPT"');
+  });
+
+  it("returns empty initialPrompt (prompt is embedded via -p)", () => {
+    const profile = getToolProfile("kimi");
+    const result = profile.buildLaunchCmd(stubOpts(), stubDeps());
+    expect(result.initialPrompt).toBe("");
+  });
+
+  it("writes the prompt data file with start instruction appended", () => {
+    const profile = getToolProfile("kimi");
+    const deps = stubDeps("MY PROMPT");
+    profile.buildLaunchCmd(stubOpts({ id: "H-X-KIMI-2" }), deps);
+
+    const calls = (deps.writeFileSync as ReturnType<typeof vi.fn>).mock.calls;
+    expect(calls[0]![0]).toMatch(/^\/fake\/state\/tmp\/nw-prompt-H-X-KIMI-2-\d+$/);
+    expect(calls[0]![1]).toContain("MY PROMPT");
+    expect(calls[0]![1]).toContain("Start implementing this work item now.");
+  });
+
+  it("writes exactly 1 file (prompt data only, no launcher script)", () => {
+    const profile = getToolProfile("kimi");
+    const deps = stubDeps();
+    profile.buildLaunchCmd(stubOpts(), deps);
+    expect((deps.writeFileSync as ReturnType<typeof vi.fn>).mock.calls).toHaveLength(1);
+  });
+
+  it("respects the shared launch override contract", () => {
+    const profile = getToolProfile("kimi");
+    const deps = stubDeps("KIMI PROMPT");
+    const result = profile.buildLaunchCmd(
+      stubOpts({
+        agentName: "ninthwave-reviewer",
+        launchOverride: {
+          command: "/bin/echo",
+          args: ["deterministic-launch"],
+        },
+      }),
+      deps,
+    );
+
+    expect(result.cmd).toContain("NINTHWAVE_LAUNCH_TOOL='kimi'");
+    expect(result.cmd).toContain("NINTHWAVE_LAUNCH_MODE='launch'");
+    expect(result.cmd).toContain("exec '/bin/echo' 'deterministic-launch'");
+    expect(result.cmd).not.toContain("exec kimi");
+    expect(deps.readFileSync).not.toHaveBeenCalled();
+    expect(deps.writeFileSync).not.toHaveBeenCalled();
+  });
+});
+
+// ── buildHeadlessCmd: kimi ────────────────────────────────────────────────────
+
+describe("kimi profile buildHeadlessCmd", () => {
+  it("uses --quiet (which implies --print + --afk + final-message-only)", () => {
+    const profile = getToolProfile("kimi");
+    const result = profile.buildHeadlessCmd(stubOpts(), stubDeps());
+    expect(result.cmd).toContain("exec kimi --quiet");
+    // --quiet is documented to subsume --print/--afk/--final-message-only,
+    // so passing them explicitly would be redundant noise.
+    expect(result.cmd).not.toContain("--print");
+    expect(result.cmd).not.toContain("--final-message-only");
+  });
+
+  it("passes --work-dir, --agent-file, and -p \"$PROMPT\"", () => {
+    const profile = getToolProfile("kimi");
+    const result = profile.buildHeadlessCmd(
+      stubOpts({
+        worktreePath: "/some/wt",
+        agentName: "ninthwave-implementer",
+      }),
+      stubDeps(),
+    );
+    expect(result.cmd).toContain("--work-dir '/some/wt'");
+    expect(result.cmd).toContain("--agent-file '.kimi/agents/ninthwave-implementer.yaml'");
+    expect(result.cmd).toContain('-p "$PROMPT"');
+  });
+
+  it("returns empty initialPrompt", () => {
+    const profile = getToolProfile("kimi");
+    const result = profile.buildHeadlessCmd(stubOpts(), stubDeps());
+    expect(result.initialPrompt).toBe("");
+  });
+
+  it("writes and references a temp prompt file", () => {
+    const profile = getToolProfile("kimi");
+    const deps = stubDeps("KIMI PROMPT");
+    profile.buildHeadlessCmd(stubOpts({ id: "H-X-KIMI-HL" }), deps);
+
+    const calls = (deps.writeFileSync as ReturnType<typeof vi.fn>).mock.calls;
+    expect(calls[0]![0]).toMatch(/^\/fake\/state\/tmp\/nw-prompt-H-X-KIMI-HL-\d+$/);
+    expect(calls[0]![1]).toContain("KIMI PROMPT");
+    expect(calls[0]![1]).toContain("Start implementing this work item now.");
+  });
+});
+
 // ── buildLaunchCmd: copilot ───────────────────────────────────────────────────
 
 describe("copilot profile buildLaunchCmd", () => {
@@ -857,8 +1046,8 @@ describe("resolveBuiltInLaunchOverride", () => {
 // ── AI_TOOL_PROFILES integrity ────────────────────────────────────────────────
 
 describe("AI_TOOL_PROFILES", () => {
-  it("has exactly 4 profiles", () => {
-    expect(AI_TOOL_PROFILES).toHaveLength(4);
+  it("has one profile per supported tool", () => {
+    expect(AI_TOOL_PROFILES).toHaveLength(5);
   });
 
   it("has unique IDs", () => {
@@ -917,6 +1106,19 @@ describe("readSeededAgentInstructions", () => {
     expect(deps.readFileSync).toHaveBeenCalledWith("/wt/.github/agents/ninthwave-implementer.agent.md", "utf-8");
   });
 
+  it("reads .yaml agent file for kimi and extracts ROLE_ADDITIONAL", () => {
+    const deps = { readFileSync: vi.fn(() => IMPLEMENTER_KIMI_YAML_SOURCE) as any };
+    const result = readSeededAgentInstructions("/wt", "kimi", "ninthwave-implementer", deps);
+    expect(result).toContain("ninthwave orchestrator");
+    expect(deps.readFileSync).toHaveBeenCalledWith("/wt/.kimi/agents/ninthwave-implementer.yaml", "utf-8");
+  });
+
+  it("throws when kimi YAML lacks ROLE_ADDITIONAL", () => {
+    const deps = { readFileSync: vi.fn(() => 'version: 1\nagent:\n  name: "test"\n') as any };
+    expect(() => readSeededAgentInstructions("/wt", "kimi", "ninthwave-implementer", deps))
+      .toThrow(/missing ROLE_ADDITIONAL/);
+  });
+
   it("throws on unknown agent name", () => {
     const deps = { readFileSync: vi.fn(() => "") as any };
     expect(() => readSeededAgentInstructions("/wt", "opencode", "unknown-agent", deps))
@@ -967,7 +1169,7 @@ describe("NON_CLAUDE_IDLE_CONTRACT", () => {
 describe("non-Claude launch payloads include idle contract", () => {
   const idleContractMarker = "CRITICAL: Do Not Exit After Implementation";
 
-  for (const toolId of ["opencode", "codex", "copilot"] as const) {
+  for (const toolId of ["opencode", "codex", "kimi", "copilot"] as const) {
     it(`${toolId} buildLaunchCmd prompt file contains the idle contract`, () => {
       const profile = getToolProfile(toolId);
       const deps = stubDeps("PROMPT_CONTENT");

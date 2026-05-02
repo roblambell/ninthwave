@@ -135,14 +135,15 @@ describe("detectInstalledAITools", () => {
     expect(result[0]!.command).toBe("codex");
   });
 
-  it("returns all four when all are installed", () => {
+  it("returns all five when all are installed", () => {
     const result = detectInstalledAITools(() => true);
 
-    expect(result).toHaveLength(4);
+    expect(result).toHaveLength(5);
     expect(result.map((t) => t.command)).toEqual([
       "claude",
       "opencode",
       "codex",
+      "kimi",
       "copilot",
     ]);
   });
@@ -156,13 +157,14 @@ describe("detectInstalledAITools", () => {
     expect(result.map((t) => t.command)).toEqual(["claude", "copilot"]);
   });
 
-  it("preserves preference order (claude > opencode > codex > copilot)", () => {
+  it("preserves preference order (claude > opencode > codex > kimi > copilot)", () => {
     const result = detectInstalledAITools(() => true);
 
     expect(result[0]!.command).toBe("claude");
     expect(result[1]!.command).toBe("opencode");
     expect(result[2]!.command).toBe("codex");
-    expect(result[3]!.command).toBe("copilot");
+    expect(result[3]!.command).toBe("kimi");
+    expect(result[4]!.command).toBe("copilot");
   });
 });
 

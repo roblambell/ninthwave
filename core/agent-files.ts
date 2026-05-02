@@ -109,7 +109,7 @@ export function seedAgentFiles(
     let files: string[];
     try {
       files = deps.readdirSync(sourceDir).filter((f: string) =>
-        f.endsWith(".md") || f.endsWith(".toml"),
+        f.endsWith(".md") || f.endsWith(".toml") || f.endsWith(".yaml"),
       );
     } catch { continue; }
 

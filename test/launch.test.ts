@@ -898,6 +898,7 @@ describe("launchSingleItem", () => {
         "/.claude/agents/",
         "/.codex/agents/",
         "/.opencode/agents/",
+        "/.kimi/agents/",
         "/.github/agents/",
         "",
       ].join("\n"),
@@ -2008,7 +2009,7 @@ describe("launchAiSession agentName", () => {
 
     expect(() =>
       launchAiSession("my-custom-tool", repo, "T-1", "Test", promptFile, mockMux)
-    ).toThrow("Unknown AI tool: my-custom-tool. Supported: claude, opencode, codex, copilot");
+    ).toThrow("Unknown AI tool: my-custom-tool. Supported: claude, opencode, codex, kimi, copilot");
     expect(mockMux.launchWorkspace).not.toHaveBeenCalled();
   });
 

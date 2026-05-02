@@ -420,6 +420,6 @@ describe("detectInstalledAITools", () => {
 
   it("returns all tools when all installed", () => {
     const result = detectInstalledAITools(() => true);
-    expect(result.map((tool) => tool.id)).toEqual(["claude", "opencode", "codex", "copilot"]);
+    expect(result.map((tool) => tool.id)).toEqual(["claude", "opencode", "codex", "kimi", "copilot"]);
   });
 });
