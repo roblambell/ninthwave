@@ -28,7 +28,7 @@ Ninthwave is the orchestration layer for parallel AI coding. Turn plans into sma
 - Launch dependent work early as stacked PRs so reviewers get clean diffs
 - Share or join a crew to spread work across teammates or multiple machines, using the hosted broker by default or a [self-hosted broker](docs/faq.md#what-is-the-self-hosted-broker) when you need full control
 - Use the native tools directly, while Ninthwave's TUI shows live queue and pipeline status
-- Stay multi-tool and no-lock-in: [Claude Code](https://docs.anthropic.com/en/docs/claude-code/overview), [OpenCode](https://opencode.ai), [Codex CLI](https://github.com/openai/codex), [Kimi Code](https://www.moonshot.cn), or [Copilot CLI](https://docs.github.com/en/copilot/how-tos/set-up/install-copilot-cli)
+- Stay multi-tool and no-lock-in: [Claude Code](https://docs.anthropic.com/en/docs/claude-code/overview), [OpenCode](https://opencode.ai), [Codex CLI](https://github.com/openai/codex), [Kimi Code CLI](https://github.com/MoonshotAI/Kimi-CLI), or [Copilot CLI](https://docs.github.com/en/copilot/how-tos/set-up/install-copilot-cli)
 
 ## How I use it
 

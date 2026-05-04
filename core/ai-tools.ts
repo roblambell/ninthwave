@@ -756,7 +756,7 @@ export const AI_TOOL_PROFILES: AiToolProfile[] = [
   },
   {
     id: "kimi",
-    displayName: "Kimi Code",
+    displayName: "Kimi Code CLI",
     command: "kimi",
     description: "Moonshot AI's coding agent",
     installCmd: "uv tool install kimi-cli",

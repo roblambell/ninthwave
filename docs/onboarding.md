@@ -151,7 +151,7 @@ flowchart TD
 
     B -->|Yes| C["Detect project AI tools<br/><code>detectProjectTools()</code>"]
     C --> D{Tools found?}
-    D -->|Yes| E["Use detected tools<br/>(e.g., Claude Code, OpenCode, Codex CLI, Kimi Code)"]
+    D -->|Yes| E["Use detected tools<br/>(e.g., Claude Code, OpenCode, Codex CLI, Kimi Code CLI)"]
     D -->|No| F["Fall back to ALL tool dirs"]
     E & F --> G["Checkbox: which agents?<br/>implementer ✓ reviewer ✓ forward-fixer ✓<br/><i>all pre-selected</i>"]
     G --> H["Preview managed files to create"]
@@ -179,7 +179,7 @@ flowchart TD
 | Claude Code | `.claude/` exists | `.claude/agents/` | `.md` |
 | OpenCode | `.opencode/` or `.opencode.json` exists | `.opencode/agents/` | `.md` |
 | Codex CLI | `.codex/agents/` exists | `.codex/agents/` | `.toml` (prefixed `ninthwave-`) |
-| Kimi Code | `.kimi/` or `.kimi/AGENTS.md` exists | `.kimi/agents/` | `.yaml` (prefixed `ninthwave-`) |
+| Kimi Code CLI | `.kimi/` or `.kimi/AGENTS.md` exists | `.kimi/agents/` | `.yaml` (prefixed `ninthwave-`) |
 | GitHub Copilot | `.github/copilot-instructions.md` (user-managed) or `.github/agents/` exists | `.github/agents/` | `.agent.md` (prefixed `ninthwave-`) |
 
 ---
@@ -235,9 +235,9 @@ Every file and directory created during onboarding, plus the user-managed instru
 | `.codex/agents/ninthwave-implementer.toml` | File | If Codex CLI selected | Yes (refreshed) | Repo policy | Implementation agent prompt rendered as Codex TOML |
 | `.codex/agents/ninthwave-reviewer.toml` | File | If Codex CLI selected | Yes (refreshed) | Repo policy | PR review agent prompt rendered as Codex TOML |
 | `.codex/agents/ninthwave-forward-fixer.toml` | File | If Codex CLI selected | Yes (refreshed) | Repo policy | CI fix-forward agent prompt rendered as Codex TOML |
-| `.kimi/agents/ninthwave-implementer.yaml` | File | If Kimi Code selected | Yes (refreshed) | Repo policy | Implementation agent prompt rendered as Kimi YAML |
-| `.kimi/agents/ninthwave-reviewer.yaml` | File | If Kimi Code selected | Yes (refreshed) | Repo policy | PR review agent prompt rendered as Kimi YAML |
-| `.kimi/agents/ninthwave-forward-fixer.yaml` | File | If Kimi Code selected | Yes (refreshed) | Repo policy | CI fix-forward agent prompt rendered as Kimi YAML |
+| `.kimi/agents/ninthwave-implementer.yaml` | File | If Kimi Code CLI selected | Yes (refreshed) | Repo policy | Implementation agent prompt rendered as Kimi YAML |
+| `.kimi/agents/ninthwave-reviewer.yaml` | File | If Kimi Code CLI selected | Yes (refreshed) | Repo policy | PR review agent prompt rendered as Kimi YAML |
+| `.kimi/agents/ninthwave-forward-fixer.yaml` | File | If Kimi Code CLI selected | Yes (refreshed) | Repo policy | CI fix-forward agent prompt rendered as Kimi YAML |
 | `.github/agents/ninthwave-implementer.agent.md` | File | If Copilot selected | Yes (refreshed) | Repo policy | Implementation agent prompt |
 | `.github/agents/ninthwave-reviewer.agent.md` | File | If Copilot selected | Yes (refreshed) | Repo policy | PR review agent prompt |
 | `.github/agents/ninthwave-forward-fixer.agent.md` | File | If Copilot selected | Yes (refreshed) | Repo policy | CI fix-forward agent prompt |
@@ -278,7 +278,7 @@ No project-level files are created in global mode.
 
 ## 7. Directory Tree
 
-Resulting project structure after `nw init` in a project with Claude Code, OpenCode, Codex CLI, Kimi Code, and Copilot detected:
+Resulting project structure after `nw init` in a project with Claude Code, OpenCode, Codex CLI, Kimi Code CLI, and Copilot detected:
 
 ```
 project-root/
