@@ -1,4 +1,4 @@
-// AI tool profiles: single source of truth for Claude Code, OpenCode, Codex, and Copilot.
+// AI tool profiles: single source of truth for Claude Code, OpenCode, Codex, Kimi, and Copilot.
 //
 // Defines AiToolId, AiToolProfile, LaunchDeps, LaunchOpts, and AI_TOOL_PROFILES.
 // All other modules should derive tool-specific behaviour from this module rather
@@ -578,7 +578,7 @@ function applyEnvPrefix(cmd: string, opts: LaunchOpts, toolId: AiToolId): string
 
 // ── Non-Claude idle contract ──────────────────────────────────────────────────
 //
-// Appended to the launch prompt for non-Claude tools (OpenCode, Codex, Copilot)
+// Appended to the launch prompt for non-Claude tools (OpenCode, Codex, Kimi, Copilot)
 // to reinforce the requirement to stay alive after implementation and PR creation.
 // Claude handles this via its native agent session model and does not need it.
 

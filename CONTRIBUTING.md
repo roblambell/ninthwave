@@ -23,7 +23,7 @@ cd ~/code/ninthwave
 bun run core/cli.ts init --yes
 ```
 
-That refreshes managed copies under `.claude/`, `.opencode/`, `.codex/agents/`, and `.github/agents/` from the canonical sources. Project instruction files such as `CLAUDE.md` and `AGENTS.md` are user-owned inputs, so init reads them but never creates, overwrites, or prunes them. In particular, Codex support is implemented through generated `.codex/agents/ninthwave-*.toml` artifacts; ninthwave does not manage root `AGENTS.md`. In normal user repos, `.github/copilot-instructions.md` is also user-owned input. In this repo, it is intentionally kept untracked via repo-local `.gitignore` rules alongside the generated tool copies so only the canonical sources are committed here.
+That refreshes managed copies under `.claude/`, `.opencode/`, `.codex/agents/`, `.kimi/agents/`, and `.github/agents/` from the canonical sources. Project instruction files such as `CLAUDE.md` and `AGENTS.md` are user-owned inputs, so init reads them but never creates, overwrites, or prunes them. In particular, Codex support is implemented through generated `.codex/agents/ninthwave-*.toml` artifacts; ninthwave does not manage root `AGENTS.md`. In normal user repos, `.github/copilot-instructions.md` is also user-owned input. In this repo, it is intentionally kept untracked via repo-local `.gitignore` rules alongside the generated tool copies so only the canonical sources are committed here.
 
 ### Testing in another project
 

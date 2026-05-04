@@ -66,7 +66,7 @@ export function checkGh(runner: ShellRunner): CheckResult {
   return { status: "pass", message: "gh CLI installed and authenticated" };
 }
 
-/** Check: at least one AI tool available (claude, opencode, codex, copilot). */
+/** Check: at least one AI tool available (claude, opencode, codex, kimi, copilot). */
 export function checkAiTool(runner: ShellRunner): CheckResult {
   const tools = AI_TOOL_PROFILES.map((p) => p.command);
   const found: string[] = [];
