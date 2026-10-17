@@ -450,7 +450,7 @@ Both runtimes delegate all scheduling decisions to `broker-state.ts`. The differ
 
 ### `crew_url` Configuration
 
-By default, `nw` connects to the hosted broker at `wss://ninthwave.sh`. To point a project at a self-hosted broker instead:
+By default, `nw` connects to the hosted broker at `wss://ninthwave.sh`. That broker was shut down in October 2026, so point each project at a self-hosted broker instead:
 
 ```bash
 nw broker --save-crew-url          # starts the broker and writes crew_url to .ninthwave/config.json

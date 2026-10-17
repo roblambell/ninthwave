@@ -2,12 +2,12 @@
 
 ## Reporting a Vulnerability
 
+Ninthwave is retired and this repository is archived, so it no longer receives security fixes. The notes below are kept for reference.
+
 **Do not open a public issue for security vulnerabilities.**
 
 Use GitHub's private vulnerability reporting:
 https://github.com/ninthwave-io/ninthwave/security/advisories/new
-
-Alternatively, email security@ninthwave.sh.
 
 ### What to include
 
