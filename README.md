@@ -1,11 +1,14 @@
 <p align="center">
-  <a href="https://ninthwave.sh"><img src="docs/assets/brand/logo.svg" alt="Ninthwave logo" width="100" /></a>
+  <img src="docs/assets/brand/logo.svg" alt="Ninthwave logo" width="100" />
 </p>
 <h1 align="center">Ninthwave</h1>
 
 <p align="center">
   <strong>Orchestrate parallel AI coding into reviewable PRs.</strong>
 </p>
+
+> [!NOTE]
+> **Ninthwave is retired.** As of October 2026 it is no longer maintained and this repository is archived. Frontier coding agents now handle this kind of orchestration well on their own, so a dedicated orchestrator is no longer worth the overhead. The code stays available under Apache 2.0. The hosted crew broker has been shut down; `nw broker` still runs a self-hosted one.
 
 <p align="center">
   <a href="https://github.com/ninthwave-io/ninthwave/stargazers"><img src="https://img.shields.io/github/stars/ninthwave-io/ninthwave?style=flat" alt="GitHub stars" /></a>
@@ -26,7 +29,7 @@ Ninthwave is the orchestration layer for parallel AI coding. Turn plans into sma
 - Run multiple native AI coding sessions in parallel, each isolated in its own worktree
 - Coordinate the full delivery loop through [Implementer](agents/implementer.md), CI, [Reviewer](agents/reviewer.md), [Rebaser](agents/rebaser.md), merge, and [Forward-Fixer](agents/forward-fixer.md)
 - Launch dependent work early as stacked PRs so reviewers get clean diffs
-- Share or join a crew to spread work across teammates or multiple machines, using the hosted broker by default or a [self-hosted broker](docs/faq.md#what-is-the-self-hosted-broker) when you need full control
+- Share or join a crew to spread work across teammates or multiple machines, using a [self-hosted broker](docs/faq.md#what-is-the-self-hosted-broker)
 - Use the native tools directly, while Ninthwave's TUI shows live queue and pipeline status
 - Stay multi-tool and no-lock-in: [Claude Code](https://docs.anthropic.com/en/docs/claude-code/overview), [OpenCode](https://opencode.ai), [Codex CLI](https://github.com/openai/codex), [Kimi Code CLI](https://github.com/MoonshotAI/Kimi-CLI), or [Copilot CLI](https://docs.github.com/en/copilot/how-tos/set-up/install-copilot-cli)
 
@@ -55,6 +58,8 @@ brew install ninthwave-io/tap/ninthwave
 ```
 
 Requires [gh](https://cli.github.com).
+
+The Homebrew formula is deprecated: it still installs the final release (v0.4.6), with a warning. Release archives are on the [releases page](../../releases). The direct install script is no longer served.
 
 Run inside [cmux](https://cmux.com) or [tmux](https://github.com/tmux/tmux/wiki) for the best experience. Ninthwave can launch workers in headless mode, but attachable sessions are what let you jump straight into a worker when you need to inspect or steer it. If you are not already comfortable with tmux, start with cmux.
 

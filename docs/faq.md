@@ -68,13 +68,13 @@ Run `nw update`. It detects how your install was managed and runs the matching u
 | Install source | Detection | Updater |
 |---|---|---|
 | **Homebrew** | Bundle lives under a Homebrew prefix (`<prefix>/share/ninthwave` with the executable in `<prefix>/bin` and the real path inside `Cellar/ninthwave/`) | `brew upgrade ninthwave` |
-| **Direct install script** | Executable lives under `~/.ninthwave/bin/` (written by `curl -fsSL https://ninthwave.sh/install \| bash`) | Re-runs `curl -fsSL https://ninthwave.sh/install \| bash` |
+| **Direct install script** | Executable lives under `~/.ninthwave/bin/` (written by the retired direct install script) | None: the install script is no longer served, so download a release archive instead |
 | **Unknown** (source builds, non-standard paths) | Neither of the above matches | Prints manual guidance and exits non-zero |
 
 These two install sources -- Homebrew and the direct install script -- are the only ones `nw update` automates in v1. For anything else, `nw update` prints the manual options it knows about:
 
 - `brew upgrade ninthwave`
-- `curl -fsSL https://ninthwave.sh/install | bash`
+- download a release archive from the GitHub releases page
 - `git pull && task install` from a source clone
 
 Ninthwave does not hot-reload. After `nw update` prints `Update complete.`, restart any running `nw` sessions (daemon and workers) so they pick up the new binary.
@@ -490,7 +490,7 @@ The broker handles session-bounded scheduling with author-affinity (tasks route 
 
 ### What is the self-hosted broker?
 
-By default, crew mode connects to the hosted broker at `wss://ninthwave.sh`. If you need full control over the coordination layer -- for air-gapped networks, compliance, or local development -- you can run your own broker with `nw broker`:
+Crew mode used to connect to a hosted broker at `wss://ninthwave.sh` by default. That broker was shut down in October 2026, so crew mode now needs a self-hosted broker. If you need full control over the coordination layer -- for air-gapped networks, compliance, or local development -- you can run your own broker with `nw broker`:
 
 ```bash
 nw broker
